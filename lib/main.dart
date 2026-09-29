@@ -107,7 +107,11 @@ Future<void> main(List<String> args) async {
     onShowWindow: window.show,
     onQuit: () async {
       try {
-        if (await claudeCode.releaseOnQuit()) await _startWatcher();
+        if (await claudeCode.releaseOnQuit()) {
+          await _startWatcher([
+            for (final instance in launcher.instances) instance.pid,
+          ]);
+        }
       } catch (error) {
         debugPrint('Не удалось вернуть уведомления Claude: $error');
       }
@@ -189,7 +193,24 @@ NotificationHandoff _handoff(Directory supportDir, ClaudeHost host) =>
 
 /// Лаунчер завершается, а открытым Claude уведомления вернуть пока нельзя:
 /// оставляем вместо себя наблюдателя.
-Future<void> _startWatcher() async {
+///
+/// На macOS закрытия Claude ([claudePids]) ждёт оболочка, а лаунчер
+/// запускается, только чтобы вернуть настройки: пока работает процесс из
+/// бандла, Finder не даёт заменить приложение новой версией, а повторный
+/// запуск попал бы в этот процесс. На Windows установщик сам закрывает
+/// наблюдателя, поэтому ждёт он сам.
+Future<void> _startWatcher(List<int> claudePids) async {
+  if (Platform.isMacOS) {
+    final anyRunning = claudePids.isEmpty
+        ? 'false'
+        : claudePids.map((pid) => 'kill -0 $pid 2>/dev/null').join(' || ');
+    await Process.start('/bin/sh', [
+      '-c',
+      'while $anyRunning; do sleep 3; done; exec "\$0" $_watcherFlag',
+      Platform.resolvedExecutable,
+    ], mode: ProcessStartMode.detached);
+    return;
+  }
   await Process.start(Platform.resolvedExecutable, [
     _watcherFlag,
   ], mode: ProcessStartMode.detached);
@@ -203,8 +224,12 @@ Future<void> _startWatcher() async {
 ///
 /// На macOS повторный запуск система передаёт этому же процессу (второй
 /// экземпляр не запускает) — тогда наблюдатель сам становится лаунчером:
-/// возвращает `true`, и main() продолжает обычный запуск.
+/// возвращает `true`, и main() продолжает обычный запуск. Но если за это время
+/// лаунчер обновили, в памяти у наблюдателя старый код: он запускает новую
+/// версию и уходит.
 Future<bool> _returnClaudeNotifications(Directory supportDir) async {
+  final executable = File(Platform.resolvedExecutable);
+  final startedAs = executable.statSync();
   final reopened = Completer<void>();
   _nativeChannel.setMethodCallHandler((call) async {
     if (call.method == 'reopen' && !reopened.isCompleted) reopened.complete();
@@ -238,7 +263,20 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
     ]);
   }
   await handoff.resign();
-  return reopened.isCompleted;
+  if (!reopened.isCompleted) return false;
+  final FileStat now;
+  try {
+    now = executable.statSync();
+  } on FileSystemException {
+    return false;
+  }
+  if (now.modified == startedAs.modified && now.size == startedAs.size) {
+    return true;
+  }
+  // …/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher → …/ClaudeLauncher.app
+  final bundle = p.dirname(p.dirname(p.dirname(executable.path)));
+  await Process.start('open', ['-n', bundle], mode: ProcessStartMode.detached);
+  return false;
 }
 
 /// Удаление лаунчера: убирает его хуки из `~/.claude/settings.json`, возвращает
