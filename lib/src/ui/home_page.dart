@@ -427,8 +427,9 @@ class _SwitchBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final closing = status.closing.map((name) => '«$name»').join(', ');
-    final target = '«${status.target.name}»';
+    final target = status.target == null ? null : '«${status.target!.name}»';
     final text = switch (status.phase) {
+      SwitchPhase.closing when target == null => 'Закрываю $closing…',
       SwitchPhase.closing => 'Закрываю $closing, чтобы открыть $target…',
       SwitchPhase.waitingForUser => launcher.host.manualQuitHint,
       SwitchPhase.launching => 'Открываю $target…',
@@ -638,6 +639,12 @@ class _ProfileCard extends StatelessWidget {
           label: Platform.isMacOS ? 'Показать папку в Finder' : 'Открыть папку',
         ),
         MenuEntry(
+          value: 'quit',
+          icon: AppIcons.quit,
+          label: 'Завершить работу',
+          enabled: running && launcher.switchStatus == null,
+        ),
+        MenuEntry(
           value: 'remove',
           icon: AppIcons.remove,
           label: 'Убрать из списка',
@@ -653,9 +660,25 @@ class _ProfileCard extends StatelessWidget {
         await _edit(cardContext);
       case 'folder':
         await launcher.host.revealFolder(launcher.dataDirOf(profile));
+      case 'quit':
+        await _quit(cardContext);
       case 'remove':
         await _remove(cardContext);
     }
+  }
+
+  Future<void> _quit(BuildContext context) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Завершить «${profile.name}»?',
+      text: Platform.isMacOS
+          ? 'Claude закроется так же, как по Cmd+Q. Если Claude Code сейчас '
+                'выполняет задачу, она прервётся.'
+          : 'Claude закроется так же, как при выходе из приложения. Если '
+                'Claude Code сейчас выполняет задачу, она прервётся.',
+      confirmLabel: 'Завершить',
+    );
+    if (confirmed) await launcher.close(profile);
   }
 
   Future<void> _edit(BuildContext context) async {

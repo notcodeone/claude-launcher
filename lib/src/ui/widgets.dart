@@ -727,6 +727,7 @@ abstract final class AppIcons {
   static const themeLight = LucideIcons.sun;
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
+  static const quit = LucideIcons.power;
 }
 
 enum FaceMood {

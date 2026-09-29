@@ -58,7 +58,12 @@ class TrayController with TrayListener {
 
   String _statusText() {
     final status = launcher.switchStatus;
-    if (status != null) return 'переключаюсь на ${status.target.title}…';
+    if (status != null) {
+      return switch (status.target) {
+        final target? => 'переключаюсь на ${target.title}…',
+        null => 'закрываю Claude…',
+      };
+    }
     if (launcher.located && launcher.claudePath == null) {
       return 'Claude не найден';
     }

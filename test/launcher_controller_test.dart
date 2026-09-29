@@ -207,6 +207,40 @@ void main() {
     });
   });
 
+  group('завершение работы профиля', () {
+    test('закрывает только экземпляры этого профиля', () async {
+      final work = host.start(null);
+      final stranger = host.start('/somewhere/else');
+      await launcher.close(launcher.profiles.first);
+
+      expect(host.calls, ['quit ${work.pid}']);
+      expect(host.instances.map((i) => i.pid), [stranger.pid]);
+      expect(launcher.switchStatus, isNull);
+    });
+
+    test('ничего не делает, если профиль не открыт', () async {
+      await launcher.close(personal);
+      expect(host.calls, isEmpty);
+    });
+
+    test(
+      'если Claude не закрылся, просит пользователя; отмена прекращает ожидание',
+      () async {
+        host.quitsOnRequest = false;
+        host.start(null);
+        final closing = launcher.close(launcher.profiles.first);
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        expect(launcher.switchStatus?.phase, SwitchPhase.waitingForUser);
+        expect(launcher.switchStatus?.target, isNull);
+
+        launcher.cancelSwitch();
+        await closing;
+        expect(launcher.switchStatus, isNull);
+        expect(host.calls.where((call) => call.startsWith('launch')), isEmpty);
+      },
+    );
+  });
+
   test('профиль со стандартной папкой Claude убрать нельзя', () async {
     await launcher.removeProfile(work);
     await launcher.removeProfile(personal);

@@ -22,7 +22,8 @@ enum SwitchPhase {
 class SwitchStatus {
   const SwitchStatus(this.target, this.phase, {this.closing = const []});
 
-  final Profile target;
+  /// Какой профиль открываем; `null` — только закрываем ([LauncherController.close]).
+  final Profile? target;
   final SwitchPhase phase;
 
   /// Названия профилей, которые закрываются.
@@ -191,12 +192,33 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// Завершает работу открытого профиля так же, как обычный выход из Claude.
+  Future<void> close(Profile profile) async {
+    if (switchStatus != null) return;
+    lastError = null;
+    _cancelRequested = false;
+    try {
+      await refresh();
+      final targets = [
+        for (final instance in instances)
+          if (profileOf(instance)?.id == profile.id) instance,
+      ];
+      if (targets.isNotEmpty) await _closeAll(null, targets);
+    } catch (error) {
+      lastError = '$error';
+      onNeedsAttention?.call();
+    } finally {
+      switchStatus = null;
+      _notify();
+    }
+  }
+
   /// Отменяет ожидание закрытия. Уже отправленные просьбы закрыться не отзываются.
   void cancelSwitch() {
     _cancelRequested = true;
   }
 
-  Future<bool> _closeAll(Profile target, List<ClaudeInstance> others) async {
+  Future<bool> _closeAll(Profile? target, List<ClaudeInstance> others) async {
     final names = [
       for (final instance in others)
         profileOf(instance)?.name ?? 'неизвестный профиль',
