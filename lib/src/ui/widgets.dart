@@ -527,7 +527,8 @@ class InfoBanner extends StatelessWidget {
     final foreground = error ? p.danger : p.text;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      // Как у карточек — 16 со всех сторон.
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: BoxDecoration(
         color: error ? p.dangerSurface : p.field,
         borderRadius: BorderRadius.circular(14),
@@ -538,7 +539,7 @@ class InfoBanner extends StatelessWidget {
           Row(
             children: [
               Icon(icon, size: 20, color: error ? p.danger : p.muted),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: SelectableText(
                   text,
@@ -549,7 +550,10 @@ class InfoBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              ?action,
+              // Текст кнопки — по тому же краю, что значки в карточках: у кнопки
+              // свои 16 px отступа, поэтому сдвигаем её к краю плашки.
+              if (action != null)
+                Transform.translate(offset: const Offset(16, 0), child: action),
             ],
           ),
           if (progress) ...[

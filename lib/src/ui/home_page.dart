@@ -18,72 +18,143 @@ class HomePage extends StatelessWidget {
   final LauncherController launcher;
   final AppSettings settings;
 
+  /// Поля окна: по ним выровнены шапка, заголовок, карточки, кнопка и подвал.
+  static const gutter = 24.0;
+  static const _headerHeight = 52.0;
+  static const _footerHeight = 40.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final header = Padding(
-      padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 0 : 16, 16, 0),
-      child: _HeaderBar(settings: settings),
-    );
+    final p = context.palette;
+    // На macOS заголовок окна скрыт: сверху место под кнопки окна.
+    final headerTop = Platform.isMacOS ? 46.0 : 16.0;
+    final scrimHeight = headerTop + _headerHeight + 16;
+
+    // Шапка и подвал парят над списком, как в sensomni: при прокрутке карточки
+    // плавно уходят под них, а не обрезаются по линии.
+    Widget scrim({
+      required bool top,
+      required double height,
+      required double solid,
+    }) {
+      final fade = p.background.withValues(alpha: 0);
+      return IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: top ? Alignment.topCenter : Alignment.bottomCenter,
+              end: top ? Alignment.bottomCenter : Alignment.topCenter,
+              colors: [p.background, p.background, fade],
+              stops: [0, solid / height, 1],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      // Подвал в стиле sensomni; кнопка «Добавить профиль» встаёт над ним.
-      bottomNavigationBar: const _Footer(),
-      floatingActionButton: AppFab(
-        icon: AppIcons.add,
-        label: 'Добавить профиль',
-        onPressed: () => _addProfile(context),
-      ),
-      body: Column(
+      body: Stack(
         children: [
-          // На macOS заголовок окна скрыт: сверху место под кнопки окна.
+          ListenableBuilder(
+            listenable: launcher,
+            builder: (context, _) => ListView(
+              padding: EdgeInsets.fromLTRB(
+                gutter,
+                headerTop + _headerHeight + 28,
+                gutter,
+                // Запас под подвал и кнопку «Добавить профиль», чтобы докрутить до конца.
+                _footerHeight + 8 + 52 + 24,
+              ),
+              children: [
+                Text('Профили', style: theme.textTheme.headlineMedium),
+                const SizedBox(height: 8),
+                Text(
+                  // По предложению на строку — без одинокого слова на второй.
+                  'Каждый профиль — отдельный вход в Claude.\n'
+                  'Одновременно открыт только один.',
+                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+                ),
+                const SizedBox(height: 24),
+                ..._banners(context),
+                if (launcher.located && launcher.claudePath == null)
+                  const _EmptyState(
+                    mood: FaceMood.worried,
+                    title: 'Claude не найден',
+                    text:
+                        'Установите приложение Claude с claude.com/download '
+                        'и перезапустите лаунчер.',
+                  )
+                else if (launcher.profiles.isEmpty)
+                  _EmptyState(
+                    mood: FaceMood.sleepy,
+                    title: 'Ничего нет..',
+                    text: 'Создайте профиль для каждого аккаунта Claude.',
+                    action: AppButton(
+                      label: 'Создать',
+                      onPressed: () => _addProfile(context),
+                    ),
+                  ),
+                for (final (index, profile) in launcher.profiles.indexed) ...[
+                  if (index > 0) const SizedBox(height: 12),
+                  _ProfileCard(launcher: launcher, profile: profile),
+                ],
+              ],
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: scrimHeight,
+            child: scrim(
+              top: true,
+              height: scrimHeight,
+              solid: headerTop + _headerHeight / 2,
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: _footerHeight + 24,
+            child: scrim(
+              top: false,
+              height: _footerHeight + 24,
+              solid: _footerHeight,
+            ),
+          ),
           // Окно перетаскивается за эту полосу и за название в шапке.
           if (Platform.isMacOS)
-            const DragToMoveArea(
-              child: SizedBox(height: 46, width: double.infinity),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: headerTop,
+              child: const DragToMoveArea(child: SizedBox.expand()),
             ),
-          header,
-          Expanded(
-            child: ListenableBuilder(
-              listenable: launcher,
-              builder: (context, _) => ListView(
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 96),
-                children: [
-                  Text('Профили', style: theme.textTheme.headlineMedium),
-                  const SizedBox(height: 8),
-                  _StatusLine(launcher: launcher),
-                  const SizedBox(height: 24),
-                  ..._banners(context),
-                  if (launcher.located && launcher.claudePath == null)
-                    const _EmptyState(
-                      mood: FaceMood.worried,
-                      title: 'Claude не найден',
-                      text:
-                          'Установите приложение Claude с claude.com/download '
-                          'и перезапустите лаунчер.',
-                    )
-                  else if (launcher.profiles.isEmpty)
-                    _EmptyState(
-                      mood: FaceMood.sleepy,
-                      title: 'Ничего нет..',
-                      text: 'Создайте профиль для каждого аккаунта Claude.',
-                      action: AppButton(
-                        label: 'Создать',
-                        onPressed: () => _addProfile(context),
-                      ),
-                    ),
-                  for (final profile in launcher.profiles) ...[
-                    _ProfileCard(launcher: launcher, profile: profile),
-                    const SizedBox(height: 12),
-                  ],
-                  const SizedBox(height: 8),
-                  Text(
-                    'Переключение закрывает открытый Claude так же, как обычный выход '
-                    'из приложения, и открывает выбранный профиль. Одновременно открыт '
-                    'только один профиль — так вход через браузер всегда попадает в нужное окно.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
+          Positioned(
+            top: headerTop,
+            left: gutter,
+            right: gutter,
+            child: _HeaderBar(settings: settings),
+          ),
+          // Подвал в стиле sensomni.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: _footerHeight,
+            child: _Footer(),
+          ),
+          // Кнопка по полю окна, над подвалом.
+          Positioned(
+            right: gutter,
+            bottom: _footerHeight + 8,
+            child: AppFab(
+              icon: AppIcons.add,
+              label: 'Добавить профиль',
+              onPressed: () => _addProfile(context),
             ),
           ),
         ],
@@ -160,30 +231,32 @@ class _Footer extends StatelessWidget {
       textDirection: TextDirection.ltr,
       textScaler: MediaQuery.textScalerOf(context),
     )..layout()).width;
-    return SafeArea(
-      top: false,
-      child: Padding(
-        // Справа меньше на ширину пробела, чтобы текст стоял на отступе 24, как слева.
-        padding: EdgeInsets.fromLTRB(24, 8, 24 - space, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '© ${DateTime.now().year} ClaudeLauncher',
-                style: style,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text('Designed by', style: style),
-            // Пока без действия, но нажимается и подсвечивается.
-            _FooterButton(
-              label: 'NotCode',
+    return Padding(
+      // Справа меньше на ширину пробела, чтобы текст стоял на отступе 24, как слева.
+      padding: EdgeInsets.fromLTRB(
+        HomePage.gutter,
+        0,
+        HomePage.gutter - space,
+        4,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '© ${DateTime.now().year} ClaudeLauncher',
               style: style,
-              horizontalPadding: space,
-              onTap: () {},
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        ),
+          ),
+          Text('Designed by', style: style),
+          // Пока без действия, но нажимается и подсвечивается.
+          _FooterButton(
+            label: 'NotCode',
+            style: style,
+            horizontalPadding: space,
+            onTap: () {},
+          ),
+        ],
       ),
     );
   }
@@ -257,7 +330,7 @@ class _HeaderBar extends StatelessWidget {
     return Builder(
       builder: (cardContext) => SoftCard(
         radius: 16,
-        padding: const EdgeInsets.fromLTRB(18, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
         child: Row(
           children: [
             // Кнопку темы в область перетаскивания не кладём: та ждёт двойного
@@ -298,54 +371,6 @@ class _HeaderBar extends StatelessWidget {
       ],
     );
     if (mode != null) await settings.setThemeMode(mode);
-  }
-}
-
-class _StatusLine extends StatelessWidget {
-  const _StatusLine({required this.launcher});
-
-  final LauncherController launcher;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final muted = TextStyle(color: p.muted, fontSize: 14);
-    final running = launcher.runningProfiles;
-    if (running.isEmpty) {
-      return Text(
-        launcher.unknownInstances.isEmpty
-            ? 'Claude сейчас не запущен'
-            : 'Открыт Claude с неизвестным профилем',
-        style: muted,
-      );
-    }
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 8,
-      runSpacing: 4,
-      children: [
-        Text(
-          running.length == 1 ? 'Сейчас открыт' : 'Сейчас открыты',
-          style: muted,
-        ),
-        for (final profile in running)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              MarkerDot(marker: profile.marker, size: 10),
-              const SizedBox(width: 6),
-              Text(
-                profile.name,
-                style: TextStyle(
-                  color: p.text,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-      ],
-    );
   }
 }
 
@@ -453,11 +478,12 @@ class _ProfileCard extends StatelessWidget {
 
     return Builder(
       builder: (cardContext) => SoftCard(
-        padding: const EdgeInsets.fromLTRB(16, 16, 10, 16),
+        // Справа 8: у кнопок-иконок свои 8 px вокруг значка — визуально те же 16.
+        padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
         child: Row(
           children: [
             ProfileAvatar(marker: profile.marker, icon: profile.icon),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,14 +498,19 @@ class _ProfileCard extends StatelessWidget {
                         ),
                       ),
                       if (running) ...[
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         const StatusDot(label: 'Открыт'),
                       ],
                     ],
                   ),
                   if (profile.email.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(profile.email, style: theme.textTheme.bodyMedium),
+                    Text(
+                      profile.email,
+                      style: theme.textTheme.bodyMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                   const SizedBox(height: 4),
                   for (final line in details)

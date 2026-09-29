@@ -105,7 +105,7 @@ class _DialogFrame extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 470),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,7 +168,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
         Row(
           children: [
             ProfileAvatar(marker: _marker, icon: _icon, size: 48),
-            const SizedBox(width: 14),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -224,7 +224,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         const FieldLabel('Заметка'),
         AppTextField(
           controller: _note,
@@ -234,9 +234,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
         ),
         const SizedBox(height: 16),
         const FieldLabel('Метка'),
-        Wrap(
-          spacing: 2,
-          runSpacing: 2,
+        _OpticalGrid(
           children: [
             for (final marker in Profile.markers)
               _Selectable(
@@ -248,24 +246,22 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           ],
         ),
         const SizedBox(height: 4),
-        Wrap(
-          spacing: 2,
-          runSpacing: 2,
+        _OpticalGrid(
           children: [
             for (final MapEntry(key: key, value: icon) in profileIcons.entries)
               _Selectable(
                 selected: key == _icon,
                 onTap: () => setState(() => _icon = key),
-                child: Icon(icon, size: 22, color: p.text),
+                child: Icon(icon, size: 24, color: p.text),
               ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Text(
           widget.folderLabel(_name.text.trim()),
           style: theme.textTheme.bodySmall,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 24),
         Row(
           children: [
             Expanded(
@@ -289,6 +285,54 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Сетка вариантов выбора: 10 колонок на всю ширину. Ячейки 40×40 шире значков (24),
+/// поэтому шаг считается по значкам — крайние значки стоят ровно по краям полей.
+class _OpticalGrid extends StatelessWidget {
+  const _OpticalGrid({required this.children});
+
+  final List<Widget> children;
+
+  static const _columns = 10;
+  static const _cell = 40.0;
+  static const _glyph = 24.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final step = (constraints.maxWidth - _glyph) / (_columns - 1);
+        const inset = (_cell - _glyph) / 2;
+        return Column(
+          children: [
+            for (var start = 0; start < children.length; start += _columns)
+              SizedBox(
+                height: _cell + 2,
+                width: constraints.maxWidth,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (
+                      var i = start;
+                      i < children.length && i < start + _columns;
+                      i++
+                    )
+                      Positioned(
+                        left: (i - start) * step - inset,
+                        top: 0,
+                        width: _cell,
+                        height: _cell,
+                        child: children[i],
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
