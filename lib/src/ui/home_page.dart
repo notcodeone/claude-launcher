@@ -675,6 +675,14 @@ class _ProfileCard extends StatelessWidget {
           icon: AppIcons.folder,
           label: Platform.isMacOS ? 'Показать папку в Finder' : 'Открыть папку',
         ),
+        // Тот самый тег «По умолчанию»: отмечен — лаунчер откроет профиль при
+        // своём запуске. Повторное нажатие снимает отметку.
+        MenuEntry(
+          value: 'startup',
+          icon: AppIcons.startup,
+          label: 'Открывать при запуске',
+          selected: settings.startupProfileId == profile.id,
+        ),
         MenuEntry(
           value: 'quit',
           icon: AppIcons.quit,
@@ -697,6 +705,10 @@ class _ProfileCard extends StatelessWidget {
         await _edit(cardContext);
       case 'folder':
         await launcher.host.revealFolder(launcher.dataDirOf(profile));
+      case 'startup':
+        await settings.setStartupProfile(
+          settings.startupProfileId == profile.id ? null : profile.id,
+        );
       case 'quit':
         await _quit(cardContext);
       case 'remove':

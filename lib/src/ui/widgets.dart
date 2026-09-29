@@ -122,7 +122,6 @@ class _Pressable extends StatelessWidget {
     required this.onTap,
     required this.child,
     this.hover,
-    this.shadow,
   });
 
   final Color background;
@@ -132,67 +131,20 @@ class _Pressable extends StatelessWidget {
 
   /// Цвет фона при наведении; по умолчанию — лёгкий оттенок цвета текста.
   final Color? hover;
-  final List<BoxShadow>? shadow;
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(12);
-    return DecoratedBox(
-      decoration: BoxDecoration(borderRadius: radius, boxShadow: shadow),
-      child: Material(
-        color: background,
-        borderRadius: radius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          hoverColor: hover ?? foreground.withValues(alpha: 0.07),
-          highlightColor: foreground.withValues(alpha: 0.08),
-          splashColor: foreground.withValues(alpha: 0.10),
-          child: child,
-        ),
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: hover ?? foreground.withValues(alpha: 0.07),
+        highlightColor: foreground.withValues(alpha: 0.08),
+        splashColor: foreground.withValues(alpha: 0.10),
+        child: child,
       ),
-    );
-  }
-}
-
-/// Выбор одного из вариантов таблетками, как «E-mail | SMS»:
-/// выбранный — чёрный, остальные — белые на тени.
-class PillChoice<T> extends StatelessWidget {
-  const PillChoice({
-    super.key,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-  });
-
-  final T value;
-  final List<(T, String)> options;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final (option, label) in options)
-          _Pressable(
-            background: option == value ? p.primary : p.card,
-            foreground: option == value ? p.onPrimary : p.text,
-            shadow: option == value ? null : p.softShadow,
-            onTap: option == value ? null : () => onChanged(option),
-            child: Padding(
-              padding: _buttonPadding,
-              child: Text(
-                label,
-                style: _buttonTextStyle.copyWith(
-                  color: option == value ? p.onPrimary : p.text,
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -822,6 +774,7 @@ abstract final class AppIcons {
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
   static const quit = LucideIcons.power;
+  static const startup = LucideIcons.star;
 }
 
 enum FaceMood {

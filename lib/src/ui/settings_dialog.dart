@@ -8,8 +8,8 @@ import '../launcher_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Настройки лаунчера: профиль при запуске, значок Claude, события Claude Code.
-/// Меняются сразу.
+/// Настройки лаунчера: значок Claude и события Claude Code. Меняются сразу.
+/// Профиль, который открывается при запуске, выбирается в меню его карточки.
 Future<void> showSettingsDialog(
   BuildContext context, {
   required LauncherController launcher,
@@ -29,12 +29,6 @@ Future<void> showSettingsDialog(
             Text(
               'Как ClaudeLauncher работает вместе с Claude.',
               style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 24),
-            _StartupProfileChoice(
-              launcher: launcher,
-              value: settings.startupProfileId,
-              onChanged: settings.setStartupProfile,
             ),
             const SizedBox(height: 24),
             _ClaudeIconSwitch(
@@ -102,15 +96,16 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
   bool _hideIcon = true;
   bool _claudeCodeEvents = true;
 
-  /// По умолчанию — профиль со стандартной папкой: это обычный запуск Claude.
-  late String? _startupProfileId = widget.launcher.profiles
-      .where((profile) => profile.usesDefaultFolder)
-      .map((profile) => profile.id)
-      .firstOrNull;
-
   Future<void> _start() async {
     final settings = widget.settings;
-    await settings.setStartupProfile(_startupProfileId);
+    // При первом запуске в списке только профиль со стандартной папкой —
+    // обычный Claude. Его и открываем при запуске; поменять — в меню профиля.
+    await settings.setStartupProfile(
+      widget.launcher.profiles
+          .where((profile) => profile.usesDefaultFolder)
+          .map((profile) => profile.id)
+          .firstOrNull,
+    );
     if (_hideIcon != settings.hideClaudeIcon) {
       await settings.setHideClaudeIcon(_hideIcon);
       await widget.launcher.setClaudeIconHidden(_hideIcon);
@@ -138,12 +133,6 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 24),
-        _StartupProfileChoice(
-          launcher: widget.launcher,
-          value: _startupProfileId,
-          onChanged: (id) => setState(() => _startupProfileId = id),
-        ),
-        const SizedBox(height: 24),
         _ClaudeIconSwitch(
           launcher: widget.launcher,
           value: _hideIcon,
@@ -160,43 +149,6 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
           expand: true,
           large: true,
           onPressed: _start,
-        ),
-      ],
-    );
-  }
-}
-
-class _StartupProfileChoice extends StatelessWidget {
-  const _StartupProfileChoice({
-    required this.launcher,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final LauncherController launcher;
-  final String? value;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Профиль при запуске', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 4),
-        Text(
-          'Если Claude не открыт, лаунчер откроет этот профиль, когда запустится сам.',
-          style: theme.textTheme.bodySmall,
-        ),
-        const SizedBox(height: 12),
-        PillChoice<String?>(
-          value: value,
-          options: [
-            (null, 'Не открывать'),
-            for (final profile in launcher.profiles) (profile.id, profile.name),
-          ],
-          onChanged: onChanged,
         ),
       ],
     );
