@@ -5,17 +5,19 @@ import 'package:flutter/material.dart';
 import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
+import '../location/location_guard.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Настройки лаунчера: значок Claude, события и уведомления Claude Code.
-/// Меняются сразу.
+/// Настройки лаунчера: проверка страны, значок Claude, события и уведомления
+/// Claude Code. Меняются сразу.
 /// Профиль, который открывается при запуске, выбирается в меню его карточки.
 Future<void> showSettingsDialog(
   BuildContext context, {
   required LauncherController launcher,
   required AppSettings settings,
   required ClaudeCodeIntegration claudeCode,
+  required LocationGuard location,
 }) {
   return showDialog<void>(
     context: context,
@@ -30,6 +32,20 @@ Future<void> showSettingsDialog(
             Text(
               'Как ClaudeLauncher работает вместе с Claude.',
               style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 24),
+            SettingSwitchRow(
+              title: 'Проверять страну перед запуском',
+              description:
+                  'Claude доступен не во всех странах. Перед запуском профиля '
+                  'лаунчер узнаёт страну по IP-адресу у публичных сервисов '
+                  '(country.is, Cloudflare, ipwho.is, ipapi.co) и не запускает '
+                  'профиль, если Claude там недоступен.',
+              value: settings.locationCheck,
+              onChanged: (enabled) async {
+                await settings.setLocationCheck(enabled);
+                if (enabled) await location.check(force: true);
+              },
             ),
             const SizedBox(height: 24),
             _ClaudeIconSwitch(

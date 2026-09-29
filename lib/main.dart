@@ -14,6 +14,7 @@ import 'src/integrations/claude_code_hooks.dart';
 import 'src/integrations/claude_code_integration.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/launcher_controller.dart';
+import 'src/location/location_guard.dart';
 import 'src/notifications.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
@@ -54,6 +55,10 @@ Future<void> main(List<String> args) async {
   );
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  // Страну узнаём сразу, пока грузится остальное: к запуску профиля по
+  // умолчанию ответ обычно уже готов.
+  final location = LocationGuard(settings: settings);
+  if (settings.locationCheck) unawaited(location.check());
   final window = AppWindow();
   final claudeCode = ClaudeCodeIntegration(
     settings: settings,
@@ -65,6 +70,14 @@ Future<void> main(List<String> args) async {
   );
   launcher.onNeedsAttention = window.show;
   launcher.beforeLaunch = claudeCode.beforeLaunch;
+  launcher.launchGuard = location.ensureCanLaunch;
+  // Окно открыли — страна могла смениться вместе с сетью: свежий ответ
+  // переиспользуется, старый перепроверяется. Пока запускать нельзя, страна
+  // перепроверяется и сама.
+  window.visible.addListener(() {
+    if (window.visible.value && settings.locationCheck) location.check();
+  });
+  location.recheckWhile(window.visible);
   // Лаунчер запустили ещё раз (Finder, «Объекты входа»): второй экземпляр
   // macOS не запускает, а сообщает этому — показываем окно.
   _nativeChannel.setMethodCallHandler((call) async {
@@ -90,6 +103,7 @@ Future<void> main(List<String> args) async {
   late final TrayController tray;
   tray = TrayController(
     launcher: launcher,
+    location: location,
     onShowWindow: window.show,
     onQuit: () async {
       try {
@@ -107,8 +121,12 @@ Future<void> main(List<String> args) async {
       launcher: launcher,
       settings: settings,
       claudeCode: claudeCode,
+      location: location,
     ),
   );
+  // Экран лаунчера — сразу: на нём видно, как проверяется страна и
+  // открывается профиль по умолчанию.
+  await window.show();
   await tray.init();
   try {
     await launcher.init();
@@ -125,10 +143,8 @@ Future<void> main(List<String> args) async {
   // Приём событий Claude Code, если пользователь его включил.
   await claudeCode.start();
 
-  // Первый запуск: окно приветствия с настройками. Заодно видно, что
-  // приложение запустилось, хотя живёт в трее.
+  // Первый запуск: окно приветствия с настройками.
   if (!settings.onboardingDone) {
-    await window.show();
     final context = _navigatorKey.currentContext;
     if (context != null && context.mounted) {
       await showWelcomeDialog(
@@ -140,6 +156,8 @@ Future<void> main(List<String> args) async {
     }
   }
 
+  // Перед запуском профиль ждёт проверку страны (LocationGuard.ensureCanLaunch),
+  // а она идёт с самого начала запуска.
   await launcher.openOnStartup(settings.startupProfileId);
 }
 
@@ -263,11 +281,13 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.launcher,
     required this.settings,
     required this.claudeCode,
+    required this.location,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
+  final LocationGuard location;
 
   @override
   Widget build(BuildContext context) {
@@ -284,6 +304,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           launcher: launcher,
           settings: settings,
           claudeCode: claudeCode,
+          location: location,
         ),
       ),
     );

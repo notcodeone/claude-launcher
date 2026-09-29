@@ -28,6 +28,10 @@ class AppSettings extends ChangeNotifier {
   /// (пока лаунчер запущен). Работает, только когда включены события.
   bool launcherNotifications = true;
 
+  /// Проверять страну по IP-адресу перед запуском профиля: Claude доступен
+  /// не во всех странах.
+  bool locationCheck = true;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
@@ -49,6 +53,7 @@ class AppSettings extends ChangeNotifier {
         claudeCodeEvents = json['claudeCodeEvents'] as bool? ?? false;
         launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
+        locationCheck = json['locationCheck'] as bool? ?? true;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
         eventsToken = json['eventsToken'] as String? ?? '';
       } on FormatException {
@@ -71,6 +76,9 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setStartupProfile(String? id) =>
       _update(() => startupProfileId = id);
+
+  Future<void> setLocationCheck(bool enabled) =>
+      _update(() => locationCheck = enabled);
 
   Future<void> setHideClaudeIcon(bool hide) =>
       _update(() => hideClaudeIcon = hide);
@@ -105,6 +113,7 @@ class AppSettings extends ChangeNotifier {
         'claudeCodeEvents': claudeCodeEvents,
         'launcherNotifications': launcherNotifications,
         'startupProfileId': startupProfileId,
+        'locationCheck': locationCheck,
         'eventsPort': eventsPort,
         'eventsToken': eventsToken,
       }),

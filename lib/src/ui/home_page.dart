@@ -8,6 +8,7 @@ import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
 import '../launcher_controller.dart';
+import '../location/location_guard.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
@@ -22,11 +23,13 @@ class HomePage extends StatelessWidget {
     required this.launcher,
     required this.settings,
     required this.claudeCode,
+    required this.location,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
+  final LocationGuard location;
 
   /// Поля окна: по ним выровнены шапка, заголовок, карточки, кнопка и подвал.
   static const gutter = 24.0;
@@ -67,7 +70,7 @@ class HomePage extends StatelessWidget {
       body: Stack(
         children: [
           ListenableBuilder(
-            listenable: Listenable.merge([launcher, claudeCode]),
+            listenable: Listenable.merge([launcher, claudeCode, location]),
             builder: (context, _) => ListView(
               padding: EdgeInsets.fromLTRB(
                 gutter,
@@ -112,6 +115,7 @@ class HomePage extends StatelessWidget {
                     launcher: launcher,
                     settings: settings,
                     claudeCode: claudeCode,
+                    location: location,
                     profile: profile,
                   ),
                 ],
@@ -153,10 +157,14 @@ class HomePage extends StatelessWidget {
             top: headerTop,
             left: gutter,
             right: gutter,
-            child: _HeaderBar(
-              launcher: launcher,
-              settings: settings,
-              claudeCode: claudeCode,
+            child: ListenableBuilder(
+              listenable: location,
+              builder: (context, _) => _HeaderBar(
+                launcher: launcher,
+                settings: settings,
+                claudeCode: claudeCode,
+                location: location,
+              ),
             ),
           ),
           // Подвал в стиле sensomni.
@@ -202,7 +210,26 @@ class HomePage extends StatelessWidget {
               : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой ▲). '
                     'Это окно можно закрыть.',
         ),
-      if (status != null) _SwitchBanner(launcher: launcher, status: status),
+      if (status != null && status.phase != SwitchPhase.checking)
+        _SwitchBanner(launcher: launcher, status: status)
+      // Страна проверяется быстро (или ответ ещё свежий) — плашка не мигает.
+      else if (location.showsProgress)
+        InfoBanner(
+          icon: AppIcons.location,
+          progress: true,
+          text: switch (status?.target) {
+            final target? => 'Проверяю страну перед запуском «${target.name}»…',
+            null => 'Проверяю страну по IP-адресу…',
+          },
+        ),
+      if (location.blocksLaunch && !location.showsProgress)
+        InfoBanner(
+          icon: AppIcons.locationOff,
+          error: true,
+          text:
+              'Claude недоступен в стране «${location.countryName}» — так её '
+              'определяет IP-адрес. Пока это так, профили не запускаются.',
+        ),
       if (launcher.lastError case final error?)
         InfoBanner(icon: AppIcons.error, error: true, text: error),
       for (final instance in launcher.unknownInstances)
@@ -281,18 +308,20 @@ class _Footer extends StatelessWidget {
   }
 }
 
-/// Плавающая шапка, как в sensomni: название слева, тема и настройки справа.
+/// Плавающая шапка, как в sensomni: название слева, страна, тема и настройки справа.
 class _HeaderBar extends StatelessWidget {
   const _HeaderBar({
     required this.launcher,
     required this.settings,
     required this.claudeCode,
+    required this.location,
     this.interactive = true,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
+  final LocationGuard location;
 
   /// Копия шапки поверх затемнения под меню не реагирует на клики.
   final bool interactive;
@@ -325,6 +354,15 @@ class _HeaderBar extends StatelessWidget {
             // клика (развернуть окно), и одиночные клики срабатывали бы с задержкой.
             Expanded(child: _dragArea(title)),
             CircleIconButton(
+              icon: location.enabled ? AppIcons.location : AppIcons.locationOff,
+              badge: _locationBadge(context.palette),
+              loading: location.showsProgress,
+              tooltip: interactive ? 'Страна' : null,
+              onPressed: () {
+                if (interactive) _openLocationMenu(cardContext);
+              },
+            ),
+            CircleIconButton(
               icon: icon,
               tooltip: interactive ? 'Тема окна' : null,
               onPressed: () {
@@ -341,6 +379,7 @@ class _HeaderBar extends StatelessWidget {
                     launcher: launcher,
                     settings: settings,
                     claudeCode: claudeCode,
+                    location: location,
                   );
                 }
               },
@@ -349,6 +388,50 @@ class _HeaderBar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Точка на кнопке страны: зелёная — Claude доступен, красная — нет,
+  /// жёлтая — узнать не удалось.
+  Color? _locationBadge(Palette p) {
+    if (!location.enabled || location.checking) return null;
+    return switch (location.state) {
+      LocationState.supported => p.success,
+      LocationState.unsupported => p.danger,
+      LocationState.unknown when location.checkedAt != null => p.warning,
+      LocationState.unknown => null,
+    };
+  }
+
+  _HeaderBar get _highlight => _HeaderBar(
+    launcher: launcher,
+    settings: settings,
+    claudeCode: claudeCode,
+    location: location,
+    interactive: false,
+  );
+
+  Future<void> _openLocationMenu(BuildContext cardContext) async {
+    final recheck = await showAnchoredMenu(
+      anchorContext: cardContext,
+      highlight: _highlight,
+      caption: _LocationCaption(location: location),
+      entries: [
+        location.enabled
+            ? const MenuEntry(
+                value: true,
+                icon: AppIcons.sync,
+                label: 'Проверить снова',
+              )
+            : const MenuEntry(
+                value: true,
+                icon: AppIcons.location,
+                label: 'Включить проверку',
+              ),
+      ],
+    );
+    if (recheck != true) return;
+    if (!location.enabled) await settings.setLocationCheck(true);
+    await location.check(force: true);
   }
 
   Widget _dragArea(Widget child) => Platform.isMacOS && interactive
@@ -365,12 +448,7 @@ class _HeaderBar extends StatelessWidget {
         );
     final mode = await showAnchoredMenu(
       anchorContext: cardContext,
-      highlight: _HeaderBar(
-        launcher: launcher,
-        settings: settings,
-        claudeCode: claudeCode,
-        interactive: false,
-      ),
+      highlight: _highlight,
       entries: [
         entry(ThemeMode.system, AppIcons.themeSystem, 'Как в системе'),
         entry(ThemeMode.light, AppIcons.themeLight, 'Светлая'),
@@ -392,6 +470,8 @@ class _SwitchBanner extends StatelessWidget {
     final closing = status.closing.map((name) => '«$name»').join(', ');
     final target = status.target == null ? null : '«${status.target!.name}»';
     final text = switch (status.phase) {
+      // Проверку страны показывает своя плашка (см. HomePage._banners).
+      SwitchPhase.checking => 'Проверяю, можно ли открыть $target…',
       SwitchPhase.closing when target == null => 'Закрываю $closing…',
       SwitchPhase.closing => 'Закрываю $closing, чтобы открыть $target…',
       SwitchPhase.waitingForUser => launcher.host.manualQuitHint,
@@ -428,9 +508,73 @@ class _SwitchBanner extends StatelessWidget {
       icon: AppIcons.sync,
       text: text,
       progress: true,
-      action: status.phase == SwitchPhase.launching ? null : cancel,
+      // Отменить можно только ожидание закрытия.
+      action: status.phase == SwitchPhase.closing ? cancel : null,
     );
   }
+}
+
+/// Что известно о стране — над пунктами меню кнопки страны.
+class _LocationCaption extends StatelessWidget {
+  const _LocationCaption({required this.location});
+
+  final LocationGuard location;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (title, text) = switch (location) {
+      LocationGuard(enabled: false) => (
+        'Проверка страны выключена',
+        'Профили запускаются без неё.',
+      ),
+      LocationGuard(checking: true) => (
+        'Проверяю страну…',
+        'По IP-адресу, у публичных сервисов.',
+      ),
+      LocationGuard(state: LocationState.supported, :final countryName?) => (
+        countryName,
+        'Claude здесь доступен.',
+      ),
+      LocationGuard(state: LocationState.unsupported, :final countryName?) => (
+        countryName,
+        'Claude здесь недоступен — профили не запускаются.',
+      ),
+      LocationGuard(checkedAt: null) => (
+        'Страна ещё не проверена',
+        'Лаунчер проверит её перед запуском профиля.',
+      ),
+      _ => (
+        'Страну определить не удалось',
+        'Сервисы не ответили — возможно, нет сети. Запуск вручную '
+            'не запрещён.',
+      ),
+    };
+    final checkedAt = location.checkedAt;
+    final source = location.source;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: theme.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(text, style: theme.textTheme.bodySmall),
+        if (location.enabled && !location.checking && checkedAt != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            [
+              'Проверено в ${_clock(checkedAt)}',
+              if (source != null) 'по IP через $source',
+            ].join(' '),
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+
+  static String _clock(DateTime time) =>
+      '${time.hour.toString().padLeft(2, '0')}:'
+      '${time.minute.toString().padLeft(2, '0')}';
 }
 
 class _EmptyState extends StatelessWidget {
@@ -480,6 +624,7 @@ class _ProfileCard extends StatelessWidget {
     required this.launcher,
     required this.settings,
     required this.claudeCode,
+    required this.location,
     required this.profile,
     this.interactive = true,
   });
@@ -487,6 +632,7 @@ class _ProfileCard extends StatelessWidget {
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
+  final LocationGuard location;
   final Profile profile;
 
   /// Копия карточки поверх затемнения под меню не реагирует на клики.
@@ -510,6 +656,9 @@ class _ProfileCard extends StatelessWidget {
     final sessions = claudeCode.sessions.of(profile.id);
     final collapsed = profile.sessionsCollapsed;
     final canShow = !switching && launcher.claudePath != null;
+    // Открытый профиль можно показать всегда, запустить — только где Claude доступен.
+    final blocked = !running && location.blocksLaunch;
+    final opening = launcher.switchStatus?.target?.id == profile.id;
     void show() {
       if (interactive) launcher.switchTo(profile);
     }
@@ -601,17 +750,20 @@ class _ProfileCard extends StatelessWidget {
                       const SizedBox(width: 12),
                       CircleIconButton(
                         icon: running ? AppIcons.show : AppIcons.launch,
+                        loading: opening,
                         tooltip: !interactive
                             ? null
                             : running
                             ? 'Показать окно Claude'
+                            : blocked
+                            ? 'Claude недоступен в этой стране'
                             : 'Открыть профиль',
                         // Свёрнуто — последнее состояние видно точкой на глазе.
                         badge: collapsed && sessions.isNotEmpty
                             ? sessionColor(palette, sessions.first.state)
                             : null,
                         // У копии карточки кнопка выглядит активной, но клики до неё не доходят.
-                        onPressed: canShow ? show : null,
+                        onPressed: canShow && !blocked ? show : null,
                       ),
                       CircleIconButton(
                         icon: AppIcons.more,
@@ -662,11 +814,12 @@ class _ProfileCard extends StatelessWidget {
     final action = await showAnchoredMenu(
       anchorContext: cardContext,
       highlight: ListenableBuilder(
-        listenable: Listenable.merge([launcher, claudeCode]),
+        listenable: Listenable.merge([launcher, claudeCode, location]),
         builder: (_, _) => _ProfileCard(
           launcher: launcher,
           settings: settings,
           claudeCode: claudeCode,
+          location: location,
           profile: profile,
           interactive: false,
         ),

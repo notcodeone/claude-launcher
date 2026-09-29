@@ -5,11 +5,13 @@ import 'dart:io';
 import 'package:tray_manager/tray_manager.dart';
 
 import 'launcher_controller.dart';
+import 'location/location_guard.dart';
 
 /// Иконка в строке меню macOS / трее Windows и её меню.
 class TrayController with TrayListener {
   TrayController({
     required this.launcher,
+    required this.location,
     required this.onShowWindow,
     required this.onQuit,
   }) {
@@ -20,6 +22,7 @@ class TrayController with TrayListener {
   }
 
   final LauncherController launcher;
+  final LocationGuard location;
 
   /// Окно лаунчера: пункт меню и двойной клик по иконке.
   final void Function() onShowWindow;
@@ -37,12 +40,14 @@ class TrayController with TrayListener {
     );
     trayManager.addListener(this);
     launcher.addListener(_update);
+    location.addListener(_update);
     await _update();
   }
 
   Future<void> dispose() async {
     _clicks.cancel();
     launcher.removeListener(_update);
+    location.removeListener(_update);
     trayManager.removeListener(this);
     await trayManager.destroy();
   }
@@ -91,6 +96,11 @@ class TrayController with TrayListener {
     final status = _statusText();
     return Menu(
       items: [
+        if (location.blocksLaunch)
+          MenuItem(
+            label: '⚠️ Claude недоступен: ${location.countryName}',
+            disabled: true,
+          ),
         MenuItem(
           label: '${status[0].toUpperCase()}${status.substring(1)}',
           disabled: true,
@@ -103,7 +113,10 @@ class TrayController with TrayListener {
                 ? profile.title
                 : '${profile.title} — ${profile.email}',
             checked: launcher.isRunning(profile),
-            disabled: switching,
+            // Где Claude недоступен, запустить нельзя — только показать открытый.
+            disabled:
+                switching ||
+                (location.blocksLaunch && !launcher.isRunning(profile)),
           ),
         MenuItem.separator(),
         MenuItem(key: 'settings', label: 'Профили и настройки…'),

@@ -158,6 +158,7 @@ class CircleIconButton extends StatelessWidget {
     this.tooltip,
     this.size = 36,
     this.badge,
+    this.loading = false,
   });
 
   final IconData icon;
@@ -167,6 +168,9 @@ class CircleIconButton extends StatelessWidget {
 
   /// Цветная точка справа сверху от значка.
   final Color? badge;
+
+  /// Вместо значка — индикатор загрузки: действие кнопки уже идёт.
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -184,12 +188,25 @@ class CircleIconButton extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Icon(
-                icon,
-                size: size * 0.55,
-                color: onPressed == null
-                    ? p.muted.withValues(alpha: 0.5)
-                    : p.text,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: loading
+                    ? SizedBox.square(
+                        key: const ValueKey('loading'),
+                        dimension: size * 0.44,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: p.text,
+                        ),
+                      )
+                    : Icon(
+                        icon,
+                        key: ValueKey(icon),
+                        size: size * 0.55,
+                        color: onPressed == null
+                            ? p.muted.withValues(alpha: 0.5)
+                            : p.text,
+                      ),
               ),
               Positioned(
                 top: size * 0.14,
@@ -198,7 +215,7 @@ class CircleIconButton extends StatelessWidget {
                   duration: const Duration(milliseconds: 180),
                   transitionBuilder: (child, animation) =>
                       ScaleTransition(scale: animation, child: child),
-                  child: badge == null
+                  child: badge == null || loading
                       ? const SizedBox.square(dimension: 9)
                       // Обводка цветом карточки отделяет точку от значка.
                       : Container(
@@ -788,6 +805,8 @@ abstract final class AppIcons {
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
   static const quit = LucideIcons.power;
+  static const location = LucideIcons.mapPin;
+  static const locationOff = LucideIcons.mapPinOff;
 
   /// Открывать при запуске лаунчера — та же иконка, что у кнопки запуска профиля.
   static const startup = launch;

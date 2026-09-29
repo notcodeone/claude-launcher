@@ -161,6 +161,58 @@ void main() {
     expect(launcher.isRunning(personal), isTrue);
   });
 
+  test('проверка запуска — до закрытия открытого профиля', () async {
+    final running = host.start(null);
+    final checks = <bool>[];
+    var allowed = false;
+    launcher.launchGuard = ({required strict}) async {
+      checks.add(strict);
+      host.calls.add('guard');
+      if (!allowed) throw const LaunchBlocked('нельзя');
+    };
+    var attention = 0;
+    launcher.onNeedsAttention = () => attention++;
+
+    await launcher.switchTo(personal);
+    expect(host.calls, ['guard'], reason: 'открытый профиль не закрыт');
+    expect(host.instances, [running]);
+    expect(launcher.lastError, 'нельзя');
+    expect(launcher.switchStatus, isNull);
+    expect(attention, 1);
+
+    // Причина видна в окне и так — сообщение не дублируем.
+    launcher.launchGuard = ({required strict}) async =>
+        throw const LaunchBlocked();
+    await launcher.switchTo(personal);
+    expect(launcher.lastError, isNull);
+
+    // Уже открытый профиль не запускается — проверять нечего.
+    host.calls.clear();
+    await launcher.switchTo(work);
+    expect(host.calls, ['activate ${running.pid}']);
+
+    allowed = true;
+    launcher.launchGuard = ({required strict}) async {
+      checks.add(strict);
+      host.calls.add('guard');
+    };
+    await launcher.switchTo(personal);
+    expect(host.calls.skip(1), [
+      'guard',
+      'quit ${running.pid}',
+      'launch /support/Claude-Lichnyy',
+    ]);
+    expect(checks, [false, false]);
+  });
+
+  test('при запуске лаунчера проверка строгая', () async {
+    final checks = <bool>[];
+    launcher.launchGuard = ({required strict}) async => checks.add(strict);
+    await launcher.openOnStartup(personal.id);
+    expect(checks, [true]);
+    expect(launcher.isRunning(personal), isTrue);
+  });
+
   test('перед запуском — beforeLaunch, пока Claude ещё закрыт', () async {
     final running = host.start(null);
     launcher.beforeLaunch = (dir) async {

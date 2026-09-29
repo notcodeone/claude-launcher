@@ -28,11 +28,13 @@ class MenuEntry<T> {
 
 /// Меню под элементом: экран плавно затемняется, сам элемент ([highlight] — его
 /// копия на том же месте) остаётся поверх затемнения, меню — под ним с отступом,
-/// по правому краю. Если снизу не хватает места — над элементом.
+/// по правому краю. Если снизу не хватает места — над элементом. [caption] —
+/// пояснение над пунктами, не нажимается.
 Future<T?> showAnchoredMenu<T>({
   required BuildContext anchorContext,
   required Widget highlight,
   required List<MenuEntry<T>> entries,
+  Widget? caption,
 }) {
   final navigator = Navigator.of(anchorContext);
   final overlayBox =
@@ -47,6 +49,7 @@ Future<T?> showAnchoredMenu<T>({
       anchorRect: anchorRect,
       highlight: highlight,
       entries: entries,
+      caption: caption,
       scrim: anchorContext.palette.scrim,
       capturedThemes: InheritedTheme.capture(
         from: anchorContext,
@@ -61,6 +64,7 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
     required this.anchorRect,
     required this.highlight,
     required this.entries,
+    required this.caption,
     required this.scrim,
     required this.capturedThemes,
   });
@@ -68,6 +72,7 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
   final Rect anchorRect;
   final Widget highlight;
   final List<MenuEntry<T>> entries;
+  final Widget? caption;
   final Color scrim;
   final CapturedThemes capturedThemes;
 
@@ -115,7 +120,7 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
                 child: ScaleTransition(
                   scale: Tween(begin: 0.96, end: 1.0).animate(curved),
                   alignment: Alignment.topRight,
-                  child: _MenuPanel<T>(entries: entries),
+                  child: _MenuPanel<T>(entries: entries, caption: caption),
                 ),
               ),
             ),
@@ -163,9 +168,10 @@ class _MenuLayout extends SingleChildLayoutDelegate {
 }
 
 class _MenuPanel<T> extends StatelessWidget {
-  const _MenuPanel({required this.entries});
+  const _MenuPanel({required this.entries, this.caption});
 
   final List<MenuEntry<T>> entries;
+  final Widget? caption;
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +201,13 @@ class _MenuPanel<T> extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (caption case final caption?) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  child: caption,
+                ),
+                const Divider(),
+              ],
               for (final (index, entry) in entries.indexed) ...[
                 if (index > 0) const Divider(),
                 _MenuItem(entry: entry),

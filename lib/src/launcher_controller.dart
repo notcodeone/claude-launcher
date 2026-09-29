@@ -9,6 +9,9 @@ import 'profile.dart';
 import 'profile_store.dart';
 
 enum SwitchPhase {
+  /// Проверяем, можно ли запускать (см. [LauncherController.launchGuard]).
+  checking,
+
   /// Попросили открытые экземпляры закрыться, ждём.
   closing,
 
@@ -28,6 +31,17 @@ class SwitchStatus {
 
   /// Названия профилей, которые закрываются.
   final List<String> closing;
+}
+
+/// Почему профиль нельзя запустить (см. [LauncherController.launchGuard]).
+class LaunchBlocked implements Exception {
+  const LaunchBlocked([this.message]);
+
+  /// Что показать пользователю; `null` — причина и так видна в окне.
+  final String? message;
+
+  @override
+  String toString() => message ?? 'Запуск профиля запрещён';
 }
 
 /// Профили, состояние запущенных экземпляров Claude и переключение между ними.
@@ -52,6 +66,11 @@ class LauncherController extends ChangeNotifier {
 
   /// Вызывается перед запуском Claude с папкой профиля — пока он ещё закрыт.
   Future<void> Function(String dataDir)? beforeLaunch;
+
+  /// Проверка перед запуском профиля — до того, как закрыть открытый: бросает
+  /// [LaunchBlocked], если запускать нельзя. [strict] — запуск при старте
+  /// лаунчера, без участия пользователя.
+  Future<void> Function({required bool strict})? launchGuard;
 
   Timer? _pollTimer;
   bool _cancelRequested = false;
@@ -134,7 +153,8 @@ class LauncherController extends ChangeNotifier {
   /// Закрывает все остальные экземпляры Claude и открывает [target].
   /// Одновременно открыт только один: так ссылка входа из браузера всегда
   /// попадает в нужный экземпляр, и не конфликтуют виртуальные машины Cowork.
-  Future<void> switchTo(Profile target) async {
+  /// [strict] — см. [launchGuard].
+  Future<void> switchTo(Profile target, {bool strict = false}) async {
     if (switchStatus != null) return;
     lastError = null;
     _cancelRequested = false;
@@ -159,6 +179,12 @@ class LauncherController extends ChangeNotifier {
         }
       }
 
+      // Уже открытый профиль не запускается — только выводится вперёд.
+      if (targetInstance == null && launchGuard != null) {
+        _setStatus(SwitchStatus(target, SwitchPhase.checking));
+        await launchGuard!(strict: strict);
+      }
+
       if (others.isNotEmpty) {
         final closed = await _closeAll(target, others);
         if (!closed) return;
@@ -174,6 +200,9 @@ class LauncherController extends ChangeNotifier {
       await host.launch(target.usesDefaultFolder ? null : targetDir);
       await _replace(target.copyWith(lastLaunchedAt: DateTime.now()));
       await _waitForLaunch(targetDir);
+    } on LaunchBlocked catch (blocked) {
+      lastError = blocked.message;
+      onNeedsAttention?.call();
     } catch (error) {
       lastError = '$error';
       onNeedsAttention?.call();
@@ -204,7 +233,7 @@ class LauncherController extends ChangeNotifier {
   Future<void> openOnStartup(String? profileId) async {
     if (profileId == null || instances.isNotEmpty) return;
     for (final profile in profiles) {
-      if (profile.id == profileId) return switchTo(profile);
+      if (profile.id == profileId) return switchTo(profile, strict: true);
     }
   }
 
