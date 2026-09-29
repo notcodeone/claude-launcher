@@ -73,9 +73,13 @@ class CodeSession {
   // Чтение файла переписки по мере роста.
   int _offset = 0;
   List<int> _carry = const [];
+
   /// Символы ответа по строкам переписки (у каждой строки свой uuid).
   final Map<String, int> _charsByLine = {};
   bool _titleScanned = false;
+
+  /// С сессией познакомились посреди задачи — начало ищем в переписке.
+  bool _findTaskStart = false;
 }
 
 /// Сессии Claude Code по событиям хуков.
@@ -90,6 +94,8 @@ class ClaudeCodeSessions {
     for (final session in _sessions.values)
       if (session.profileId == profileId) session,
   ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+  Iterable<CodeSession> get all => _sessions.values;
 
   bool get anyWorking => _sessions.values.any(
     (session) => session.state == CodeSessionState.working,
@@ -126,8 +132,13 @@ class ClaudeCodeSessions {
         .._offset = 0
         .._carry = const [];
     }
-    // С сессией знакомимся посреди работы: прошлые задачи в файле не считаем.
-    if (isNew) session._offset = _lengthOf(session.transcriptPath);
+    // С сессией знакомимся посреди работы (например, лаунчер перезапустили):
+    // пока считаем с этого места, а начало задачи найдём в переписке.
+    if (isNew) {
+      session
+        .._offset = _lengthOf(session.transcriptPath)
+        .._findTaskStart = event.kind != ClaudeCodeEventKind.promptSubmitted;
+    }
     session.updatedAt = event.time;
 
     switch (event.kind) {
@@ -167,21 +178,23 @@ class ClaudeCodeSessions {
       .._charsByLine.clear()
       // Токены считаем с этого места: всё раньше — прошлые задачи.
       .._offset = _lengthOf(session.transcriptPath)
-      .._carry = const [];
+      .._carry = const []
+      .._findTaskStart = false;
   }
 
   /// Дочитывает файлы переписки: название сессии и токены текущей задачи.
-  /// Возвращает, изменилось ли что-нибудь.
-  Future<bool> readTranscripts() async {
+  /// [where] — только эти сессии. Возвращает, изменилось ли что-нибудь.
+  Future<bool> readTranscripts({bool Function(CodeSession)? where}) async {
     var changed = false;
-    for (final session in _sessions.values) {
+    for (final session in _sessions.values.toList()) {
       if (session.transcriptPath.isEmpty) continue;
+      if (where != null && !where(session)) continue;
       final nameBefore = session.name;
       final tokensBefore = session.tokens;
       await _scanTitle(session);
+      if (session._findTaskStart) await _findStart(session);
       await _readNew(session);
-      changed |=
-          session.name != nameBefore || session.tokens != tokensBefore;
+      changed |= session.name != nameBefore || session.tokens != tokensBefore;
     }
     return changed;
   }
@@ -211,6 +224,71 @@ class ClaudeCodeSessions {
     for (final line in _lines(bytes)) {
       _applyTitle(session, line);
     }
+  }
+
+  /// Сколько с конца переписки просматривать в поисках начала задачи:
+  /// сначала немного, потом больше — ответы инструментов бывают большими.
+  static const _taskSearchSizes = [
+    256 * 1024,
+    4 * 1024 * 1024,
+    16 * 1024 * 1024,
+  ];
+
+  /// Начало текущей задачи — последнее сообщение пользователя в переписке.
+  /// С него считаем время и токены, как если бы видели задачу с начала.
+  Future<void> _findStart(CodeSession session) async {
+    session._findTaskStart = false;
+    if (session.state == CodeSessionState.done) return;
+    final file = File(session.transcriptPath);
+    if (!await file.exists()) return;
+    final length = await file.length();
+    for (final size in _taskSearchSizes) {
+      final from = max(0, length - size);
+      final bytes = await _readRange(file, from, length);
+      // С конца: строка за строкой, пока не встретим сообщение пользователя.
+      var end = bytes.lastIndexOf(0x0A);
+      while (end > 0) {
+        final start = bytes.lastIndexOf(0x0A, end - 1) + 1;
+        // Первая строка куска может быть обрезана — возьмём кусок побольше.
+        if (start == 0 && from > 0) break;
+        final line = _lines(bytes.sublist(start, end)).firstOrNull;
+        if (line != null && _isPrompt(line)) {
+          final time = DateTime.tryParse(line['timestamp'] as String? ?? '');
+          session
+            ..startedAt = time?.toLocal() ?? session.startedAt
+            ..tokens = 0
+            .._charsByLine.clear()
+            .._offset = from + end + 1
+            .._carry = const [];
+          return;
+        }
+        end = start - 1;
+      }
+      if (from == 0) return;
+    }
+  }
+
+  /// Сообщение пользователя, с которого начинается задача: текст, а не
+  /// результат инструмента. Сообщения, отправленные во время работы, пишутся
+  /// в переписку иначе (`queue-operation`) — задачу они не начинают.
+  static bool _isPrompt(Map<String, Object?> line) {
+    if (line['type'] != 'user' ||
+        line['isMeta'] == true ||
+        line['isSidechain'] == true) {
+      return false;
+    }
+    final message = line['message'];
+    if (message is! Map) return false;
+    final content = message['content'];
+    if (content is String) return content.trim().isNotEmpty;
+    if (content is! List) return false;
+    var hasText = false;
+    for (final block in content) {
+      if (block is! Map) continue;
+      if (block['type'] == 'tool_result') return false;
+      if (block['type'] == 'text') hasText = true;
+    }
+    return hasText;
   }
 
   Future<void> _readNew(CodeSession session) async {

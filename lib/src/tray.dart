@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,14 +10,22 @@ import 'launcher_controller.dart';
 class TrayController with TrayListener {
   TrayController({
     required this.launcher,
-    required this.onOpenSettings,
+    required this.onShowWindow,
     required this.onQuit,
-  });
+  }) {
+    _clicks = ClickDisambiguator(
+      onSingle: trayManager.popUpContextMenu,
+      onDouble: onShowWindow,
+    );
+  }
 
   final LauncherController launcher;
-  final void Function() onOpenSettings;
+
+  /// Окно лаунчера: пункт меню и двойной клик по иконке.
+  final void Function() onShowWindow;
   final void Function() onQuit;
 
+  late final ClickDisambiguator _clicks;
   String _lastState = '';
 
   Future<void> init() async {
@@ -32,6 +41,7 @@ class TrayController with TrayListener {
   }
 
   Future<void> dispose() async {
+    _clicks.cancel();
     launcher.removeListener(_update);
     trayManager.removeListener(this);
     await trayManager.destroy();
@@ -39,7 +49,7 @@ class TrayController with TrayListener {
 
   Future<void> _update() async {
     final menu = _buildMenu();
-    final tooltip = 'Claude Launcher — ${_statusText()}';
+    final tooltip = 'ClaudeLauncher — ${_statusText()}';
 
     // Меню пересобирается при каждом опросе процессов; трогаем трей только при изменениях.
     // Сравниваем без id пунктов: они новые у каждого MenuItem, а клик по уже открытому
@@ -97,21 +107,25 @@ class TrayController with TrayListener {
           ),
         MenuItem.separator(),
         MenuItem(key: 'settings', label: 'Профили и настройки…'),
-        MenuItem(key: 'quit', label: 'Выйти из Claude Launcher'),
+        MenuItem(key: 'quit', label: 'Выйти из ClaudeLauncher'),
       ],
     );
   }
 
+  /// Клик — меню, двойной клик — окно лаунчера.
   @override
-  void onTrayIconMouseDown() => trayManager.popUpContextMenu();
+  void onTrayIconMouseDown() => _clicks.click();
 
   @override
-  void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
+  void onTrayIconRightMouseDown() {
+    _clicks.cancel();
+    trayManager.popUpContextMenu();
+  }
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     final key = menuItem.key ?? '';
-    if (key == 'settings') return onOpenSettings();
+    if (key == 'settings') return onShowWindow();
     if (key == 'quit') return onQuit();
     if (key.startsWith('profile:')) {
       final id = key.substring('profile:'.length);
@@ -119,5 +133,44 @@ class TrayController with TrayListener {
         if (profile.id == id) launcher.switchTo(profile);
       }
     }
+  }
+}
+
+/// Отличает клик от двойного клика по иконке в трее.
+///
+/// Меню трея модальное: если открыть его на первом клике, второй клик только
+/// закроет меню и до лаунчера не дойдёт. Поэтому одиночный клик срабатывает
+/// с задержкой [window] — если за это время не было второго.
+class ClickDisambiguator {
+  ClickDisambiguator({
+    required this.onSingle,
+    required this.onDouble,
+    this.window = const Duration(milliseconds: 300),
+  });
+
+  final void Function() onSingle;
+  final void Function() onDouble;
+
+  /// Короче системного интервала двойного клика (обычно 0,5 с), чтобы меню
+  /// не запаздывало заметно; быстрый двойной клик укладывается и в него.
+  final Duration window;
+
+  Timer? _pending;
+
+  void click() {
+    if (_pending?.isActive ?? false) {
+      cancel();
+      onDouble();
+      return;
+    }
+    _pending = Timer(window, () {
+      _pending = null;
+      onSingle();
+    });
+  }
+
+  void cancel() {
+    _pending?.cancel();
+    _pending = null;
   }
 }

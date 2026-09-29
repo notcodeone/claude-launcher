@@ -8,6 +8,7 @@ import 'package:claude_launcher/src/integrations/claude_code_integration.dart';
 import 'package:claude_launcher/src/integrations/claude_code_sessions.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/profile_store.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'launcher_controller_test.dart' show FakeHost;
@@ -182,10 +183,12 @@ void main() {
       await settings.load();
       await settings.setEventsPort(0);
       final hooks = ClaudeCodeHooks(File('${dir.path}/.claude/settings.json'));
+      final windowVisible = ValueNotifier(true);
       final integration = ClaudeCodeIntegration(
         settings: settings,
         launcher: launcher,
         hooks: hooks,
+        windowVisible: windowVisible,
         tickInterval: const Duration(milliseconds: 20),
       );
       addTearDown(integration.dispose);
@@ -216,6 +219,52 @@ void main() {
       expect(session.state, CodeSessionState.working);
       await send('Stop');
       expect(session.state, CodeSessionState.done);
+
+      // Пока окно закрыто, переписку не читаем; открыли — сразу догоняем.
+      final transcript = File('${dir.path}/s2.jsonl')..writeAsStringSync('');
+      windowVisible.value = false;
+      await post(port, {
+        'hook_event_name': 'UserPromptSubmit',
+        'session_id': 's2',
+        'transcript_path': transcript.path,
+      }, token: settings.eventsToken);
+      transcript.writeAsStringSync(
+        '${jsonEncode({
+          'type': 'assistant',
+          'message': {
+            'content': [
+              {'type': 'text', 'text': 'я' * 40},
+            ],
+          },
+        })}\n',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final hidden = integration.sessions
+          .of(profile.id)
+          .firstWhere((session) => session.id == 's2');
+      expect(hidden.tokens, 0);
+      windowVisible.value = true;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(hidden.tokens, 10);
+
+      // Свёрнутая карточка — тоже не читаем.
+      await launcher.updateProfile(profile.copyWith(sessionsCollapsed: true));
+      transcript.writeAsStringSync(
+        '${jsonEncode({
+          'type': 'assistant',
+          'message': {
+            'content': [
+              {'type': 'text', 'text': 'я' * 40},
+            ],
+          },
+        })}\n',
+        mode: FileMode.append,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(hidden.tokens, 10);
+      await launcher.updateProfile(profile.copyWith(sessionsCollapsed: false));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(hidden.tokens, 20);
 
       // Профиль закрыли — его сессии больше не показываем.
       host.instances.clear();

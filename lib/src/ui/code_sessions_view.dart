@@ -21,10 +21,12 @@ String sessionLabel(CodeSessionState state) => switch (state) {
   CodeSessionState.done => 'Готово',
 };
 
-/// «12 с», «2 мин», «1 ч 5 мин».
+/// «12 с», «2 мин 14 с», «1 ч 5 мин» — как счётчик в самом Claude Code.
 String formatElapsed(Duration elapsed) {
   if (elapsed.inSeconds < 60) return '${max(0, elapsed.inSeconds)} с';
-  if (elapsed.inMinutes < 60) return '${elapsed.inMinutes} мин';
+  if (elapsed.inMinutes < 60) {
+    return '${elapsed.inMinutes} мин ${elapsed.inSeconds % 60} с';
+  }
   final minutes = elapsed.inMinutes % 60;
   return minutes == 0
       ? '${elapsed.inHours} ч'
@@ -153,9 +155,7 @@ class _SessionRow extends StatelessWidget {
       height: 28,
       child: Row(
         children: [
-          // Текст — по краю имени профиля (аватар 40 + 12), значок — сразу
-          // слева от текста, как маркер списка.
-          const SizedBox(width: 40 + 12 - _iconGap - _iconBox),
+          // Значок — по левому краю карточки, как линия над ним.
           SizedBox(
             width: _iconBox,
             child: Center(child: _StateIcon(state: session.state)),
@@ -185,7 +185,13 @@ class _SessionRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Text(meta, style: base),
+          // Цифры одной ширины: подпись не дёргается каждую секунду.
+          Text(
+            meta,
+            style: base.copyWith(
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ],
       ),
     );

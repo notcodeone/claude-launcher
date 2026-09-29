@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -15,20 +16,29 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     required this.settings,
     required this.launcher,
     ClaudeCodeHooks? hooks,
-    this.tickInterval = const Duration(seconds: 2),
-  }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser() {
-    launcher.addListener(_prune);
+    ValueListenable<bool>? windowVisible,
+    this.tickInterval = const Duration(seconds: 1),
+  }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser(),
+       windowVisible = windowVisible ?? ValueNotifier(true) {
+    launcher.addListener(_onLauncherChanged);
+    this.windowVisible.addListener(_updateWatching);
   }
 
   final AppSettings settings;
   final LauncherController launcher;
   final ClaudeCodeHooks hooks;
 
-  /// Как часто дочитывать переписку работающих сессий (время и токены).
+  /// Открыто ли окно лаунчера. Пока закрыто, время и токены не считаем.
+  final ValueListenable<bool> windowVisible;
+
+  /// Как часто обновлять время и токены работающих сессий.
   final Duration tickInterval;
 
   ClaudeCodeEventServer? _server;
   Timer? _ticker;
+  Future<void> _reading = Future.value();
+  String _watchKey = '';
+  bool _disposed = false;
 
   final sessions = ClaudeCodeSessions();
 
@@ -70,7 +80,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       _server = null;
       error = 'Не удалось подключить события Claude Code: $e';
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _disconnect() async {
@@ -85,30 +95,77 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     } catch (e) {
       error = 'Не удалось убрать хуки из ~/.claude/settings.json: $e';
     }
-    notifyListeners();
+    _notify();
   }
 
   /// Одновременно открыт один профиль — событие относится к нему.
+  /// Состояние (и точка на свёрнутой карточке) меняется сразу, а переписку
+  /// дочитываем, только если время и токены сейчас видны.
   Future<void> _onEvent(ClaudeCodeEvent event) async {
     final running = launcher.runningProfiles;
     if (running.length != 1) return;
     sessions.handle(event, running.single.id);
-    await sessions.readTranscripts();
-    _ensureTicker();
-    notifyListeners();
+    _notify();
+    await _refresh();
   }
 
-  /// Пока Claude работает, раз в [tickInterval] обновляем время и токены.
-  void _ensureTicker() {
-    if (_ticker != null || !sessions.anyWorking) return;
-    _ticker = Timer.periodic(tickInterval, (_) async {
-      await sessions.readTranscripts();
-      if (!sessions.anyWorking) {
-        _ticker?.cancel();
-        _ticker = null;
-      }
-      notifyListeners();
-    });
+  /// Время и токены видны, только когда окно открыто, а карточка профиля
+  /// развёрнута. Переписку остальных сессий не читаем вовсе.
+  bool _watched(CodeSession session) {
+    if (!windowVisible.value) return false;
+    for (final profile in launcher.profiles) {
+      if (profile.id == session.profileId) return !profile.sessionsCollapsed;
+    }
+    return false;
+  }
+
+  void _onLauncherChanged() {
+    _prune();
+    _updateWatching();
+  }
+
+  /// Окно открыли или карточку развернули — сразу догоняем переписку;
+  /// закрыли или свернули — перестаём обновлять.
+  void _updateWatching() {
+    final key = [
+      windowVisible.value,
+      for (final profile in launcher.profiles)
+        if (!profile.sessionsCollapsed) profile.id,
+    ].join(',');
+    if (key == _watchKey) return;
+    _watchKey = key;
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    await _readWatched();
+    _syncTicker();
+    _notify();
+  }
+
+  /// По очереди: два чтения одного файла начали бы с одного места.
+  Future<void> _readWatched() => _reading = _reading.then((_) async {
+    try {
+      await sessions.readTranscripts(where: _watched);
+    } on FileSystemException catch (error) {
+      debugPrint('Не удалось прочитать переписку Claude Code: $error');
+    }
+  });
+
+  /// Тикаем раз в [tickInterval], пока есть видимая работающая сессия.
+  void _syncTicker() {
+    final needed =
+        !_disposed &&
+        sessions.all.any(
+          (session) =>
+              session.state == CodeSessionState.working && _watched(session),
+        );
+    if (!needed) {
+      _ticker?.cancel();
+      _ticker = null;
+    } else {
+      _ticker ??= Timer.periodic(tickInterval, (_) => _refresh());
+    }
   }
 
   /// Сессии закрытого профиля и давно выполненные задачи убираем.
@@ -119,12 +176,18 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       },
       now: DateTime.now(),
     );
-    if (changed) notifyListeners();
+    if (changed) _notify();
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
   }
 
   @override
   void dispose() {
-    launcher.removeListener(_prune);
+    _disposed = true;
+    launcher.removeListener(_onLauncherChanged);
+    windowVisible.removeListener(_updateWatching);
     _ticker?.cancel();
     _server?.stop();
     super.dispose();

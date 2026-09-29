@@ -1,4 +1,4 @@
-﻿; Установщик Claude Launcher для Windows (Inno Setup 6).
+﻿; Установщик ClaudeLauncher для Windows (Inno Setup 6).
 ;
 ; Сборка (после `flutter build windows --release`), из корня репозитория:
 ;   iscc /DAppVersion=1.0.0 windows\installer\claude_launcher.iss
@@ -11,7 +11,7 @@
   #define AppVersion "1.0.0"
 #endif
 
-#define AppName "Claude Launcher"
+#define AppName "ClaudeLauncher"
 #define AppExe "claude_launcher.exe"
 #define ReleaseDir "..\..\build\windows\x64\runner\Release"
 
@@ -52,6 +52,13 @@ Name: "startup"; Description: "Запускать {#AppName} при входе �
 
 [Files]
 Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; Ярлыки версий до переименования в ClaudeLauncher. Папку установки обновление
+; сохраняет прежнюю — по AppId.
+Type: files; Name: "{userprograms}\Claude Launcher.lnk"
+Type: files; Name: "{userdesktop}\Claude Launcher.lnk"
+Type: files; Name: "{userstartup}\Claude Launcher.lnk"
 
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"

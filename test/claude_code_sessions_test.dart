@@ -162,6 +162,62 @@ void main() {
       },
     );
 
+    test(
+      'знакомство посреди задачи: начало — последнее сообщение пользователя',
+      () async {
+        Map<String, Object?> user(Object content, {String? at}) => {
+          'type': 'user',
+          'uuid': 'u${nextUuid++}',
+          'timestamp': ?at,
+          'message': {'role': 'user', 'content': content},
+        };
+        write([
+          user('прошлая задача', at: '2026-09-29T10:00:00.000Z'),
+          answer(text(4000)),
+          user([
+            {'type': 'image'},
+            {'type': 'text', 'text': 'текущая задача'},
+          ], at: '2026-09-29T11:58:30.000Z'),
+          answer(text(40)),
+          // Не начало задачи: ответ инструмента и сообщение во время работы.
+          user([
+            {'type': 'tool_result', 'content': 'вывод'},
+          ], at: '2026-09-29T11:59:00.000Z'),
+          {'type': 'queue-operation', 'operation': 'enqueue', 'content': 'ещё'},
+          {
+            'type': 'attachment',
+            'attachment': {'type': 'queued_command'},
+          },
+          answer(text(20)),
+        ]);
+        // Лаунчер перезапустили: первое событие — посреди работы.
+        event(ClaudeCodeEventKind.toolUsed, minute: 5);
+        await sessions.readTranscripts();
+        expect(only().startedAt.toUtc(), DateTime.utc(2026, 9, 29, 11, 58, 30));
+        expect(only().tokens, 15);
+
+        // Дальше — как обычно.
+        write([answer(text(40))]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 25);
+      },
+    );
+
+    test('новая задача не ищет начало в прошлом', () async {
+      write([
+        {
+          'type': 'user',
+          'timestamp': '2026-09-29T10:00:00.000Z',
+          'message': {'content': 'прошлая задача'},
+        },
+        answer(text(400)),
+      ]);
+      event(ClaudeCodeEventKind.promptSubmitted);
+      await sessions.readTranscripts();
+      expect(only().startedAt, start);
+      expect(only().tokens, 0);
+    });
+
     test('название: своё, иначе от Claude, иначе папка проекта', () async {
       event(ClaudeCodeEventKind.promptSubmitted);
       expect(only().name, 'parking-server');
@@ -250,7 +306,11 @@ void main() {
   group('подписи', () {
     test('время работы', () {
       expect(formatElapsed(const Duration(seconds: 12)), '12 с');
-      expect(formatElapsed(const Duration(minutes: 2, seconds: 59)), '2 мин');
+      expect(
+        formatElapsed(const Duration(minutes: 2, seconds: 59)),
+        '2 мин 59 с',
+      );
+      expect(formatElapsed(const Duration(minutes: 3)), '3 мин 0 с');
       expect(formatElapsed(const Duration(hours: 1, minutes: 5)), '1 ч 5 мин');
       expect(formatElapsed(const Duration(hours: 2)), '2 ч');
       expect(formatElapsed(const Duration(seconds: -1)), '0 с');

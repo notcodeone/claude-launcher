@@ -23,6 +23,7 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   final supportDir = await getApplicationSupportDirectory();
+  await _moveRenamedSupportDir(supportDir);
 
   // Запускает деинсталлятор Windows: убираем за собой и выходим, окно не показываем.
   if (args.contains('--cleanup')) {
@@ -37,17 +38,18 @@ Future<void> main(List<String> args) async {
   );
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  final window = AppWindow();
   final claudeCode = ClaudeCodeIntegration(
     settings: settings,
     launcher: launcher,
+    windowVisible: window.visible,
   );
-  final window = AppWindow();
   launcher.onNeedsAttention = window.show;
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
     WindowOptions(
-      title: 'Claude Launcher',
+      title: 'ClaudeLauncher',
       size: const Size(580, 700),
       minimumSize: const Size(480, 480),
       center: true,
@@ -63,7 +65,7 @@ Future<void> main(List<String> args) async {
   late final TrayController tray;
   tray = TrayController(
     launcher: launcher,
-    onOpenSettings: window.show,
+    onShowWindow: window.show,
     onQuit: () async {
       await tray.dispose();
       exit(0);
@@ -111,6 +113,25 @@ Future<void> main(List<String> args) async {
   await launcher.openOnStartup(settings.startupProfileId);
 }
 
+/// До переименования в ClaudeLauncher папка данных на Windows называлась
+/// «Claude Launcher»: её имя берётся из названия продукта в exe. Переносим
+/// оттуда профили и настройки, если на новом месте их ещё нет.
+Future<void> _moveRenamedSupportDir(Directory supportDir) async {
+  if (!Platform.isWindows) return;
+  final old = Directory(p.join(p.dirname(supportDir.path), 'Claude Launcher'));
+  if (!await old.exists()) return;
+  try {
+    await for (final entity in old.list()) {
+      if (entity is! File) continue;
+      final target = File(p.join(supportDir.path, p.basename(entity.path)));
+      if (!await target.exists()) await entity.copy(target.path);
+    }
+    await old.delete(recursive: true);
+  } catch (error) {
+    debugPrint('Не удалось перенести данные из ${old.path}: $error');
+  }
+}
+
 /// Удаление лаунчера: убирает его хуки из `~/.claude/settings.json` и
 /// возвращает значок Claude. Профили Claude и их данные не трогает.
 Future<void> _cleanup(Directory supportDir) async {
@@ -148,7 +169,7 @@ class ClaudeLauncherApp extends StatelessWidget {
       listenable: settings,
       builder: (context, _) => MaterialApp(
         navigatorKey: _navigatorKey,
-        title: 'Claude Launcher',
+        title: 'ClaudeLauncher',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),

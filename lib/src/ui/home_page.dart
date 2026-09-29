@@ -194,9 +194,9 @@ class HomePage extends StatelessWidget {
         InfoBanner(
           icon: AppIcons.info,
           text: Platform.isMacOS
-              ? 'Claude Launcher живёт в строке меню — ищите иконку с двумя кружками '
+              ? 'ClaudeLauncher живёт в строке меню — ищите иконку с двумя кружками '
                     'вверху экрана. Это окно можно закрыть.'
-              : 'Claude Launcher живёт в трее у часов (возможно, под стрелкой ▲). '
+              : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой ▲). '
                     'Это окно можно закрыть.',
         ),
       if (status != null) _SwitchBanner(launcher: launcher, status: status),

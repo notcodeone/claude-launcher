@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "notcodeone" "\0"
-            VALUE "FileDescription", "Claude Launcher" "\0"
+            VALUE "FileDescription", "ClaudeLauncher" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "claude_launcher" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 notcodeone. All rights reserved." "\0"
             VALUE "OriginalFilename", "claude_launcher.exe" "\0"
-            VALUE "ProductName", "Claude Launcher" "\0"
+            VALUE "ProductName", "ClaudeLauncher" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
