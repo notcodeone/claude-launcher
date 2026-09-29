@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 SS = 8  # суперсэмплинг для сглаживания
-INDIGO = (79, 70, 229, 255)
+BLACK = (10, 10, 10, 255)
 WHITE = (255, 255, 255, 255)
 
 
@@ -40,7 +40,7 @@ def app_icon(size):
     s = size * SS
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ImageDraw.Draw(img).rounded_rectangle(
-        (0.1 * s, 0.1 * s, 0.9 * s, 0.9 * s), radius=0.18 * s, fill=INDIGO
+        (0.1 * s, 0.1 * s, 0.9 * s, 0.9 * s), radius=0.18 * s, fill=BLACK
     )
     img = img.resize((size, size), Image.LANCZOS)
     img.alpha_composite(glyph(size, WHITE, scale=0.78))
@@ -51,9 +51,9 @@ def main():
     tray = ROOT / "assets" / "tray"
     tray.mkdir(parents=True, exist_ok=True)
     glyph(36, (0, 0, 0, 255)).save(tray / "tray_icon_template.png")
+    # В трее Windows фон бывает и светлым, и тёмным — берём чёрный квадрат с белым знаком.
     ico_sizes = [16, 20, 24, 32, 40, 48, 64]
-    base = glyph(256, INDIGO)
-    base.save(tray / "tray_icon.ico", sizes=[(n, n) for n in ico_sizes])
+    app_icon(256).save(tray / "tray_icon.ico", sizes=[(n, n) for n in ico_sizes])
 
     appiconset = ROOT / "macos" / "Runner" / "Assets.xcassets" / "AppIcon.appiconset"
     for n in [16, 32, 64, 128, 256, 512, 1024]:

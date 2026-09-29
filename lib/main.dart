@@ -11,6 +11,7 @@ import 'src/launcher_controller.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
 import 'src/ui/home_page.dart';
+import 'src/ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,12 +27,16 @@ Future<void> main() async {
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
+    WindowOptions(
       title: 'Claude Launcher',
-      size: Size(560, 640),
-      minimumSize: Size(460, 420),
+      size: const Size(560, 660),
+      minimumSize: const Size(460, 420),
       center: true,
       skipTaskbar: true,
+      // На macOS контент заходит под заголовок, как в веб-проектах: белое окно без полосы.
+      titleBarStyle: Platform.isMacOS
+          ? TitleBarStyle.hidden
+          : TitleBarStyle.normal,
     ),
     () => windowManager.setPreventClose(true),
   );
@@ -65,17 +70,11 @@ class ClaudeLauncherApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    ThemeData theme(Brightness brightness) => ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF4F46E5),
-            brightness: brightness,
-          ),
-        );
     return MaterialApp(
       title: 'Claude Launcher',
       debugShowCheckedModeBanner: false,
-      theme: theme(Brightness.light),
-      darkTheme: theme(Brightness.dark),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
       home: HomePage(launcher: launcher),
     );
   }

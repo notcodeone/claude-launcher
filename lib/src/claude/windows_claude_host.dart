@@ -26,10 +26,16 @@ class WindowsClaudeHost extends ClaudeHost {
 
   @override
   String get defaultDataDir => switch (_installation?.familyName) {
-        final family? =>
-          p.join(_localAppData, 'Packages', family, 'LocalCache', 'Roaming', 'Claude'),
-        null => p.join(_appData, 'Claude'),
-      };
+    final family? => p.join(
+      _localAppData,
+      'Packages',
+      family,
+      'LocalCache',
+      'Roaming',
+      'Claude',
+    ),
+    null => p.join(_appData, 'Claude'),
+  };
 
   @override
   Duration get pollInterval => const Duration(seconds: 5);
@@ -116,7 +122,9 @@ $result
         if (_isClaudeDesktopMain(process))
           ClaudeInstance(
             pid: process['ProcessId'] as int,
-            dataDir: windowsUserDataDir(process['CommandLine'] as String? ?? ''),
+            dataDir: windowsUserDataDir(
+              process['CommandLine'] as String? ?? '',
+            ),
           ),
     ];
   }
@@ -126,7 +134,8 @@ $result
     final exe = (process['ExecutablePath'] as String? ?? '').toLowerCase();
     final commandLine = process['CommandLine'] as String? ?? '';
     final isDesktop =
-        exe.contains(r'\windowsapps\claude_') || exe.contains(r'\anthropicclaude\');
+        exe.contains(r'\windowsapps\claude_') ||
+        exe.contains(r'\anthropicclaude\');
     return isDesktop && !isWindowsChildProcess(commandLine);
   }
 
@@ -137,15 +146,14 @@ $result
 
     final aumid = installation.aumid;
     if (dataDir == null && aumid != null) {
-      await Process.start('explorer.exe', ['shell:AppsFolder\\$aumid'],
-          mode: ProcessStartMode.detached);
+      await Process.start('explorer.exe', [
+        'shell:AppsFolder\\$aumid',
+      ], mode: ProcessStartMode.detached);
       return;
     }
-    await Process.start(
-      installation.exe,
-      [if (dataDir != null) '--user-data-dir=$dataDir'],
-      mode: ProcessStartMode.detached,
-    );
+    await Process.start(installation.exe, [
+      if (dataDir != null) '--user-data-dir=$dataDir',
+    ], mode: ProcessStartMode.detached);
   }
 
   /// Повторный запуск с той же папкой: Claude держит блокировку «один экземпляр
@@ -169,15 +177,15 @@ $result
   List<HWND> _visibleWindowsOf(int pid) {
     final windows = <HWND>[];
     final ownerPid = calloc<Uint32>();
-    final callback = NativeCallable<WNDENUMPROC>.isolateLocal(
-      (Pointer handle, int _) {
-        final window = HWND(handle);
-        GetWindowThreadProcessId(window, ownerPid);
-        if (ownerPid.value == pid && IsWindowVisible(window)) windows.add(window);
-        return TRUE;
-      },
-      exceptionalReturn: FALSE,
-    );
+    final callback = NativeCallable<WNDENUMPROC>.isolateLocal((
+      Pointer handle,
+      int _,
+    ) {
+      final window = HWND(handle);
+      GetWindowThreadProcessId(window, ownerPid);
+      if (ownerPid.value == pid && IsWindowVisible(window)) windows.add(window);
+      return TRUE;
+    }, exceptionalReturn: FALSE);
     try {
       EnumWindows(callback.nativeFunction, const LPARAM(0));
     } finally {
@@ -190,7 +198,8 @@ $result
   /// Запускает PowerShell без окна консоли. Скрипт передаётся через
   /// -EncodedCommand, результат — JSON в Base64, чтобы не зависеть от кодировок.
   Future<Object?> _powershell(String script) async {
-    final wrapped = '\$ErrorActionPreference = "Stop"\n'
+    final wrapped =
+        '\$ErrorActionPreference = "Stop"\n'
         '\$value = & {\n$script\n}\n'
         '\$json = ConvertTo-Json -Compress -Depth 4 -InputObject \$value\n'
         '[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]\$json))';
@@ -198,11 +207,14 @@ $result
       for (final unit in wrapped.codeUnits) ...[unit & 0xFF, unit >> 8],
     ]);
     // detachedWithStdio: консольный процесс без собственного окна, но с доступом к выводу.
-    final process = await Process.start(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-      mode: ProcessStartMode.detachedWithStdio,
-    );
+    final process = await Process.start('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-EncodedCommand',
+      encoded,
+    ], mode: ProcessStartMode.detachedWithStdio);
     final errors = process.stderr.transform(utf8.decoder).join();
     final output = (await process.stdout.transform(utf8.decoder).join()).trim();
     if (output.isEmpty) {

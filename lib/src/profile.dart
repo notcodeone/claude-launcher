@@ -50,14 +50,14 @@ class Profile {
   }
 
   Map<String, Object?> toJson() => {
-        'id': id,
-        'name': name,
-        'email': email,
-        'note': note,
-        'marker': marker,
-        'folderName': folderName,
-        'lastLaunchedAt': lastLaunchedAt?.toIso8601String(),
-      };
+    'id': id,
+    'name': name,
+    'email': email,
+    'note': note,
+    'marker': marker,
+    'folderName': folderName,
+    'lastLaunchedAt': lastLaunchedAt?.toIso8601String(),
+  };
 
   factory Profile.fromJson(Map<String, Object?> json) {
     final lastLaunched = json['lastLaunchedAt'] as String?;
@@ -68,17 +68,47 @@ class Profile {
       note: json['note'] as String? ?? '',
       marker: json['marker'] as String? ?? defaultMarker,
       folderName: json['folderName'] as String?,
-      lastLaunchedAt: lastLaunched == null ? null : DateTime.parse(lastLaunched),
+      lastLaunchedAt: lastLaunched == null
+          ? null
+          : DateTime.parse(lastLaunched),
     );
   }
 }
 
 const _translit = {
-  'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
-  'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
-  'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-  'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '',
-  'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+  'а': 'a',
+  'б': 'b',
+  'в': 'v',
+  'г': 'g',
+  'д': 'd',
+  'е': 'e',
+  'ё': 'e',
+  'ж': 'zh',
+  'з': 'z',
+  'и': 'i',
+  'й': 'y',
+  'к': 'k',
+  'л': 'l',
+  'м': 'm',
+  'н': 'n',
+  'о': 'o',
+  'п': 'p',
+  'р': 'r',
+  'с': 's',
+  'т': 't',
+  'у': 'u',
+  'ф': 'f',
+  'х': 'h',
+  'ц': 'ts',
+  'ч': 'ch',
+  'ш': 'sh',
+  'щ': 'sch',
+  'ъ': '',
+  'ы': 'y',
+  'ь': '',
+  'э': 'e',
+  'ю': 'yu',
+  'я': 'ya',
 };
 
 /// Имя папки для нового профиля: `Claude-<латиница из имени>`, уникальное среди [taken].

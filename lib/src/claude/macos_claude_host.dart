@@ -55,7 +55,12 @@ class MacClaudeHost extends ClaudeHost {
   Future<List<ClaudeInstance>> running() async {
     final result = await Process.run('ps', ['-axww', '-o', 'pid=,command=']);
     if (result.exitCode != 0) {
-      throw ProcessException('ps', const [], '${result.stderr}', result.exitCode);
+      throw ProcessException(
+        'ps',
+        const [],
+        '${result.stderr}',
+        result.exitCode,
+      );
     }
     return [
       for (final line in (result.stdout as String).split('\n'))
@@ -79,7 +84,12 @@ class MacClaudeHost extends ClaudeHost {
       if (dataDir != null) ...['--args', '--user-data-dir=$dataDir'],
     ]);
     if (result.exitCode != 0) {
-      throw ProcessException('open', const [], '${result.stderr}', result.exitCode);
+      throw ProcessException(
+        'open',
+        const [],
+        '${result.stderr}',
+        result.exitCode,
+      );
     }
   }
 
@@ -90,7 +100,9 @@ class MacClaudeHost extends ClaudeHost {
 
   @override
   Future<void> requestQuit(ClaudeInstance instance) async {
-    final sent = await _channel.invokeMethod<bool>('terminate', {'pid': instance.pid});
+    final sent = await _channel.invokeMethod<bool>('terminate', {
+      'pid': instance.pid,
+    });
     // Если Apple Event не ушёл, SIGTERM: Electron обрабатывает его как обычный выход.
     if (sent != true) Process.killPid(instance.pid, ProcessSignal.sigterm);
   }

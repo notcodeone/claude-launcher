@@ -83,9 +83,9 @@ class LauncherController extends ChangeNotifier {
   // ---------------------------------------------------------------- состояние
 
   String dataDirOf(Profile profile) => switch (profile.folderName) {
-        final folder? => p.join(host.profilesBaseDir, folder),
-        null => host.defaultDataDir,
-      };
+    final folder? => p.join(host.profilesBaseDir, folder),
+    null => host.defaultDataDir,
+  };
 
   Profile? profileOf(ClaudeInstance instance) {
     final dir = host.dataDirOf(instance);
@@ -99,11 +99,15 @@ class LauncherController extends ChangeNotifier {
       instances.any((instance) => profileOf(instance)?.id == profile.id);
 
   /// Запущенные экземпляры, которые не относятся ни к одному профилю.
-  List<ClaudeInstance> get unknownInstances =>
-      [for (final instance in instances) if (profileOf(instance) == null) instance];
+  List<ClaudeInstance> get unknownInstances => [
+    for (final instance in instances)
+      if (profileOf(instance) == null) instance,
+  ];
 
-  List<Profile> get runningProfiles =>
-      [for (final profile in profiles) if (isRunning(profile)) profile];
+  List<Profile> get runningProfiles => [
+    for (final profile in profiles)
+      if (isRunning(profile)) profile,
+  ];
 
   Future<void> refresh() async {
     try {
@@ -127,7 +131,9 @@ class LauncherController extends ChangeNotifier {
     try {
       claudePath ??= await host.locate();
       if (claudePath == null) {
-        throw StateError('Claude не найден. Установите приложение Claude и попробуйте снова.');
+        throw StateError(
+          'Claude не найден. Установите приложение Claude и попробуйте снова.',
+        );
       }
 
       await refresh();
@@ -172,7 +178,8 @@ class LauncherController extends ChangeNotifier {
 
   Future<bool> _closeAll(Profile target, List<ClaudeInstance> others) async {
     final names = [
-      for (final instance in others) profileOf(instance)?.title ?? 'неизвестный профиль',
+      for (final instance in others)
+        profileOf(instance)?.name ?? 'неизвестный профиль',
     ];
     _setStatus(SwitchStatus(target, SwitchPhase.closing, closing: names));
     for (final instance in others) {
@@ -185,11 +192,16 @@ class LauncherController extends ChangeNotifier {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (_cancelRequested || _disposed) return false;
       await refresh();
-      if (!instances.any((instance) => pids.contains(instance.pid))) return true;
+      if (!instances.any((instance) => pids.contains(instance.pid))) {
+        return true;
+      }
 
-      final waitingLong = DateTime.now().difference(started) > host.manualQuitHintAfter;
+      final waitingLong =
+          DateTime.now().difference(started) > host.manualQuitHintAfter;
       if (waitingLong && switchStatus?.phase == SwitchPhase.closing) {
-        _setStatus(SwitchStatus(target, SwitchPhase.waitingForUser, closing: names));
+        _setStatus(
+          SwitchStatus(target, SwitchPhase.waitingForUser, closing: names),
+        );
         onNeedsAttention?.call();
       }
     }
@@ -199,7 +211,9 @@ class LauncherController extends ChangeNotifier {
     for (var i = 0; i < 40 && !_disposed; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       await refresh();
-      if (instances.any((instance) => host.samePath(host.dataDirOf(instance), targetDir))) {
+      if (instances.any(
+        (instance) => host.samePath(host.dataDirOf(instance), targetDir),
+      )) {
         return;
       }
     }
@@ -238,14 +252,18 @@ class LauncherController extends ChangeNotifier {
 
   /// Убирает профиль из списка. Папку данных не трогает: её можно удалить вручную.
   Future<void> removeProfile(Profile profile) async {
-    profiles = [for (final existing in profiles) if (existing.id != profile.id) existing];
+    profiles = [
+      for (final existing in profiles)
+        if (existing.id != profile.id) existing,
+    ];
     await store.save(profiles);
     _notify();
   }
 
   Future<void> _replace(Profile profile) async {
     profiles = [
-      for (final existing in profiles) existing.id == profile.id ? profile : existing,
+      for (final existing in profiles)
+        existing.id == profile.id ? profile : existing,
     ];
     await store.save(profiles);
     _notify();
@@ -253,6 +271,9 @@ class LauncherController extends ChangeNotifier {
 
   static String _newId() {
     final random = Random.secure();
-    return List.generate(12, (_) => random.nextInt(16).toRadixString(16)).join();
+    return List.generate(
+      12,
+      (_) => random.nextInt(16).toRadixString(16),
+    ).join();
   }
 }

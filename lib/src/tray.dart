@@ -21,7 +21,9 @@ class TrayController with TrayListener {
 
   Future<void> init() async {
     await trayManager.setIcon(
-      Platform.isWindows ? 'assets/tray/tray_icon.ico' : 'assets/tray/tray_icon_template.png',
+      Platform.isWindows
+          ? 'assets/tray/tray_icon.ico'
+          : 'assets/tray/tray_icon_template.png',
       isTemplate: true,
     );
     trayManager.addListener(this);
@@ -60,12 +62,16 @@ class TrayController with TrayListener {
   String _statusText() {
     final status = launcher.switchStatus;
     if (status != null) return 'переключаюсь на ${status.target.title}…';
-    if (launcher.located && launcher.claudePath == null) return 'Claude не найден';
+    if (launcher.located && launcher.claudePath == null) {
+      return 'Claude не найден';
+    }
     final running = [
       for (final profile in launcher.runningProfiles) profile.title,
       if (launcher.unknownInstances.isNotEmpty) '❔ профиль не из списка',
     ];
-    return running.isEmpty ? 'Claude не запущен' : 'открыт ${running.join(', ')}';
+    return running.isEmpty
+        ? 'Claude не запущен'
+        : 'открыт ${running.join(', ')}';
   }
 
   /// Текст рядом с иконкой в строке меню macOS: метка и имя открытого профиля.
@@ -85,20 +91,27 @@ class TrayController with TrayListener {
   Menu _buildMenu() {
     final switching = launcher.switchStatus != null;
     final status = _statusText();
-    return Menu(items: [
-      MenuItem(label: '${status[0].toUpperCase()}${status.substring(1)}', disabled: true),
-      MenuItem.separator(),
-      for (final profile in launcher.profiles)
-        MenuItem.checkbox(
-          key: 'profile:${profile.id}',
-          label: profile.email.isEmpty ? profile.title : '${profile.title} — ${profile.email}',
-          checked: launcher.isRunning(profile),
-          disabled: switching,
+    return Menu(
+      items: [
+        MenuItem(
+          label: '${status[0].toUpperCase()}${status.substring(1)}',
+          disabled: true,
         ),
-      MenuItem.separator(),
-      MenuItem(key: 'settings', label: 'Профили и настройки…'),
-      MenuItem(key: 'quit', label: 'Выйти из Claude Launcher'),
-    ]);
+        MenuItem.separator(),
+        for (final profile in launcher.profiles)
+          MenuItem.checkbox(
+            key: 'profile:${profile.id}',
+            label: profile.email.isEmpty
+                ? profile.title
+                : '${profile.title} — ${profile.email}',
+            checked: launcher.isRunning(profile),
+            disabled: switching,
+          ),
+        MenuItem.separator(),
+        MenuItem(key: 'settings', label: 'Профили и настройки…'),
+        MenuItem(key: 'quit', label: 'Выйти из Claude Launcher'),
+      ],
+    );
   }
 
   @override

@@ -26,7 +26,8 @@ String? macUserDataDir(String command) {
 }
 
 /// Вспомогательные процессы Electron (renderer, gpu и т.п.) запускаются с `--type=`.
-bool isWindowsChildProcess(String commandLine) => commandLine.contains('--type=');
+bool isWindowsChildProcess(String commandLine) =>
+    commandLine.contains('--type=');
 
 /// Папка данных из командной строки Windows. Встречаются три формы:
 /// `"--user-data-dir=C:\a b"`, `--user-data-dir="C:\a b"` и `--user-data-dir=C:\ab`.

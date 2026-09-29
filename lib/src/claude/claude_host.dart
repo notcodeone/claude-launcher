@@ -62,14 +62,17 @@ abstract class ClaudeHost {
       dir = dir.parent;
     }
     if (Platform.isWindows) {
-      await Process.start('explorer.exe', [dir.path], mode: ProcessStartMode.detached);
+      await Process.start('explorer.exe', [
+        dir.path,
+      ], mode: ProcessStartMode.detached);
     } else {
       await Process.run('open', [dir.path]);
     }
   }
 
   /// Папка данных экземпляра с учётом стандартной.
-  String dataDirOf(ClaudeInstance instance) => instance.dataDir ?? defaultDataDir;
+  String dataDirOf(ClaudeInstance instance) =>
+      instance.dataDir ?? defaultDataDir;
 
   /// Сравнение путей без учёта регистра: и APFS, и NTFS по умолчанию к нему нечувствительны.
   bool samePath(String a, String b) => _normalize(a) == _normalize(b);
