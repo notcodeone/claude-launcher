@@ -71,6 +71,12 @@ class CountryLookupException implements Exception {
 
 typedef CountryLookup = Future<({String country, String source})> Function();
 
+/// Флаг страны эмодзи: буквы кода ISO 3166-1 — региональные символы Юникода
+/// (FI → 🇫🇮). Нарисует его шрифт эмодзи системы.
+String countryFlag(String code) => String.fromCharCodes([
+  for (final letter in code.toUpperCase().codeUnits) 0x1F1E6 + letter - 0x41,
+]);
+
 /// Страна по IP-адресу: код ISO 3166-1 и какой сервис ответил.
 ///
 /// Сервисы спрашиваем с подстраховкой: следующий — если прежние не ответили

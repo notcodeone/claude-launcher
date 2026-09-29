@@ -523,6 +523,47 @@ class _LocationCaption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final p = context.palette;
+    final checkedAt = location.checkedAt;
+    final checked = [
+      if (checkedAt != null) 'Проверено в ${_clock(checkedAt)}',
+      ?location.source,
+    ].join(' / ');
+
+    // Страна известна: флаг и название крупно, под ними — доступен ли Claude.
+    if (location case LocationGuard(
+      enabled: true,
+      checking: false,
+      :final country?,
+      :final countryName?,
+      state: LocationState.supported || LocationState.unsupported,
+    )) {
+      final supported = location.state == LocationState.supported;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            // Флаги в эмодзи Windows нет — там вместо него были бы две буквы.
+            Platform.isMacOS
+                ? '${countryFlag(country)} $countryName'
+                : countryName,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 8),
+          StatusDot(
+            label: supported ? 'Claude доступен' : 'Claude недоступен',
+            color: supported ? p.success : p.danger,
+          ),
+          const SizedBox(height: 8),
+          Text(checked, style: theme.textTheme.bodySmall),
+        ],
+      );
+    }
+
     final (title, text) = switch (location) {
       LocationGuard(enabled: false) => (
         'Проверка страны выключена',
@@ -531,14 +572,6 @@ class _LocationCaption extends StatelessWidget {
       LocationGuard(checking: true) => (
         'Проверяю страну…',
         'По IP-адресу, у публичных сервисов.',
-      ),
-      LocationGuard(state: LocationState.supported, :final countryName?) => (
-        countryName,
-        'Claude здесь доступен.',
-      ),
-      LocationGuard(state: LocationState.unsupported, :final countryName?) => (
-        countryName,
-        'Claude здесь недоступен — профили не запускаются.',
       ),
       LocationGuard(checkedAt: null) => (
         'Страна ещё не проверена',
@@ -550,8 +583,6 @@ class _LocationCaption extends StatelessWidget {
             'не запрещён.',
       ),
     };
-    final checkedAt = location.checkedAt;
-    final source = location.source;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -560,13 +591,7 @@ class _LocationCaption extends StatelessWidget {
         Text(text, style: theme.textTheme.bodySmall),
         if (location.enabled && !location.checking && checkedAt != null) ...[
           const SizedBox(height: 4),
-          Text(
-            [
-              'Проверено в ${_clock(checkedAt)}',
-              if (source != null) 'по IP через $source',
-            ].join(' '),
-            style: theme.textTheme.bodySmall,
-          ),
+          Text(checked, style: theme.textTheme.bodySmall),
         ],
       ],
     );

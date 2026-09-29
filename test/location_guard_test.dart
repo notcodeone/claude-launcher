@@ -21,6 +21,11 @@ void main() {
     expect(countryNames['RU'], 'Россия');
   });
 
+  test('флаг страны — эмодзи из региональных символов', () {
+    expect(countryFlag('FI'), '🇫🇮');
+    expect(countryFlag('ru'), '🇷🇺');
+  });
+
   group('сервисы', () {
     late HttpServer server;
     final responses = <String, (int, String)>{};

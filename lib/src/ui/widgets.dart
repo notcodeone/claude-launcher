@@ -552,26 +552,29 @@ class Tag extends StatelessWidget {
 
 /// «● Открыт» — как «● В наличии».
 class StatusDot extends StatelessWidget {
-  const StatusDot({super.key, required this.label});
+  const StatusDot({super.key, required this.label, this.color});
 
   final String label;
 
+  /// Цвет точки и подписи; по умолчанию — зелёный «всё хорошо».
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
+    final color = this.color ?? context.palette.success;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 7,
           height: 7,
-          decoration: BoxDecoration(color: p.success, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
         Text(
           label,
           style: TextStyle(
-            color: p.success,
+            color: color,
             fontSize: 12.5,
             fontWeight: FontWeight.w500,
           ),
