@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'src/app_settings.dart';
 import 'src/app_window.dart';
 import 'src/claude/claude_host.dart';
+import 'src/integrations/claude_code_integration.dart';
 import 'src/launcher_controller.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
@@ -29,6 +30,10 @@ Future<void> main() async {
   );
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  final claudeCode = ClaudeCodeIntegration(
+    settings: settings,
+    launcher: launcher,
+  );
   final window = AppWindow();
   launcher.onNeedsAttention = window.show;
 
@@ -58,7 +63,13 @@ Future<void> main() async {
     },
   );
 
-  runApp(ClaudeLauncherApp(launcher: launcher, settings: settings));
+  runApp(
+    ClaudeLauncherApp(
+      launcher: launcher,
+      settings: settings,
+      claudeCode: claudeCode,
+    ),
+  );
   await tray.init();
   try {
     await launcher.init();
@@ -72,13 +83,21 @@ Future<void> main() async {
   // значка появляется новая запись, которую тоже нужно спрятать.
   if (settings.hideClaudeIcon) await launcher.setClaudeIconHidden(true);
 
+  // Приём событий Claude Code, если пользователь его включил.
+  await claudeCode.start();
+
   // Первый запуск: окно приветствия с настройками. Заодно видно, что
   // приложение запустилось, хотя живёт в трее.
   if (!settings.onboardingDone) {
     await window.show();
     final context = _navigatorKey.currentContext;
     if (context != null && context.mounted) {
-      await showWelcomeDialog(context, launcher: launcher, settings: settings);
+      await showWelcomeDialog(
+        context,
+        launcher: launcher,
+        settings: settings,
+        claudeCode: claudeCode,
+      );
     }
   }
 
@@ -90,10 +109,12 @@ class ClaudeLauncherApp extends StatelessWidget {
     super.key,
     required this.launcher,
     required this.settings,
+    required this.claudeCode,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
+  final ClaudeCodeIntegration claudeCode;
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +127,11 @@ class ClaudeLauncherApp extends StatelessWidget {
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
         themeMode: settings.themeMode,
-        home: HomePage(launcher: launcher, settings: settings),
+        home: HomePage(
+          launcher: launcher,
+          settings: settings,
+          claudeCode: claudeCode,
+        ),
       ),
     );
   }

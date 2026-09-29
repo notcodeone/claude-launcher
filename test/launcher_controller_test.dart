@@ -207,6 +207,12 @@ void main() {
     });
   });
 
+  test('профиль со стандартной папкой Claude убрать нельзя', () async {
+    await launcher.removeProfile(work);
+    await launcher.removeProfile(personal);
+    expect(launcher.profiles.map((profile) => profile.id), [work.id]);
+  });
+
   test('значок Claude прячется через host', () async {
     await launcher.setClaudeIconHidden(true);
     await launcher.setClaudeIconHidden(false);

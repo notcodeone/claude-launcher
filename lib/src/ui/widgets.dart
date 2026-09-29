@@ -457,6 +457,43 @@ class ProfileAvatar extends StatelessWidget {
 bool _blendsIn(Color color, Color background) =>
     (color.computeLuminance() - background.computeLuminance()).abs() < 0.2;
 
+/// Маленькая серая метка рядом с названием, например «По умолчанию».
+class Tag extends StatelessWidget {
+  const Tag({super.key, required this.label, this.icon});
+
+  final String label;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: p.field,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: p.muted),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: p.muted,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// «● Открыт» — как «● В наличии».
 class StatusDot extends StatelessWidget {
   const StatusDot({super.key, required this.label});

@@ -3,19 +3,23 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../app_settings.dart';
+import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
+import 'theme.dart';
 import 'widgets.dart';
 
-/// Настройки лаунчера: профиль при запуске и значок Claude. Меняются сразу.
+/// Настройки лаунчера: профиль при запуске, значок Claude, события Claude Code.
+/// Меняются сразу.
 Future<void> showSettingsDialog(
   BuildContext context, {
   required LauncherController launcher,
   required AppSettings settings,
+  required ClaudeCodeIntegration claudeCode,
 }) {
   return showDialog<void>(
     context: context,
     builder: (context) => ListenableBuilder(
-      listenable: settings,
+      listenable: Listenable.merge([settings, claudeCode]),
       builder: (context, _) {
         final theme = Theme.of(context);
         return AppDialogFrame(
@@ -42,6 +46,12 @@ Future<void> showSettingsDialog(
               },
             ),
             const SizedBox(height: 24),
+            _ClaudeCodeEventsSwitch(
+              value: settings.claudeCodeEvents,
+              claudeCode: claudeCode,
+              onChanged: claudeCode.setEnabled,
+            ),
+            const SizedBox(height: 24),
             AppButton(
               label: 'Готово',
               expand: true,
@@ -60,19 +70,29 @@ Future<void> showWelcomeDialog(
   BuildContext context, {
   required LauncherController launcher,
   required AppSettings settings,
+  required ClaudeCodeIntegration claudeCode,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _WelcomeDialog(launcher: launcher, settings: settings),
+    builder: (_) => _WelcomeDialog(
+      launcher: launcher,
+      settings: settings,
+      claudeCode: claudeCode,
+    ),
   );
 }
 
 class _WelcomeDialog extends StatefulWidget {
-  const _WelcomeDialog({required this.launcher, required this.settings});
+  const _WelcomeDialog({
+    required this.launcher,
+    required this.settings,
+    required this.claudeCode,
+  });
 
   final LauncherController launcher;
   final AppSettings settings;
+  final ClaudeCodeIntegration claudeCode;
 
   @override
   State<_WelcomeDialog> createState() => _WelcomeDialogState();
@@ -80,6 +100,7 @@ class _WelcomeDialog extends StatefulWidget {
 
 class _WelcomeDialogState extends State<_WelcomeDialog> {
   bool _hideIcon = true;
+  bool _claudeCodeEvents = true;
 
   /// По умолчанию — профиль со стандартной папкой: это обычный запуск Claude.
   late String? _startupProfileId = widget.launcher.profiles
@@ -93,6 +114,9 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
     if (_hideIcon != settings.hideClaudeIcon) {
       await settings.setHideClaudeIcon(_hideIcon);
       await widget.launcher.setClaudeIconHidden(_hideIcon);
+    }
+    if (_claudeCodeEvents != settings.claudeCodeEvents) {
+      await widget.claudeCode.setEnabled(_claudeCodeEvents);
     }
     await settings.completeOnboarding();
     if (mounted) Navigator.of(context).pop();
@@ -124,6 +148,11 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
           launcher: widget.launcher,
           value: _hideIcon,
           onChanged: (hide) => setState(() => _hideIcon = hide),
+        ),
+        const SizedBox(height: 24),
+        _ClaudeCodeEventsSwitch(
+          value: _claudeCodeEvents,
+          onChanged: (enabled) => setState(() => _claudeCodeEvents = enabled),
         ),
         const SizedBox(height: 24),
         AppButton(
@@ -206,6 +235,44 @@ class _ClaudeIconSwitch extends StatelessWidget {
             : 'Открыть настройки панели задач',
         onTap: host.openIconSettings,
       ),
+    );
+  }
+}
+
+class _ClaudeCodeEventsSwitch extends StatelessWidget {
+  const _ClaudeCodeEventsSwitch({
+    required this.value,
+    required this.onChanged,
+    this.claudeCode,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  /// В настройках — чтобы показать состояние подключения; в приветствии не нужен.
+  final ClaudeCodeIntegration? claudeCode;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final error = claudeCode?.error;
+    return SettingSwitchRow(
+      title: 'События Claude Code',
+      description:
+          'Лаунчер узнаёт, когда Claude Code завершил задачу или ждёт вас, и '
+          'показывает это на карточке профиля. Для этого он добавит свои хуки в '
+          '~/.claude/settings.json и сохранит рядом резервную копию. Позже сюда '
+          'подключим уведомления в Telegram.',
+      value: value,
+      onChanged: onChanged,
+      link: switch ((error, value && (claudeCode?.connected ?? false))) {
+        (final String message, _) => Text(
+          message,
+          style: TextStyle(color: p.danger, fontSize: 12.5),
+        ),
+        (null, true) => const StatusDot(label: 'Подключено'),
+        _ => null,
+      },
     );
   }
 }

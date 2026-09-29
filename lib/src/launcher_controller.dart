@@ -273,7 +273,9 @@ class LauncherController extends ChangeNotifier {
   Future<void> updateProfile(Profile profile) => _replace(profile);
 
   /// Убирает профиль из списка. Папку данных не трогает: её можно удалить вручную.
+  /// Профиль со стандартной папкой Claude убрать нельзя.
   Future<void> removeProfile(Profile profile) async {
+    if (profile.usesDefaultFolder) return;
     profiles = [
       for (final existing in profiles)
         if (existing.id != profile.id) existing,

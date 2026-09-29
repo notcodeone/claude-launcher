@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -17,21 +18,42 @@ class AppSettings extends ChangeNotifier {
   /// Прятать значок самого Claude в строке меню / трее.
   bool hideClaudeIcon = false;
 
+  /// Получать события Claude Code через его хуки (задел для уведомлений в Telegram).
+  bool claudeCodeEvents = false;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
+  /// Локальный порт и ключ приёма событий Claude Code. Ключ не даёт чужим
+  /// процессам подсовывать лаунчеру события.
+  int eventsPort = 47813;
+  String eventsToken = '';
+
   Future<void> load() async {
-    if (!await file.exists()) return;
-    try {
-      final json =
-          jsonDecode(await file.readAsString()) as Map<String, Object?>;
-      themeMode =
-          ThemeMode.values.asNameMap()[json['themeMode']] ?? ThemeMode.system;
-      onboardingDone = json['onboardingDone'] as bool? ?? false;
-      hideClaudeIcon = json['hideClaudeIcon'] as bool? ?? false;
-      startupProfileId = json['startupProfileId'] as String?;
-    } on FormatException {
-      // Повреждённый файл — остаёмся на значениях по умолчанию.
+    if (await file.exists()) {
+      try {
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, Object?>;
+        themeMode =
+            ThemeMode.values.asNameMap()[json['themeMode']] ?? ThemeMode.system;
+        onboardingDone = json['onboardingDone'] as bool? ?? false;
+        hideClaudeIcon = json['hideClaudeIcon'] as bool? ?? false;
+        claudeCodeEvents = json['claudeCodeEvents'] as bool? ?? false;
+        startupProfileId = json['startupProfileId'] as String?;
+        eventsPort = json['eventsPort'] as int? ?? eventsPort;
+        eventsToken = json['eventsToken'] as String? ?? '';
+      } on FormatException {
+        // Повреждённый файл — остаёмся на значениях по умолчанию.
+      }
+    }
+    if (eventsToken.isEmpty) {
+      final random = Random.secure();
+      eventsToken = List.generate(
+        32,
+        (_) => random.nextInt(16).toRadixString(16),
+      ).join();
+      // Ключ попадает в хуки Claude Code — он должен пережить перезапуск.
+      await _save();
     }
     notifyListeners();
   }
@@ -43,6 +65,11 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setHideClaudeIcon(bool hide) =>
       _update(() => hideClaudeIcon = hide);
+
+  Future<void> setClaudeCodeEvents(bool enabled) =>
+      _update(() => claudeCodeEvents = enabled);
+
+  Future<void> setEventsPort(int port) => _update(() => eventsPort = port);
 
   Future<void> completeOnboarding() => _update(() => onboardingDone = true);
 
@@ -60,7 +87,10 @@ class AppSettings extends ChangeNotifier {
         'themeMode': themeMode.name,
         'onboardingDone': onboardingDone,
         'hideClaudeIcon': hideClaudeIcon,
+        'claudeCodeEvents': claudeCodeEvents,
         'startupProfileId': startupProfileId,
+        'eventsPort': eventsPort,
+        'eventsToken': eventsToken,
       }),
       flush: true,
     );

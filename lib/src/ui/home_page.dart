@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
+import '../integrations/claude_code_events.dart';
+import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
@@ -14,10 +16,16 @@ import 'theme.dart';
 import 'widgets.dart';
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.launcher, required this.settings});
+  const HomePage({
+    super.key,
+    required this.launcher,
+    required this.settings,
+    required this.claudeCode,
+  });
 
   final LauncherController launcher;
   final AppSettings settings;
+  final ClaudeCodeIntegration claudeCode;
 
   /// Поля окна: по ним выровнены шапка, заголовок, карточки, кнопка и подвал.
   static const gutter = 24.0;
@@ -58,7 +66,7 @@ class HomePage extends StatelessWidget {
       body: Stack(
         children: [
           ListenableBuilder(
-            listenable: launcher,
+            listenable: Listenable.merge([launcher, claudeCode]),
             builder: (context, _) => ListView(
               padding: EdgeInsets.fromLTRB(
                 gutter,
@@ -101,6 +109,7 @@ class HomePage extends StatelessWidget {
                   _ProfileCard(
                     launcher: launcher,
                     settings: settings,
+                    claudeCode: claudeCode,
                     profile: profile,
                   ),
                 ],
@@ -142,7 +151,11 @@ class HomePage extends StatelessWidget {
             top: headerTop,
             left: gutter,
             right: gutter,
-            child: _HeaderBar(launcher: launcher, settings: settings),
+            child: _HeaderBar(
+              launcher: launcher,
+              settings: settings,
+              claudeCode: claudeCode,
+            ),
           ),
           // Подвал в стиле sensomni.
           const Positioned(
@@ -310,11 +323,13 @@ class _HeaderBar extends StatelessWidget {
   const _HeaderBar({
     required this.launcher,
     required this.settings,
+    required this.claudeCode,
     this.interactive = true,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
+  final ClaudeCodeIntegration claudeCode;
 
   /// Копия шапки поверх затемнения под меню не реагирует на клики.
   final bool interactive;
@@ -362,6 +377,7 @@ class _HeaderBar extends StatelessWidget {
                     context,
                     launcher: launcher,
                     settings: settings,
+                    claudeCode: claudeCode,
                   );
                 }
               },
@@ -389,6 +405,7 @@ class _HeaderBar extends StatelessWidget {
       highlight: _HeaderBar(
         launcher: launcher,
         settings: settings,
+        claudeCode: claudeCode,
         interactive: false,
       ),
       entries: [
@@ -479,12 +496,14 @@ class _ProfileCard extends StatelessWidget {
   const _ProfileCard({
     required this.launcher,
     required this.settings,
+    required this.claudeCode,
     required this.profile,
     this.interactive = true,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
+  final ClaudeCodeIntegration claudeCode;
   final Profile profile;
 
   /// Копия карточки поверх затемнения под меню не реагирует на клики.
@@ -503,8 +522,7 @@ class _ProfileCard extends StatelessWidget {
       else
         'Папка ${profile.folderName}',
       if (profile.note.isNotEmpty) profile.note,
-      if (settings.startupProfileId == profile.id)
-        'Открывается при запуске лаунчера',
+      ?_eventLine(claudeCode.lastEvents[profile.id]),
     ];
 
     return Builder(
@@ -531,6 +549,14 @@ class _ProfileCard extends StatelessWidget {
                       if (running) ...[
                         const SizedBox(width: 8),
                         const StatusDot(label: 'Открыт'),
+                      ],
+                      // Профиль, который лаунчер открывает при своём запуске.
+                      if (settings.startupProfileId == profile.id) ...[
+                        const SizedBox(width: 8),
+                        const Tooltip(
+                          message: 'Открывается при запуске лаунчера',
+                          child: Tag(label: 'По умолчанию'),
+                        ),
                       ],
                     ],
                   ),
@@ -577,6 +603,19 @@ class _ProfileCard extends StatelessWidget {
     );
   }
 
+  /// «Claude Code завершил задачу · claude-launcher · 14:32».
+  static String? _eventLine(ClaudeCodeEvent? event) {
+    if (event == null) return null;
+    final what = switch (event.kind) {
+      ClaudeCodeEventKind.finished => 'Claude Code завершил задачу',
+      ClaudeCodeEventKind.needsPermission => 'Claude Code ждёт разрешения',
+      ClaudeCodeEventKind.waiting => 'Claude Code ждёт ответа',
+    };
+    final project = event.cwd.isEmpty ? '' : ' · ${p.basename(event.cwd)}';
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '$what$project · ${two(event.time.hour)}:${two(event.time.minute)}';
+  }
+
   Future<void> _openMenu(BuildContext cardContext) async {
     final running = launcher.isRunning(profile);
     final action = await showAnchoredMenu(
@@ -586,6 +625,7 @@ class _ProfileCard extends StatelessWidget {
         builder: (_, _) => _ProfileCard(
           launcher: launcher,
           settings: settings,
+          claudeCode: claudeCode,
           profile: profile,
           interactive: false,
         ),
@@ -602,7 +642,8 @@ class _ProfileCard extends StatelessWidget {
           icon: AppIcons.remove,
           label: 'Убрать из списка',
           destructive: true,
-          enabled: !running,
+          // Стандартную папку Claude из списка не убираем никогда.
+          enabled: !running && !profile.usesDefaultFolder,
         ),
       ],
     );
