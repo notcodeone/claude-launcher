@@ -52,8 +52,18 @@ abstract class ClaudeHost {
   Future<void> activate(ClaudeInstance instance);
 
   /// Просит экземпляр закрыться так же, как при обычном выходе из приложения.
-  /// Принудительно процесс не завершается никогда.
   Future<void> requestQuit(ClaudeInstance instance);
+
+  /// Завершает процесс принудительно — только по явной кнопке пользователя,
+  /// когда Claude не закрылся сам (на Windows при закрытии окна он уходит в трей).
+  /// Windows: TerminateProcess. macOS: SIGKILL — SIGTERM Electron принимает
+  /// за обычный выход, а тот уже не сработал.
+  Future<void> forceQuit(ClaudeInstance instance) async {
+    Process.killPid(
+      instance.pid,
+      Platform.isWindows ? ProcessSignal.sigterm : ProcessSignal.sigkill,
+    );
+  }
 
   /// Прячет (или возвращает) значок самого Claude в строке меню / трее.
   Future<void> setClaudeIconHidden(bool hidden);

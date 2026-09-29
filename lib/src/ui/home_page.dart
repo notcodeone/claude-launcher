@@ -435,19 +435,38 @@ class _SwitchBanner extends StatelessWidget {
       SwitchPhase.waitingForUser => launcher.host.manualQuitHint,
       SwitchPhase.launching => 'Открываю $target…',
     };
+    final cancel = AppButton(
+      label: 'Отмена',
+      kind: AppButtonKind.secondary,
+      onPressed: launcher.cancelSwitch,
+    );
+    if (status.phase == SwitchPhase.waitingForUser) {
+      // Claude не закрылся сам (на Windows ушёл в трей) — даём закрыть его
+      // принудительно одной кнопкой, но только по явному выбору.
+      return InfoBanner(
+        icon: AppIcons.hand,
+        text:
+            '$text При принудительном закрытии несохранённое в Claude может '
+            'потеряться.',
+        progress: true,
+        footer: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            cancel,
+            const SizedBox(width: 8),
+            AppButton(
+              label: 'Закрыть принудительно',
+              onPressed: launcher.forceClose,
+            ),
+          ],
+        ),
+      );
+    }
     return InfoBanner(
-      icon: status.phase == SwitchPhase.waitingForUser
-          ? AppIcons.hand
-          : AppIcons.sync,
+      icon: AppIcons.sync,
       text: text,
       progress: true,
-      action: status.phase == SwitchPhase.launching
-          ? null
-          : AppButton(
-              label: 'Отмена',
-              kind: AppButtonKind.secondary,
-              onPressed: launcher.cancelSwitch,
-            ),
+      action: status.phase == SwitchPhase.launching ? null : cancel,
     );
   }
 }

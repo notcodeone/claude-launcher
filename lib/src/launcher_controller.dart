@@ -55,6 +55,9 @@ class LauncherController extends ChangeNotifier {
 
   Timer? _pollTimer;
   bool _cancelRequested = false;
+
+  /// Экземпляры, которые сейчас закрываются (см. [forceClose]).
+  Set<int> _closingPids = {};
   bool _disposed = false;
 
   Future<void> init() async {
@@ -219,6 +222,16 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// Когда Claude не закрылся сам: завершает оставшиеся экземпляры принудительно.
+  /// Ожидание закрытия увидит, что их нет, и продолжит (переключение — запуском
+  /// нужного профиля).
+  Future<void> forceClose() async {
+    if (switchStatus?.phase != SwitchPhase.waitingForUser) return;
+    for (final instance in instances) {
+      if (_closingPids.contains(instance.pid)) await host.forceQuit(instance);
+    }
+  }
+
   /// Отменяет ожидание закрытия. Уже отправленные просьбы закрыться не отзываются.
   void cancelSwitch() {
     _cancelRequested = true;
@@ -235,7 +248,7 @@ class LauncherController extends ChangeNotifier {
     }
 
     final started = DateTime.now();
-    final pids = {for (final instance in others) instance.pid};
+    final pids = _closingPids = {for (final instance in others) instance.pid};
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (_cancelRequested || _disposed) return false;

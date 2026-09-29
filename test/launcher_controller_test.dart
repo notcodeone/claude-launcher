@@ -65,6 +65,12 @@ class FakeHost extends ClaudeHost {
   Future<void> openIconSettings() async {}
 
   @override
+  Future<void> forceQuit(ClaudeInstance instance) async {
+    calls.add('force ${instance.pid}');
+    instances.remove(instance);
+  }
+
+  @override
   Future<void> requestQuit(ClaudeInstance instance) async {
     calls.add('quit ${instance.pid}');
     if (quitsOnRequest) instances.remove(instance);
@@ -239,6 +245,28 @@ void main() {
         expect(host.calls.where((call) => call.startsWith('launch')), isEmpty);
       },
     );
+  });
+
+  test('принудительное закрытие продолжает переключение', () async {
+    host.quitsOnRequest = false;
+    final stuck = host.start(null);
+    final switching = launcher.switchTo(personal);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(launcher.switchStatus?.phase, SwitchPhase.waitingForUser);
+
+    await launcher.forceClose();
+    await switching;
+    expect(host.calls, [
+      'quit ${stuck.pid}',
+      'force ${stuck.pid}',
+      'launch /support/Claude-Lichnyy',
+    ]);
+  });
+
+  test('принудительно — только когда Claude не закрылся сам', () async {
+    host.start(null);
+    await launcher.forceClose();
+    expect(host.calls, isEmpty);
   });
 
   test('профиль со стандартной папкой Claude убрать нельзя', () async {

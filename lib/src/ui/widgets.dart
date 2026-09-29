@@ -652,13 +652,19 @@ class InfoBanner extends StatelessWidget {
     this.error = false,
     this.progress = false,
     this.action,
+    this.footer,
   });
 
   final IconData icon;
   final String text;
   final bool error;
   final bool progress;
+
+  /// Кнопка справа от текста.
   final Widget? action;
+
+  /// Ряд кнопок под текстом — когда их несколько.
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -702,6 +708,7 @@ class InfoBanner extends StatelessWidget {
               child: const LinearProgressIndicator(),
             ),
           ],
+          if (footer != null) ...[const SizedBox(height: 12), footer!],
         ],
       ),
     );

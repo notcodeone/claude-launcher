@@ -30,7 +30,7 @@ class MacClaudeHost extends ClaudeHost {
   @override
   String get manualQuitHint =>
       'Claude не закрывается сам — возможно, он ждёт ответа в своём окне. '
-      'Проверьте окно Claude или закройте его через Cmd+Q. '
+      'Ответьте в окне Claude или закройте его принудительно. '
       'Лаунчер продолжит, как только Claude закроется.';
 
   @override
