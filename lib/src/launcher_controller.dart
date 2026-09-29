@@ -66,7 +66,13 @@ class LauncherController extends ChangeNotifier {
       ];
       await store.save(profiles);
     }
-    claudePath = await host.locate();
+    // Сбой поиска Claude не должен останавливать запуск: профили, окно
+    // приветствия и настройки работают и без него, ошибку покажем плашкой.
+    try {
+      claudePath = await host.locate();
+    } catch (error) {
+      lastError = 'Не удалось найти Claude: $error';
+    }
     located = true;
     await refresh();
     _pollTimer = Timer.periodic(host.pollInterval, (_) => refresh());

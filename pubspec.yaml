@@ -38,6 +38,7 @@ dependencies:
   ffi: ^2.2.0
   path: ^1.9.1
   lucide_icons_flutter: ^3.1.20
+  win32_registry: ^3.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

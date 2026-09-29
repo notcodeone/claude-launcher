@@ -94,7 +94,8 @@ class HomePage extends StatelessWidget {
                         'Установите приложение Claude с claude.com/download '
                         'и перезапустите лаунчер.',
                   )
-                else if (launcher.profiles.isEmpty)
+                // Пока профили грузятся, список пуст — это не «ничего нет».
+                else if (launcher.located && launcher.profiles.isEmpty)
                   _EmptyState(
                     mood: FaceMood.sleepy,
                     title: 'Ничего нет..',

@@ -1,13 +1,14 @@
-import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 import 'package:win32/win32.dart';
+import 'package:win32_registry/win32_registry.dart';
 
 import 'claude_host.dart';
 import 'command_line.dart';
+import 'windows_package.dart';
 
 /// Windows: Claude ставится пакетом MSIX, путь к `Claude.exe` меняется с каждым
 /// обновлением, поэтому ищем его заново перед запуском.
@@ -15,6 +16,9 @@ import 'command_line.dart';
 /// Стандартный профиль запускаем через пакет (как из меню «Пуск»), чтобы Claude
 /// видел свою обычную папку данных. Остальные — прямым запуском `Claude.exe`
 /// с `--user-data-dir` в `%APPDATA%`: там её ищет виртуальная машина Cowork.
+///
+/// Всё — через API Windows, без PowerShell: из приложения без консоли он
+/// запускается ненадёжно, а консольные окна мелькали бы при каждом опросе.
 class WindowsClaudeHost extends ClaudeHost {
   _Installation? _installation;
 
@@ -26,6 +30,7 @@ class WindowsClaudeHost extends ClaudeHost {
 
   @override
   String get defaultDataDir => switch (_installation?.familyName) {
+    // У пакета MSIX %APPDATA% виртуализирован в папку пакета.
     final family? => p.join(
       _localAppData,
       'Packages',
@@ -38,7 +43,7 @@ class WindowsClaudeHost extends ClaudeHost {
   };
 
   @override
-  Duration get pollInterval => const Duration(seconds: 5);
+  Duration get pollInterval => const Duration(seconds: 3);
 
   @override
   Duration get manualQuitHintAfter => const Duration(seconds: 4);
@@ -59,34 +64,75 @@ class WindowsClaudeHost extends ClaudeHost {
     return dir;
   }
 
+  // ------------------------------------------------------------------- поиск
+
   @override
   Future<String?> locate() async {
-    _installation = await _locatePackaged() ?? await _locateLegacy();
+    _installation =
+        _locatePackaged() ?? _locateFromRunning() ?? await _locateLegacy();
     return _installation?.exe;
   }
 
-  Future<_Installation?> _locatePackaged() async {
-    final json = await _powershell(r'''
-$result = $null
-$pkg = Get-AppxPackage -Name 'Claude*' |
-  Where-Object { Test-Path (Join-Path $_.InstallLocation 'app\Claude.exe') } |
-  Sort-Object Version -Descending | Select-Object -First 1
-if ($pkg) {
-  $appId = (Get-AppxPackageManifest $pkg).Package.Applications.Application |
-    Select-Object -First 1 -ExpandProperty Id
-  $result = @{
-    exe = (Join-Path $pkg.InstallLocation 'app\Claude.exe')
-    familyName = $pkg.PackageFamilyName
-    appId = $appId
+  static const _packagesKey =
+      r'Software\Classes\Local Settings\Software\Microsoft\Windows'
+      r'\CurrentVersion\AppModel\Repository\Packages';
+
+  /// Пакеты Магазина текущего пользователя перечислены в его реестре вместе
+  /// с папкой установки (`PackageRootFolder`).
+  _Installation? _locatePackaged() {
+    final RegistryKey packages;
+    try {
+      packages = CURRENT_USER.open(_packagesKey);
+    } on WindowsException {
+      return null;
+    }
+    final found = <(List<int>, _Installation)>[];
+    try {
+      for (final fullName in packages.keys) {
+        final package = WindowsPackageName.parse(fullName);
+        if (package == null || package.name != 'Claude') continue;
+        final root = packages.getString('PackageRootFolder', path: fullName);
+        if (root == null) continue;
+        final installation = _fromPackageRoot(root, package);
+        if (installation != null) found.add((package.version, installation));
+      }
+    } finally {
+      packages.close();
+    }
+    found.sort((a, b) => compareVersions(a.$1, b.$1));
+    return found.isEmpty ? null : found.last.$2;
   }
-}
-$result
-''');
-    if (json is! Map<String, Object?>) return null;
+
+  /// Запасной путь: если Claude открыт, путь к нему видно по процессу.
+  _Installation? _locateFromRunning() {
+    for (final process in _claudeProcesses()) {
+      if (!process.exe.toLowerCase().contains(r'\windowsapps\')) continue;
+      final root = p.dirname(
+        p.dirname(process.exe),
+      ); // …\<пакет>\app\Claude.exe
+      final package = WindowsPackageName.parse(p.basename(root));
+      if (package == null) continue;
+      final installation = _fromPackageRoot(root, package);
+      if (installation != null) return installation;
+    }
+    return null;
+  }
+
+  _Installation? _fromPackageRoot(String root, WindowsPackageName package) {
+    final exe = p.join(root, 'app', 'Claude.exe');
+    if (!File(exe).existsSync()) return null;
+    String? appId;
+    try {
+      appId = manifestApplicationId(
+        File(p.join(root, 'AppxManifest.xml')).readAsStringSync(),
+      );
+    } on FileSystemException {
+      appId = null;
+    }
     return _Installation(
-      exe: json['exe'] as String,
-      familyName: json['familyName'] as String?,
-      appId: json['appId'] as String?,
+      exe: exe,
+      familyName: package.familyName,
+      appId: appId ?? 'Claude',
     );
   }
 
@@ -106,38 +152,120 @@ $result
     return null;
   }
 
+  // -------------------------------------------------------------- процессы
+
   @override
-  Future<List<ClaudeInstance>> running() async {
-    final json = await _powershell(r'''
-@(Get-CimInstance Win32_Process -Filter "Name='Claude.exe'" |
-  Select-Object ProcessId, ExecutablePath, CommandLine)
-''');
-    final processes = switch (json) {
-      final List<Object?> list => list,
-      final Map<String, Object?> single => [single],
-      _ => const <Object?>[],
-    };
-    return [
-      for (final process in processes.cast<Map<String, Object?>>())
-        if (_isClaudeDesktopMain(process))
-          ClaudeInstance(
-            pid: process['ProcessId'] as int,
-            dataDir: windowsUserDataDir(
-              process['CommandLine'] as String? ?? '',
-            ),
-          ),
-    ];
+  Future<List<ClaudeInstance>> running() async => [
+    for (final process in _claudeProcesses())
+      if (isClaudeDesktopExe(process.exe) &&
+          !isWindowsChildProcess(process.commandLine))
+        ClaudeInstance(
+          pid: process.pid,
+          dataDir: windowsUserDataDir(process.commandLine),
+        ),
+  ];
+
+  /// Все процессы `Claude.exe` текущего пользователя с путём и командной строкой.
+  List<({int pid, String exe, String commandLine})> _claudeProcesses() {
+    const capacity = 8192;
+    final ids = calloc<Uint32>(capacity);
+    final needed = calloc<Uint32>();
+    final result = <({int pid, String exe, String commandLine})>[];
+    try {
+      if (!EnumProcesses(ids, capacity * sizeOf<Uint32>(), needed).value) {
+        return result;
+      }
+      final count = needed.value ~/ sizeOf<Uint32>();
+      for (var i = 0; i < count; i++) {
+        final pid = ids[i];
+        if (pid == 0) continue;
+        final handle = OpenProcess(
+          PROCESS_QUERY_LIMITED_INFORMATION,
+          false,
+          pid,
+        ).value;
+        // Чужие и системные процессы открыть нельзя — просто пропускаем.
+        if (handle.address == 0) continue;
+        try {
+          final exe = _imagePath(handle);
+          if (exe == null || p.basename(exe).toLowerCase() != 'claude.exe') {
+            continue;
+          }
+          result.add((
+            pid: pid,
+            exe: exe,
+            commandLine: _commandLine(handle) ?? '',
+          ));
+        } finally {
+          CloseHandle(handle);
+        }
+      }
+    } finally {
+      calloc.free(ids);
+      calloc.free(needed);
+    }
+    return result;
   }
 
-  /// Отсекаем вспомогательные процессы Electron и одноимённый `claude.exe` от Claude Code CLI.
-  bool _isClaudeDesktopMain(Map<String, Object?> process) {
-    final exe = (process['ExecutablePath'] as String? ?? '').toLowerCase();
-    final commandLine = process['CommandLine'] as String? ?? '';
-    final isDesktop =
-        exe.contains(r'\windowsapps\claude_') ||
-        exe.contains(r'\anthropicclaude\');
-    return isDesktop && !isWindowsChildProcess(commandLine);
+  String? _imagePath(HANDLE process) {
+    const capacity = 1024;
+    final buffer = calloc<Uint16>(capacity).cast<Utf16>();
+    final size = calloc<Uint32>()..value = capacity;
+    try {
+      final ok = QueryFullProcessImageName(
+        process,
+        PROCESS_NAME_WIN32,
+        PWSTR(buffer),
+        size,
+      ).value;
+      return ok ? buffer.toDartString(length: size.value) : null;
+    } finally {
+      calloc.free(buffer);
+      calloc.free(size);
+    }
   }
+
+  /// Командная строка процесса: `NtQueryInformationProcess` с классом
+  /// ProcessCommandLineInformation (60) возвращает UNICODE_STRING
+  /// { Length, MaximumLength, Buffer } и сами символы следом в том же буфере.
+  String? _commandLine(HANDLE process) {
+    const processCommandLineInformation = 60;
+    final needed = calloc<Uint32>();
+    try {
+      _ntQueryInformationProcess(
+        process,
+        processCommandLineInformation,
+        nullptr,
+        0,
+        needed,
+      );
+      final size = needed.value;
+      if (size == 0) return null;
+      final buffer = calloc<Uint8>(size);
+      try {
+        final status = _ntQueryInformationProcess(
+          process,
+          processCommandLineInformation,
+          buffer,
+          size,
+          needed,
+        );
+        if (status != 0) return null;
+        final lengthInBytes = buffer.cast<Uint16>().value;
+        // Поле Buffer — после двух USHORT и выравнивания до 8 байт.
+        final text = Pointer<Pointer<Utf16>>.fromAddress(
+          buffer.address + 8,
+        ).value;
+        return text.toDartString(length: lengthInBytes ~/ 2);
+      } finally {
+        calloc.free(buffer);
+      }
+    } finally {
+      calloc.free(needed);
+    }
+  }
+
+  // ----------------------------------------------------------------- запуск
 
   @override
   Future<void> launch(String? dataDir) async {
@@ -153,35 +281,6 @@ $result
     }
     await Process.start(installation.exe, [
       if (dataDir != null) '--user-data-dir=$dataDir',
-    ], mode: ProcessStartMode.detached);
-  }
-
-  @override
-  bool get iconChangeNeedsRestart => false;
-
-  /// Windows 11 хранит видимость значков трея в реестре пользователя:
-  /// `IsPromoted = 0` — значок под стрелкой ▲, `1` — на панели задач.
-  /// Путь к Claude.exe меняется с версиями, поэтому правим все его записи.
-  @override
-  Future<void> setClaudeIconHidden(bool hidden) async {
-    await _powershell('''
-\$root = 'HKCU:\\Control Panel\\NotifyIconSettings'
-if (Test-Path \$root) {
-  Get-ChildItem \$root | ForEach-Object {
-    \$exe = (Get-ItemProperty \$_.PSPath).ExecutablePath
-    if (\$exe -like '*\\WindowsApps\\Claude_*' -or \$exe -like '*\\AnthropicClaude\\*') {
-      Set-ItemProperty -Path \$_.PSPath -Name IsPromoted -Value ${hidden ? 0 : 1} -Type DWord
-    }
-  }
-}
-\$null
-''');
-  }
-
-  @override
-  Future<void> openIconSettings() async {
-    await Process.start('explorer.exe', [
-      'ms-settings:taskbar',
     ], mode: ProcessStartMode.detached);
   }
 
@@ -224,35 +323,58 @@ if (Test-Path \$root) {
     return windows;
   }
 
-  /// Запускает PowerShell без окна консоли. Скрипт передаётся через
-  /// -EncodedCommand, результат — JSON в Base64, чтобы не зависеть от кодировок.
-  Future<Object?> _powershell(String script) async {
-    final wrapped =
-        '\$ErrorActionPreference = "Stop"\n'
-        '\$value = & {\n$script\n}\n'
-        '\$json = ConvertTo-Json -Compress -Depth 4 -InputObject \$value\n'
-        '[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]\$json))';
-    final encoded = base64Encode([
-      for (final unit in wrapped.codeUnits) ...[unit & 0xFF, unit >> 8],
-    ]);
-    // detachedWithStdio: консольный процесс без собственного окна, но с доступом к выводу.
-    final process = await Process.start('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-EncodedCommand',
-      encoded,
-    ], mode: ProcessStartMode.detachedWithStdio);
-    final errors = process.stderr.transform(utf8.decoder).join();
-    final output = (await process.stdout.transform(utf8.decoder).join()).trim();
-    if (output.isEmpty) {
-      throw ProcessException('powershell.exe', const [], await errors);
+  // ------------------------------------------------------------ значок в трее
+
+  @override
+  bool get iconChangeNeedsRestart => false;
+
+  static const _notifyIconsKey = r'Control Panel\NotifyIconSettings';
+
+  /// Windows 11 хранит видимость значков трея в реестре пользователя:
+  /// `IsPromoted = 0` — значок под стрелкой ▲, `1` — на панели задач.
+  /// Путь к Claude.exe меняется с версиями, поэтому правим все его записи.
+  @override
+  Future<void> setClaudeIconHidden(bool hidden) async {
+    final RegistryKey root;
+    try {
+      root = CURRENT_USER.open(_notifyIconsKey);
+    } on WindowsException {
+      return; // Windows 10: такого раздела нет.
     }
-    final json = utf8.decode(base64Decode(output));
-    return json.isEmpty ? null : jsonDecode(json);
+    try {
+      for (final id in root.keys) {
+        final exe = root.getString('ExecutablePath', path: id) ?? '';
+        if (!isClaudeDesktopExe(exe)) continue;
+        final icon = root.open(
+          id,
+          config: const RegistryOpenConfig(access: RegistryAccess.readWrite),
+        );
+        try {
+          icon.setValue('IsPromoted', RegistryValue.dword(hidden ? 0 : 1));
+        } finally {
+          icon.close();
+        }
+      }
+    } finally {
+      root.close();
+    }
+  }
+
+  @override
+  Future<void> openIconSettings() async {
+    await Process.start('explorer.exe', [
+      'ms-settings:taskbar',
+    ], mode: ProcessStartMode.detached);
   }
 }
+
+/// `NtQueryInformationProcess` нет в пакете win32 — подключаем из ntdll сами.
+/// Поле верхнего уровня ленивое: на macOS библиотека не загружается.
+final _ntQueryInformationProcess = DynamicLibrary.open('ntdll.dll')
+    .lookupFunction<
+      Int32 Function(Pointer, Uint32, Pointer, Uint32, Pointer<Uint32>),
+      int Function(Pointer, int, Pointer, int, Pointer<Uint32>)
+    >('NtQueryInformationProcess');
 
 class _Installation {
   const _Installation({required this.exe, this.familyName, this.appId});
@@ -272,9 +394,5 @@ int _compareVersionDirs(String a, String b) {
       .split('.')
       .map((part) => int.tryParse(part) ?? 0)
       .toList();
-  final left = parts(a), right = parts(b);
-  for (var i = 0; i < left.length && i < right.length; i++) {
-    if (left[i] != right[i]) return left[i].compareTo(right[i]);
-  }
-  return left.length.compareTo(right.length);
+  return compareVersions(parts(a), parts(b));
 }
