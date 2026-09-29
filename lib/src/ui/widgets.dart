@@ -788,8 +788,10 @@ abstract final class AppIcons {
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
   static const quit = LucideIcons.power;
-  static const makeDefault = LucideIcons.star;
-  static const unsetDefault = LucideIcons.starOff;
+
+  /// Открывать при запуске лаунчера — та же иконка, что у кнопки запуска профиля.
+  static const startup = launch;
+  static const startupOff = LucideIcons.playOff;
   static const close = LucideIcons.x;
 }
 

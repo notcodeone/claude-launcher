@@ -682,14 +682,14 @@ class _ProfileCard extends StatelessWidget {
         if (settings.startupProfileId == profile.id)
           const MenuEntry(
             value: 'startup',
-            icon: AppIcons.unsetDefault,
+            icon: AppIcons.startupOff,
             label: 'Не открывать при запуске',
           )
         else
           const MenuEntry(
             value: 'startup',
-            icon: AppIcons.makeDefault,
-            label: 'Сделать по умолчанию',
+            icon: AppIcons.startup,
+            label: 'Открывать при запуске',
           ),
         MenuEntry(
           value: 'quit',
