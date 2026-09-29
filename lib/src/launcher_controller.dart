@@ -249,6 +249,7 @@ class LauncherController extends ChangeNotifier {
 
     final started = DateTime.now();
     final pids = _closingPids = {for (final instance in others) instance.pid};
+    var forced = false;
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (_cancelRequested || _disposed) return false;
@@ -257,8 +258,17 @@ class LauncherController extends ChangeNotifier {
         return true;
       }
 
-      final waitingLong =
-          DateTime.now().difference(started) > host.manualQuitHintAfter;
+      final elapsed = DateTime.now().difference(started);
+      final autoForce = host.autoForceQuitAfter;
+      if (!forced && autoForce != null && elapsed > autoForce) {
+        forced = true;
+        for (final instance in instances) {
+          if (pids.contains(instance.pid)) await host.forceQuit(instance);
+        }
+        continue;
+      }
+
+      final waitingLong = elapsed > host.manualQuitHintAfter;
       if (waitingLong && switchStatus?.phase == SwitchPhase.closing) {
         _setStatus(
           SwitchStatus(target, SwitchPhase.waitingForUser, closing: names),

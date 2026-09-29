@@ -40,6 +40,10 @@ abstract class ClaudeHost {
   /// Сколько ждать закрытия, прежде чем попросить пользователя закрыть Claude самому.
   Duration get manualQuitHintAfter;
 
+  /// Через сколько после вежливой просьбы закрыться завершать Claude
+  /// принудительно без вопросов; `null` — никогда (только по кнопке).
+  Duration? get autoForceQuitAfter => null;
+
   /// Подсказка, как закрыть Claude вручную, если он не закрылся сам.
   String get manualQuitHint;
 

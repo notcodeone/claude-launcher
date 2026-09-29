@@ -27,6 +27,12 @@ class FakeHost extends ClaudeHost {
   @override
   Duration get manualQuitHintAfter => const Duration(milliseconds: 100);
 
+  /// Как на Windows: завершать принудительно, если не закрылся сам.
+  Duration? autoForce;
+
+  @override
+  Duration? get autoForceQuitAfter => autoForce;
+
   @override
   String get manualQuitHint => 'закройте вручную';
 
@@ -261,6 +267,29 @@ void main() {
       'force ${stuck.pid}',
       'launch /support/Claude-Lichnyy',
     ]);
+  });
+
+  test(
+    'на Windows ушедший в трей Claude закрывается принудительно сам',
+    () async {
+      host
+        ..quitsOnRequest = false
+        ..autoForce = const Duration(milliseconds: 50);
+      final stuck = host.start(null);
+      await launcher.switchTo(personal);
+      expect(host.calls, [
+        'quit ${stuck.pid}',
+        'force ${stuck.pid}',
+        'launch /support/Claude-Lichnyy',
+      ]);
+    },
+  );
+
+  test('если Claude вышел сам, принудительно не закрываем', () async {
+    host.autoForce = const Duration(milliseconds: 50);
+    final work = host.start(null);
+    await launcher.close(launcher.profiles.first);
+    expect(host.calls, ['quit ${work.pid}']);
   });
 
   test('принудительно — только когда Claude не закрылся сам', () async {

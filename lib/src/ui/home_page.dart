@@ -694,8 +694,9 @@ class _ProfileCard extends StatelessWidget {
       text: Platform.isMacOS
           ? 'Claude закроется так же, как по Cmd+Q. Если Claude Code сейчас '
                 'выполняет задачу, она прервётся.'
-          : 'Claude закроется так же, как при выходе из приложения. Если '
-                'Claude Code сейчас выполняет задачу, она прервётся.',
+          : 'Claude будет закрыт принудительно: на Windows он не выходит сам, '
+                'а сворачивается в трей. Если Claude Code сейчас выполняет '
+                'задачу, она прервётся.',
       confirmLabel: 'Завершить',
     );
     if (confirmed) await launcher.close(profile);
