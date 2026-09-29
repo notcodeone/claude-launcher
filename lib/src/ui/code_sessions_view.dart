@@ -104,7 +104,7 @@ class CodeSessionsSection extends StatelessWidget {
 }
 
 const _iconBox = 14.0;
-const _iconGap = 6.0;
+const _iconGap = 8.0;
 
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
@@ -207,7 +207,7 @@ class _StateIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = sessionColor(p, state);
-    return switch (state) {
+    final icon = switch (state) {
       CodeSessionState.working => SizedBox.square(
         dimension: 11,
         child: CircularProgressIndicator(strokeWidth: 1.8, color: color),
@@ -220,5 +220,12 @@ class _StateIcon extends StatelessWidget {
       ),
       CodeSessionState.done => Icon(AppIcons.check, size: 14, color: color),
     };
+    // По центру строки значок выглядит выше слова: буквы сидят в строке ниже
+    // середины. Опускаем к середине между центром заглавных и строчных;
+    // галочка в своём квадрате и так стоит выше — её чуть сильнее.
+    return Transform.translate(
+      offset: Offset(0, state == CodeSessionState.done ? 1.5 : 1),
+      child: icon,
+    );
   }
 }
