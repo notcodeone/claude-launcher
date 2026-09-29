@@ -54,6 +54,17 @@ class FakeHost extends ClaudeHost {
   }
 
   @override
+  bool get iconChangeNeedsRestart => false;
+
+  @override
+  Future<void> setClaudeIconHidden(bool hidden) async {
+    calls.add('icon ${hidden ? 'hidden' : 'shown'}');
+  }
+
+  @override
+  Future<void> openIconSettings() async {}
+
+  @override
   Future<void> requestQuit(ClaudeInstance instance) async {
     calls.add('quit ${instance.pid}');
     if (quitsOnRequest) instances.remove(instance);
@@ -175,6 +186,32 @@ void main() {
       expect(host.calls.last, 'launch /support/Claude-Lichnyy');
     },
   );
+
+  group('профиль при запуске лаунчера', () {
+    test('открывается, если Claude не запущен', () async {
+      await launcher.openOnStartup(personal.id);
+      expect(host.calls, ['launch /support/Claude-Lichnyy']);
+    });
+
+    test('не трогает уже открытый Claude', () async {
+      host.start(null);
+      await launcher.refresh();
+      await launcher.openOnStartup(personal.id);
+      expect(host.calls, isEmpty);
+    });
+
+    test('ничего не делает без выбранного или с удалённым профилем', () async {
+      await launcher.openOnStartup(null);
+      await launcher.openOnStartup('нет такого');
+      expect(host.calls, isEmpty);
+    });
+  });
+
+  test('значок Claude прячется через host', () async {
+    await launcher.setClaudeIconHidden(true);
+    await launcher.setClaudeIconHidden(false);
+    expect(host.calls, ['icon hidden', 'icon shown']);
+  });
 
   test('профили сохраняются между запусками', () async {
     await launcher.updateProfile(

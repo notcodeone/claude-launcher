@@ -156,6 +156,35 @@ $result
     ], mode: ProcessStartMode.detached);
   }
 
+  @override
+  bool get iconChangeNeedsRestart => false;
+
+  /// Windows 11 хранит видимость значков трея в реестре пользователя:
+  /// `IsPromoted = 0` — значок под стрелкой ▲, `1` — на панели задач.
+  /// Путь к Claude.exe меняется с версиями, поэтому правим все его записи.
+  @override
+  Future<void> setClaudeIconHidden(bool hidden) async {
+    await _powershell('''
+\$root = 'HKCU:\\Control Panel\\NotifyIconSettings'
+if (Test-Path \$root) {
+  Get-ChildItem \$root | ForEach-Object {
+    \$exe = (Get-ItemProperty \$_.PSPath).ExecutablePath
+    if (\$exe -like '*\\WindowsApps\\Claude_*' -or \$exe -like '*\\AnthropicClaude\\*') {
+      Set-ItemProperty -Path \$_.PSPath -Name IsPromoted -Value ${hidden ? 0 : 1} -Type DWord
+    }
+  }
+}
+\$null
+''');
+  }
+
+  @override
+  Future<void> openIconSettings() async {
+    await Process.start('explorer.exe', [
+      'ms-settings:taskbar',
+    ], mode: ProcessStartMode.detached);
+  }
+
   /// Повторный запуск с той же папкой: Claude держит блокировку «один экземпляр
   /// на папку», поэтому новый процесс сразу завершится, а открытый покажет окно.
   @override

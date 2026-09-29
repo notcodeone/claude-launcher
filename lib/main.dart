@@ -12,7 +12,11 @@ import 'src/launcher_controller.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
 import 'src/ui/home_page.dart';
+import 'src/ui/settings_dialog.dart';
 import 'src/ui/theme.dart';
+
+/// Нужен, чтобы показать окно приветствия из main(), вне дерева виджетов.
+final _navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,12 +62,27 @@ Future<void> main() async {
   await tray.init();
   try {
     await launcher.init();
-    // Иначе после первого запуска непонятно, запустилось ли приложение без окна.
-    if (launcher.firstRun) await window.show();
   } catch (error) {
     launcher.lastError = 'Не удалось загрузить профили: $error';
     await window.show();
+    return;
   }
+
+  // Повторно при каждом запуске: на Windows после обновления Claude у его
+  // значка появляется новая запись, которую тоже нужно спрятать.
+  if (settings.hideClaudeIcon) await launcher.setClaudeIconHidden(true);
+
+  // Первый запуск: окно приветствия с настройками. Заодно видно, что
+  // приложение запустилось, хотя живёт в трее.
+  if (!settings.onboardingDone) {
+    await window.show();
+    final context = _navigatorKey.currentContext;
+    if (context != null && context.mounted) {
+      await showWelcomeDialog(context, launcher: launcher, settings: settings);
+    }
+  }
+
+  await launcher.openOnStartup(settings.startupProfileId);
 }
 
 class ClaudeLauncherApp extends StatelessWidget {
@@ -81,6 +100,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: settings,
       builder: (context, _) => MaterialApp(
+        navigatorKey: _navigatorKey,
         title: 'Claude Launcher',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(Brightness.light),

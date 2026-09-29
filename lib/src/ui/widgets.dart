@@ -504,6 +504,108 @@ class FieldLabel extends StatelessWidget {
   );
 }
 
+/// Общая рамка диалогов: ширина до 470, поля 24, прокрутка, если не влезает.
+class AppDialogFrame extends StatelessWidget {
+  const AppDialogFrame({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 470),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Строка настройки: заголовок, пояснение, необязательная ссылка и переключатель.
+class SettingSwitchRow extends StatelessWidget {
+  const SettingSwitchRow({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.value,
+    required this.onChanged,
+    this.link,
+  });
+
+  final String title;
+  final String description;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final Widget? link;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(description, style: theme.textTheme.bodySmall),
+              if (link != null) ...[const SizedBox(height: 8), link!],
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Switch(value: value, onChanged: onChanged),
+      ],
+    );
+  }
+}
+
+/// Ссылка в тексте: цвета текста, при наведении подчёркивается.
+class InlineLink extends StatefulWidget {
+  const InlineLink({super.key, required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<InlineLink> createState() => _InlineLinkState();
+}
+
+class _InlineLinkState extends State<InlineLink> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.label,
+          style: Theme.of(context).textTheme.bodySmall!.copyWith(
+            color: p.text,
+            fontWeight: FontWeight.w500,
+            decoration: _hovered ? TextDecoration.underline : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Спокойная серая плашка для подсказок, статуса и ошибок.
 class InfoBanner extends StatelessWidget {
   const InfoBanner({
@@ -587,6 +689,7 @@ abstract final class AppIcons {
   static const themeSystem = LucideIcons.sunMoon;
   static const themeLight = LucideIcons.sun;
   static const themeDark = LucideIcons.moon;
+  static const settings = LucideIcons.settings;
 }
 
 enum FaceMood {

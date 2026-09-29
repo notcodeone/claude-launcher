@@ -40,7 +40,7 @@ Future<bool> showConfirmDialog(
     context: context,
     builder: (context) {
       final theme = Theme.of(context);
-      return _DialogFrame(
+      return AppDialogFrame(
         children: [
           Text(title, style: theme.textTheme.titleLarge),
           const SizedBox(height: 8),
@@ -93,30 +93,6 @@ Future<bool> showConfirmDialog(
   return confirmed ?? false;
 }
 
-class _DialogFrame extends StatelessWidget {
-  const _DialogFrame({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.all(20),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 470),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: children,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ProfileDialog extends StatefulWidget {
   const _ProfileDialog({required this.profile, required this.folderLabel});
 
@@ -163,7 +139,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     final p = context.palette;
     final isNew = widget.profile == null;
 
-    return _DialogFrame(
+    return AppDialogFrame(
       children: [
         Row(
           children: [

@@ -224,6 +224,26 @@ ThemeData buildTheme(Brightness brightness) {
       cursorColor: p.primary,
       selectionColor: p.primary.withValues(alpha: 0.18),
     ),
+    // Переключатель: чёрный, когда включён (в тёмной теме — белый); бегунок
+    // одного размера в обоих положениях, без обводки дорожки.
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? p.onPrimary
+            : brightness == Brightness.light
+            ? Colors.white
+            : p.muted,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? p.primary
+            : brightness == Brightness.light
+            ? const Color(0xFFD9D9DC)
+            : const Color(0xFF3A3A40),
+      ),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      thumbIcon: const WidgetStatePropertyAll(Icon(null)),
+    ),
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(
         color: p.primary,

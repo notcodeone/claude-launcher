@@ -173,6 +173,24 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// При запуске лаунчера: открывает профиль [profileId], если Claude сейчас
+  /// не открыт. Уже открытый Claude не трогаем.
+  Future<void> openOnStartup(String? profileId) async {
+    if (profileId == null || instances.isNotEmpty) return;
+    for (final profile in profiles) {
+      if (profile.id == profileId) return switchTo(profile);
+    }
+  }
+
+  /// Прячет или возвращает значок самого Claude; ошибка не мешает работе лаунчера.
+  Future<void> setClaudeIconHidden(bool hidden) async {
+    try {
+      await host.setClaudeIconHidden(hidden);
+    } catch (error) {
+      debugPrint('Не удалось изменить значок Claude: $error');
+    }
+  }
+
   /// Отменяет ожидание закрытия. Уже отправленные просьбы закрыться не отзываются.
   void cancelSwitch() {
     _cancelRequested = true;

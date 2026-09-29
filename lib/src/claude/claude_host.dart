@@ -55,6 +55,15 @@ abstract class ClaudeHost {
   /// Принудительно процесс не завершается никогда.
   Future<void> requestQuit(ClaudeInstance instance);
 
+  /// Прячет (или возвращает) значок самого Claude в строке меню / трее.
+  Future<void> setClaudeIconHidden(bool hidden);
+
+  /// Вступает ли [setClaudeIconHidden] в силу только после перезапуска Claude.
+  bool get iconChangeNeedsRestart;
+
+  /// Открывает системные настройки значков строки меню / панели задач.
+  Future<void> openIconSettings();
+
   /// Открывает папку в Finder / Проводнике (или ближайшую существующую родительскую).
   Future<void> revealFolder(String path) async {
     var dir = Directory(path);

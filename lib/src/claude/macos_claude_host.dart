@@ -98,6 +98,54 @@ class MacClaudeHost extends ClaudeHost {
     await _channel.invokeMethod<bool>('activate', {'pid': instance.pid});
   }
 
+  /// Настройка AppKit «значок строки меню скрыт». Публичного способа скрыть
+  /// значок чужого приложения нет; эту настройку уважают не все приложения,
+  /// поэтому в интерфейсе рядом есть кнопка системных настроек.
+  static const _statusItemKey = 'NSStatusItem Visible Item-0';
+
+  Future<String> _bundleId() async {
+    final appPath = _appPath ?? await locate();
+    if (appPath != null) {
+      final result = await Process.run('mdls', [
+        '-name',
+        'kMDItemCFBundleIdentifier',
+        '-raw',
+        appPath,
+      ]);
+      final id = (result.stdout as String).trim();
+      if (result.exitCode == 0 && id.isNotEmpty && id != '(null)') return id;
+    }
+    return 'com.anthropic.claudefordesktop';
+  }
+
+  @override
+  bool get iconChangeNeedsRestart => true;
+
+  @override
+  Future<void> setClaudeIconHidden(bool hidden) async {
+    final bundleId = await _bundleId();
+    if (hidden) {
+      await Process.run('defaults', [
+        'write',
+        bundleId,
+        _statusItemKey,
+        '-bool',
+        'false',
+      ]);
+    } else {
+      // Ключа может не быть — это нормально.
+      await Process.run('defaults', ['delete', bundleId, _statusItemKey]);
+    }
+  }
+
+  @override
+  Future<void> openIconSettings() async {
+    // «Системные настройки → Строка меню → Разрешить в строке меню».
+    await Process.run('open', [
+      'x-apple.systempreferences:com.apple.ControlCenter-Settings.extension',
+    ]);
+  }
+
   @override
   Future<void> requestQuit(ClaudeInstance instance) async {
     final sent = await _channel.invokeMethod<bool>('terminate', {

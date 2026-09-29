@@ -9,6 +9,7 @@ import '../launcher_controller.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
 import 'profile_dialog.dart';
+import 'settings_dialog.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -97,7 +98,11 @@ class HomePage extends StatelessWidget {
                   ),
                 for (final (index, profile) in launcher.profiles.indexed) ...[
                   if (index > 0) const SizedBox(height: 12),
-                  _ProfileCard(launcher: launcher, profile: profile),
+                  _ProfileCard(
+                    launcher: launcher,
+                    settings: settings,
+                    profile: profile,
+                  ),
                 ],
               ],
             ),
@@ -137,7 +142,7 @@ class HomePage extends StatelessWidget {
             top: headerTop,
             left: gutter,
             right: gutter,
-            child: _HeaderBar(settings: settings),
+            child: _HeaderBar(launcher: launcher, settings: settings),
           ),
           // Подвал в стиле sensomni.
           const Positioned(
@@ -153,7 +158,7 @@ class HomePage extends StatelessWidget {
             bottom: _footerHeight + 8,
             child: AppFab(
               icon: AppIcons.add,
-              label: 'Добавить профиль',
+              label: 'Добавить',
               onPressed: () => _addProfile(context),
             ),
           ),
@@ -300,10 +305,15 @@ class _FooterButton extends StatelessWidget {
   }
 }
 
-/// Плавающая шапка, как в sensomni: название слева, тема окна справа.
+/// Плавающая шапка, как в sensomni: название слева, тема и настройки справа.
 class _HeaderBar extends StatelessWidget {
-  const _HeaderBar({required this.settings, this.interactive = true});
+  const _HeaderBar({
+    required this.launcher,
+    required this.settings,
+    this.interactive = true,
+  });
 
+  final LauncherController launcher;
   final AppSettings settings;
 
   /// Копия шапки поверх затемнения под меню не реагирует на клики.
@@ -319,7 +329,7 @@ class _HeaderBar extends StatelessWidget {
     final title = Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        'Claude Launcher',
+        'ClaudeLauncher',
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
           fontSize: 16,
           fontWeight: FontWeight.w700,
@@ -343,6 +353,19 @@ class _HeaderBar extends StatelessWidget {
                 if (interactive) _openThemeMenu(cardContext);
               },
             ),
+            CircleIconButton(
+              icon: AppIcons.settings,
+              tooltip: interactive ? 'Настройки' : null,
+              onPressed: () {
+                if (interactive) {
+                  showSettingsDialog(
+                    context,
+                    launcher: launcher,
+                    settings: settings,
+                  );
+                }
+              },
+            ),
           ],
         ),
       ),
@@ -363,7 +386,11 @@ class _HeaderBar extends StatelessWidget {
         );
     final mode = await showAnchoredMenu(
       anchorContext: cardContext,
-      highlight: _HeaderBar(settings: settings, interactive: false),
+      highlight: _HeaderBar(
+        launcher: launcher,
+        settings: settings,
+        interactive: false,
+      ),
       entries: [
         entry(ThemeMode.system, AppIcons.themeSystem, 'Как в системе'),
         entry(ThemeMode.light, AppIcons.themeLight, 'Светлая'),
@@ -451,11 +478,13 @@ class _EmptyState extends StatelessWidget {
 class _ProfileCard extends StatelessWidget {
   const _ProfileCard({
     required this.launcher,
+    required this.settings,
     required this.profile,
     this.interactive = true,
   });
 
   final LauncherController launcher;
+  final AppSettings settings;
   final Profile profile;
 
   /// Копия карточки поверх затемнения под меню не реагирует на клики.
@@ -474,6 +503,8 @@ class _ProfileCard extends StatelessWidget {
       else
         'Папка ${profile.folderName}',
       if (profile.note.isNotEmpty) profile.note,
+      if (settings.startupProfileId == profile.id)
+        'Открывается при запуске лаунчера',
     ];
 
     return Builder(
@@ -554,6 +585,7 @@ class _ProfileCard extends StatelessWidget {
         listenable: launcher,
         builder: (_, _) => _ProfileCard(
           launcher: launcher,
+          settings: settings,
           profile: profile,
           interactive: false,
         ),
@@ -613,6 +645,10 @@ class _ProfileCard extends StatelessWidget {
       detail: launcher.dataDirOf(profile),
       confirmLabel: 'Убрать',
     );
-    if (confirmed) await launcher.removeProfile(profile);
+    if (!confirmed) return;
+    await launcher.removeProfile(profile);
+    if (settings.startupProfileId == profile.id) {
+      await settings.setStartupProfile(null);
+    }
   }
 }
