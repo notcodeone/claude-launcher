@@ -119,6 +119,13 @@ void main() {
     expect(saved.lastLaunchedAt, isNotNull);
   });
 
+  test('если Claude не запущен, профиль просто запускается', () async {
+    await launcher.switchTo(personal);
+
+    expect(host.calls, ['launch /support/Claude-Lichnyy']);
+    expect(launcher.isRunning(personal), isTrue);
+  });
+
   test('уже открытый профиль просто выводится вперёд', () async {
     final running = host.start('/support/Claude-Lichnyy');
     await launcher.switchTo(personal);

@@ -26,6 +26,8 @@ class HomePage extends StatelessWidget {
       child: _HeaderBar(settings: settings),
     );
     return Scaffold(
+      // Подвал в стиле sensomni; кнопка «Добавить профиль» встаёт над ним.
+      bottomNavigationBar: const _Footer(),
       floatingActionButton: AppFab(
         icon: AppIcons.add,
         label: 'Добавить профиль',
@@ -37,7 +39,7 @@ class HomePage extends StatelessWidget {
           // Окно перетаскивается за эту полосу и за название в шапке.
           if (Platform.isMacOS)
             const DragToMoveArea(
-              child: SizedBox(height: 30, width: double.infinity),
+              child: SizedBox(height: 46, width: double.infinity),
             ),
           header,
           Expanded(
@@ -137,6 +139,75 @@ class HomePage extends StatelessWidget {
       note: draft.note,
       marker: draft.marker,
       icon: draft.icon,
+    );
+  }
+}
+
+/// Нижняя строка, как подвал сайта sensomni: копирайт слева, ссылки справа.
+class _Footer extends StatelessWidget {
+  const _Footer();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 10, 16, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '© ${DateTime.now().year} ClaudeLauncher - Designed by NotCode',
+                style: TextStyle(color: p.muted, fontSize: 12.5),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Пока без действия, но выглядит и реагирует как активная ссылка.
+            _FooterLink(label: 'Контакты', onTap: () {}),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Текстовая ссылка подвала: серая, при наведении — цвета текста.
+class _FooterLink extends StatefulWidget {
+  const _FooterLink({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_FooterLink> createState() => _FooterLinkState();
+}
+
+class _FooterLinkState extends State<_FooterLink> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 150),
+            // От стиля темы — чтобы был тот же шрифт, что у остального текста.
+            style: Theme.of(context).textTheme.bodySmall!.copyWith(
+              color: _hovered ? p.text : p.muted,
+              fontSize: 12.5,
+            ),
+            child: Text(widget.label),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -39,7 +39,6 @@ class TrayController with TrayListener {
 
   Future<void> _update() async {
     final menu = _buildMenu();
-    final title = _title();
     final tooltip = 'Claude Launcher — ${_statusText()}';
 
     // Меню пересобирается при каждом опросе процессов; трогаем трей только при изменениях.
@@ -48,7 +47,6 @@ class TrayController with TrayListener {
     final state = jsonEncode([
       for (final item in menu.items ?? const <MenuItem>[])
         [item.type, item.key, item.label, item.checked, item.disabled],
-      title,
       tooltip,
     ]);
     if (state == _lastState) return;
@@ -56,7 +54,6 @@ class TrayController with TrayListener {
 
     await trayManager.setContextMenu(menu);
     await trayManager.setToolTip(tooltip);
-    if (Platform.isMacOS) await trayManager.setTitle(title);
   }
 
   String _statusText() {
@@ -72,20 +69,6 @@ class TrayController with TrayListener {
     return running.isEmpty
         ? 'Claude не запущен'
         : 'открыт ${running.join(', ')}';
-  }
-
-  /// Текст рядом с иконкой в строке меню macOS: метка и имя открытого профиля.
-  String _title() {
-    if (launcher.switchStatus != null) return ' ⏳';
-    final running = launcher.runningProfiles;
-    if (running.length == 1 && launcher.unknownInstances.isEmpty) {
-      return ' ${running.single.title}';
-    }
-    final markers = [
-      for (final profile in running) profile.marker,
-      if (launcher.unknownInstances.isNotEmpty) '❔',
-    ];
-    return markers.isEmpty ? '' : ' ${markers.join()}';
   }
 
   Menu _buildMenu() {
