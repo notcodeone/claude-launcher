@@ -15,6 +15,9 @@ class AppSettings extends ChangeNotifier {
   /// Пользователь прошёл окно приветствия.
   bool onboardingDone = false;
 
+  /// Пользователь закрыл подсказку, что лаунчер живёт в строке меню / трее.
+  bool trayHintDismissed = false;
+
   /// Прятать значок самого Claude в строке меню / трее.
   bool hideClaudeIcon = false;
 
@@ -37,6 +40,7 @@ class AppSettings extends ChangeNotifier {
         themeMode =
             ThemeMode.values.asNameMap()[json['themeMode']] ?? ThemeMode.system;
         onboardingDone = json['onboardingDone'] as bool? ?? false;
+        trayHintDismissed = json['trayHintDismissed'] as bool? ?? false;
         hideClaudeIcon = json['hideClaudeIcon'] as bool? ?? false;
         claudeCodeEvents = json['claudeCodeEvents'] as bool? ?? false;
         startupProfileId = json['startupProfileId'] as String?;
@@ -73,6 +77,8 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> completeOnboarding() => _update(() => onboardingDone = true);
 
+  Future<void> dismissTrayHint() => _update(() => trayHintDismissed = true);
+
   Future<void> _update(void Function() change) async {
     change();
     notifyListeners();
@@ -86,6 +92,7 @@ class AppSettings extends ChangeNotifier {
       const JsonEncoder.withIndent('  ').convert({
         'themeMode': themeMode.name,
         'onboardingDone': onboardingDone,
+        'trayHintDismissed': trayHintDismissed,
         'hideClaudeIcon': hideClaudeIcon,
         'claudeCodeEvents': claudeCodeEvents,
         'startupProfileId': startupProfileId,

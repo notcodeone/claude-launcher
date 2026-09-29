@@ -28,24 +28,30 @@ void main() {
     expect(reloaded.themeMode, ThemeMode.light);
   });
 
-  test('приветствие, значок и профиль при запуске сохраняются', () async {
-    final file = File('${dir.path}/settings.json');
-    final settings = AppSettings(file);
-    await settings.load();
-    expect(settings.onboardingDone, isFalse);
-    expect(settings.hideClaudeIcon, isFalse);
-    expect(settings.startupProfileId, isNull);
+  test(
+    'приветствие, подсказка, значок и профиль при запуске сохраняются',
+    () async {
+      final file = File('${dir.path}/settings.json');
+      final settings = AppSettings(file);
+      await settings.load();
+      expect(settings.onboardingDone, isFalse);
+      expect(settings.trayHintDismissed, isFalse);
+      expect(settings.hideClaudeIcon, isFalse);
+      expect(settings.startupProfileId, isNull);
 
-    await settings.setHideClaudeIcon(true);
-    await settings.setStartupProfile('abc');
-    await settings.completeOnboarding();
+      await settings.setHideClaudeIcon(true);
+      await settings.setStartupProfile('abc');
+      await settings.completeOnboarding();
+      await settings.dismissTrayHint();
 
-    final reloaded = AppSettings(file);
-    await reloaded.load();
-    expect(reloaded.onboardingDone, isTrue);
-    expect(reloaded.hideClaudeIcon, isTrue);
-    expect(reloaded.startupProfileId, 'abc');
-  });
+      final reloaded = AppSettings(file);
+      await reloaded.load();
+      expect(reloaded.onboardingDone, isTrue);
+      expect(reloaded.trayHintDismissed, isTrue);
+      expect(reloaded.hideClaudeIcon, isTrue);
+      expect(reloaded.startupProfileId, 'abc');
+    },
+  );
 
   test('повреждённый файл не ломает запуск', () async {
     final file = File('${dir.path}/settings.json')

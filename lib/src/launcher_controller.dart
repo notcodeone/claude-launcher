@@ -47,9 +47,6 @@ class LauncherController extends ChangeNotifier {
   SwitchStatus? switchStatus;
   String? lastError;
 
-  /// Лаунчер запущен впервые (профилей ещё не было).
-  bool firstRun = false;
-
   /// Вызывается, когда нужно внимание пользователя: ошибка или ручное закрытие Claude.
   VoidCallback? onNeedsAttention;
 
@@ -63,7 +60,6 @@ class LauncherController extends ChangeNotifier {
   Future<void> init() async {
     profiles = await store.load();
     if (profiles.isEmpty) {
-      firstRun = true;
       profiles = [
         const Profile(id: 'default', name: 'Основной', icon: 'briefcase'),
       ];

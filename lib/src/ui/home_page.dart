@@ -82,7 +82,7 @@ class HomePage extends StatelessWidget {
                 Text(
                   // По предложению на строку — без одинокого слова на второй.
                   'Каждый профиль — отдельный вход в Claude.\n'
-                  'Одновременно открыт только один.',
+                  'Одновременно запущен только один.',
                   style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
                 ),
                 const SizedBox(height: 24),
@@ -190,9 +190,12 @@ class HomePage extends StatelessWidget {
           padding: EdgeInsets.only(bottom: 16),
           child: LinearProgressIndicator(),
         ),
-      if (launcher.firstRun && status == null)
+      // Пока не закроют крестиком: иначе после перезапуска лаунчера подсказка
+      // пропала бы непрочитанной.
+      if (!settings.trayHintDismissed && status == null)
         InfoBanner(
           icon: AppIcons.info,
+          onClose: settings.dismissTrayHint,
           text: Platform.isMacOS
               ? 'ClaudeLauncher живёт в строке меню — ищите иконку с двумя кружками '
                     'вверху экрана. Это окно можно закрыть.'
@@ -206,7 +209,7 @@ class HomePage extends StatelessWidget {
         InfoBanner(
           icon: AppIcons.unknown,
           text:
-              'Открыт Claude с папкой, которой нет в профилях:\n'
+              'Запущен Claude с папкой, которой нет в профилях:\n'
               '${launcher.host.dataDirOf(instance)}',
         ),
     ];
@@ -530,7 +533,7 @@ class _ProfileCard extends StatelessWidget {
                   ),
                   if (running) ...[
                     const SizedBox(width: 8),
-                    const StatusDot(label: 'Открыт'),
+                    const StatusDot(label: 'Запущен'),
                   ],
                   // Профиль, который лаунчер открывает при своём запуске.
                   if (settings.startupProfileId == profile.id) ...[
@@ -673,16 +676,21 @@ class _ProfileCard extends StatelessWidget {
         MenuEntry(
           value: 'folder',
           icon: AppIcons.folder,
-          label: Platform.isMacOS ? 'Показать папку в Finder' : 'Открыть папку',
+          label: Platform.isMacOS ? 'Открыть в Finder' : 'Открыть в Проводнике',
         ),
-        // Тот самый тег «По умолчанию»: отмечен — лаунчер откроет профиль при
-        // своём запуске. Повторное нажатие снимает отметку.
-        MenuEntry(
-          value: 'startup',
-          icon: AppIcons.startup,
-          label: 'Открывать при запуске',
-          selected: settings.startupProfileId == profile.id,
-        ),
+        // Тег «По умолчанию»: этот профиль лаунчер открывает при своём запуске.
+        if (settings.startupProfileId == profile.id)
+          const MenuEntry(
+            value: 'startup',
+            icon: AppIcons.unsetDefault,
+            label: 'Не открывать при запуске',
+          )
+        else
+          const MenuEntry(
+            value: 'startup',
+            icon: AppIcons.makeDefault,
+            label: 'Сделать по умолчанию',
+          ),
         MenuEntry(
           value: 'quit',
           icon: AppIcons.quit,

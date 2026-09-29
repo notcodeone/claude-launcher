@@ -83,7 +83,7 @@ class TrayController with TrayListener {
     ];
     return running.isEmpty
         ? 'Claude не запущен'
-        : 'открыт ${running.join(', ')}';
+        : 'запущен ${running.join(', ')}';
   }
 
   Menu _buildMenu() {

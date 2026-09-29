@@ -692,6 +692,7 @@ class InfoBanner extends StatelessWidget {
     this.progress = false,
     this.action,
     this.footer,
+    this.onClose,
   });
 
   final IconData icon;
@@ -704,6 +705,9 @@ class InfoBanner extends StatelessWidget {
 
   /// Ряд кнопок под текстом — когда их несколько.
   final Widget? footer;
+
+  /// Крестик справа: подсказку можно закрыть.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -738,6 +742,16 @@ class InfoBanner extends StatelessWidget {
               // свои 16 px отступа, поэтому сдвигаем её к краю плашки.
               if (action != null)
                 Transform.translate(offset: const Offset(16, 0), child: action),
+              // Крестик — по краю значков в карточках: у кнопки 8 px вокруг значка.
+              if (onClose != null)
+                Transform.translate(
+                  offset: const Offset(8, 0),
+                  child: CircleIconButton(
+                    icon: AppIcons.close,
+                    tooltip: 'Закрыть',
+                    onPressed: onClose,
+                  ),
+                ),
             ],
           ),
           if (progress) ...[
@@ -774,7 +788,9 @@ abstract final class AppIcons {
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
   static const quit = LucideIcons.power;
-  static const startup = LucideIcons.star;
+  static const makeDefault = LucideIcons.star;
+  static const unsetDefault = LucideIcons.starOff;
+  static const close = LucideIcons.x;
 }
 
 enum FaceMood {
