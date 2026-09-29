@@ -225,7 +225,11 @@ class CircleIconButton extends StatelessWidget {
         highlightColor: p.text.withValues(alpha: 0.08),
         child: SizedBox.square(
           dimension: size,
-          child: Icon(icon, size: size * 0.55, color: p.text),
+          child: Icon(
+            icon,
+            size: size * 0.55,
+            color: onPressed == null ? p.muted.withValues(alpha: 0.5) : p.text,
+          ),
         ),
       ),
     );
@@ -447,6 +451,8 @@ class InfoBanner extends StatelessWidget {
 abstract final class AppIcons {
   static const add = LucideIcons.plus;
   static const more = LucideIcons.ellipsisVertical;
+  static const launch = LucideIcons.play;
+  static const show = LucideIcons.appWindow;
   static const edit = LucideIcons.pencil;
   static const folder = LucideIcons.folderOpen;
   static const remove = LucideIcons.trash2;

@@ -184,7 +184,9 @@ class _HeaderBar extends StatelessWidget {
             CircleIconButton(
               icon: icon,
               tooltip: interactive ? 'Тема окна' : null,
-              onPressed: interactive ? () => _openThemeMenu(cardContext) : null,
+              onPressed: () {
+                if (interactive) _openThemeMenu(cardContext);
+              },
             ),
           ],
         ),
@@ -404,9 +406,13 @@ class _ProfileCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            AppButton(
-              label: running ? 'Показать' : 'Открыть',
-              kind: running ? AppButtonKind.primary : AppButtonKind.secondary,
+            CircleIconButton(
+              icon: running ? AppIcons.show : AppIcons.launch,
+              tooltip: !interactive
+                  ? null
+                  : running
+                  ? 'Показать окно Claude'
+                  : 'Открыть профиль',
               // У копии карточки кнопка выглядит активной, но клики до неё не доходят.
               onPressed: switching || launcher.claudePath == null
                   ? null
@@ -414,11 +420,12 @@ class _ProfileCard extends StatelessWidget {
                       if (interactive) launcher.switchTo(profile);
                     },
             ),
-            const SizedBox(width: 2),
             CircleIconButton(
               icon: AppIcons.more,
               tooltip: interactive ? 'Ещё' : null,
-              onPressed: interactive ? () => _openMenu(cardContext) : null,
+              onPressed: () {
+                if (interactive) _openMenu(cardContext);
+              },
             ),
           ],
         ),
