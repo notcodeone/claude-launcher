@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../app_settings.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
+import 'anchored_menu.dart';
 import 'profile_dialog.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -19,34 +20,33 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 0 : 16, 16, 0),
+      child: _HeaderBar(settings: settings),
+    );
     return Scaffold(
       floatingActionButton: AppFab(
-        icon: Icons.add_rounded,
+        icon: AppIcons.add,
         tooltip: 'Добавить профиль',
         onPressed: () => _addProfile(context),
       ),
       body: Column(
         children: [
-          // На macOS заголовок окна скрыт: эта полоса — место под кнопки окна и для перетаскивания.
+          // На macOS заголовок окна скрыт: сверху место под кнопки окна.
+          // Окно перетаскивается за эту полосу и за название в шапке.
           if (Platform.isMacOS)
             const DragToMoveArea(
-              child: SizedBox(height: 32, width: double.infinity),
+              child: SizedBox(height: 30, width: double.infinity),
             ),
+          header,
           Expanded(
             child: ListenableBuilder(
               listenable: launcher,
               builder: (context, _) => ListView(
-                padding: EdgeInsets.fromLTRB(
-                  24,
-                  Platform.isMacOS ? 8 : 28,
-                  24,
-                  96,
-                ),
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 96),
                 children: [
-                  Text(
-                    'Профили',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
+                  Text('Профили', style: theme.textTheme.headlineMedium),
                   const SizedBox(height: 8),
                   _StatusLine(launcher: launcher),
                   const SizedBox(height: 24),
@@ -73,18 +73,7 @@ class HomePage extends StatelessWidget {
                     _ProfileCard(launcher: launcher, profile: profile),
                     const SizedBox(height: 12),
                   ],
-                  const SizedBox(height: 20),
-                  const FieldLabel('Тема окна'),
-                  PillChoice<ThemeMode>(
-                    value: settings.themeMode,
-                    options: const [
-                      (ThemeMode.system, 'Как в системе'),
-                      (ThemeMode.light, 'Светлая'),
-                      (ThemeMode.dark, 'Тёмная'),
-                    ],
-                    onChanged: settings.setThemeMode,
-                  ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
                   // Отступ справа — чтобы подсказку не перекрывала кнопка «+».
                   Padding(
                     padding: const EdgeInsets.only(right: 64),
@@ -92,7 +81,7 @@ class HomePage extends StatelessWidget {
                       'Переключение закрывает открытый Claude так же, как обычный выход '
                       'из приложения, и открывает выбранный профиль. Одновременно открыт '
                       'только один профиль — так вход через браузер всегда попадает в нужное окно.',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: theme.textTheme.bodySmall,
                     ),
                   ),
                 ],
@@ -114,7 +103,7 @@ class HomePage extends StatelessWidget {
         ),
       if (launcher.firstRun && status == null)
         InfoBanner(
-          icon: Icons.info_outline_rounded,
+          icon: AppIcons.info,
           text: Platform.isMacOS
               ? 'Claude Launcher живёт в строке меню — ищите иконку с двумя кружками '
                     'вверху экрана. Это окно можно закрыть.'
@@ -123,10 +112,10 @@ class HomePage extends StatelessWidget {
         ),
       if (status != null) _SwitchBanner(launcher: launcher, status: status),
       if (launcher.lastError case final error?)
-        InfoBanner(icon: Icons.error_outline_rounded, error: true, text: error),
+        InfoBanner(icon: AppIcons.error, error: true, text: error),
       for (final instance in launcher.unknownInstances)
         InfoBanner(
-          icon: Icons.help_outline_rounded,
+          icon: AppIcons.unknown,
           text:
               'Открыт Claude с папкой, которой нет в профилях:\n'
               '${launcher.host.dataDirOf(instance)}',
@@ -151,7 +140,80 @@ class HomePage extends StatelessWidget {
       email: draft.email,
       note: draft.note,
       marker: draft.marker,
+      icon: draft.icon,
     );
+  }
+}
+
+/// Плавающая шапка, как в sensomni: название слева, тема окна справа.
+class _HeaderBar extends StatelessWidget {
+  const _HeaderBar({required this.settings, this.interactive = true});
+
+  final AppSettings settings;
+
+  /// Копия шапки поверх затемнения под меню не реагирует на клики.
+  final bool interactive;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (settings.themeMode) {
+      ThemeMode.system => AppIcons.themeSystem,
+      ThemeMode.light => AppIcons.themeLight,
+      ThemeMode.dark => AppIcons.themeDark,
+    };
+    final title = Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Claude Launcher',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
+        ),
+      ),
+    );
+    return Builder(
+      builder: (cardContext) => SoftCard(
+        radius: 16,
+        padding: const EdgeInsets.fromLTRB(18, 8, 8, 8),
+        child: Row(
+          children: [
+            // Кнопку темы в область перетаскивания не кладём: та ждёт двойного
+            // клика (развернуть окно), и одиночные клики срабатывали бы с задержкой.
+            Expanded(child: _dragArea(title)),
+            CircleIconButton(
+              icon: icon,
+              tooltip: interactive ? 'Тема окна' : null,
+              onPressed: interactive ? () => _openThemeMenu(cardContext) : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dragArea(Widget child) => Platform.isMacOS && interactive
+      ? DragToMoveArea(child: SizedBox(height: 36, child: child))
+      : SizedBox(height: 36, child: child);
+
+  Future<void> _openThemeMenu(BuildContext cardContext) async {
+    MenuEntry<ThemeMode> entry(ThemeMode mode, IconData icon, String label) =>
+        MenuEntry(
+          value: mode,
+          icon: icon,
+          label: label,
+          selected: settings.themeMode == mode,
+        );
+    final mode = await showAnchoredMenu(
+      anchorContext: cardContext,
+      highlight: _HeaderBar(settings: settings, interactive: false),
+      entries: [
+        entry(ThemeMode.system, AppIcons.themeSystem, 'Как в системе'),
+        entry(ThemeMode.light, AppIcons.themeLight, 'Светлая'),
+        entry(ThemeMode.dark, AppIcons.themeDark, 'Тёмная'),
+      ],
+    );
+    if (mode != null) await settings.setThemeMode(mode);
   }
 }
 
@@ -220,16 +282,15 @@ class _SwitchBanner extends StatelessWidget {
     };
     return InfoBanner(
       icon: status.phase == SwitchPhase.waitingForUser
-          ? Icons.pan_tool_outlined
-          : Icons.sync_rounded,
+          ? AppIcons.hand
+          : AppIcons.sync,
       text: text,
       progress: true,
       action: status.phase == SwitchPhase.launching
           ? null
           : AppButton(
               label: 'Отмена',
-              kind: AppButtonKind.text,
-              compact: true,
+              kind: AppButtonKind.secondary,
               onPressed: launcher.cancelSwitch,
             ),
     );
@@ -279,10 +340,17 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _ProfileCard extends StatelessWidget {
-  const _ProfileCard({required this.launcher, required this.profile});
+  const _ProfileCard({
+    required this.launcher,
+    required this.profile,
+    this.interactive = true,
+  });
 
   final LauncherController launcher;
   final Profile profile;
+
+  /// Копия карточки поверх затемнения под меню не реагирует на клики.
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
@@ -299,122 +367,102 @@ class _ProfileCard extends StatelessWidget {
       if (profile.note.isNotEmpty) profile.note,
     ];
 
-    return SoftCard(
-      padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
-      child: Row(
-        children: [
-          MarkerDot(marker: profile.marker, size: 28),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        profile.name,
-                        style: theme.textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
+    return Builder(
+      builder: (cardContext) => SoftCard(
+        padding: const EdgeInsets.fromLTRB(16, 16, 10, 16),
+        child: Row(
+          children: [
+            ProfileAvatar(marker: profile.marker, icon: profile.icon),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          profile.name,
+                          style: theme.textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    if (running) ...[
-                      const SizedBox(width: 10),
-                      const StatusDot(label: 'Открыт'),
+                      if (running) ...[
+                        const SizedBox(width: 10),
+                        const StatusDot(label: 'Открыт'),
+                      ],
                     ],
+                  ),
+                  if (profile.email.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(profile.email, style: theme.textTheme.bodyMedium),
                   ],
-                ),
-                if (profile.email.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(profile.email, style: theme.textTheme.bodyMedium),
+                  const SizedBox(height: 4),
+                  for (final line in details)
+                    Text(line, style: theme.textTheme.bodySmall),
                 ],
-                const SizedBox(height: 4),
-                for (final line in details)
-                  Text(line, style: theme.textTheme.bodySmall),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          AppButton(
-            label: running ? 'Показать' : 'Открыть',
-            kind: running ? AppButtonKind.secondary : AppButtonKind.primary,
-            compact: true,
-            onPressed: switching || launcher.claudePath == null
-                ? null
-                : () => launcher.switchTo(profile),
-          ),
-          _MoreButton(launcher: launcher, profile: profile, running: running),
-        ],
+            const SizedBox(width: 12),
+            AppButton(
+              label: running ? 'Показать' : 'Открыть',
+              kind: running ? AppButtonKind.primary : AppButtonKind.secondary,
+              // У копии карточки кнопка выглядит активной, но клики до неё не доходят.
+              onPressed: switching || launcher.claudePath == null
+                  ? null
+                  : () {
+                      if (interactive) launcher.switchTo(profile);
+                    },
+            ),
+            const SizedBox(width: 2),
+            CircleIconButton(
+              icon: AppIcons.more,
+              tooltip: interactive ? 'Ещё' : null,
+              onPressed: interactive ? () => _openMenu(cardContext) : null,
+            ),
+          ],
+        ),
       ),
     );
   }
-}
 
-class _MoreButton extends StatelessWidget {
-  const _MoreButton({
-    required this.launcher,
-    required this.profile,
-    required this.running,
-  });
-
-  final LauncherController launcher;
-  final Profile profile;
-  final bool running;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    PopupMenuItem<String> item(
-      String value,
-      IconData icon,
-      String label, {
-      Color? color,
-      bool enabled = true,
-    }) {
-      final foreground = enabled ? (color ?? p.text) : p.muted;
-      return PopupMenuItem(
-        value: value,
-        enabled: enabled,
-        height: 46,
-        child: Row(
-          children: [
-            Icon(icon, size: 19, color: foreground),
-            const SizedBox(width: 12),
-            Text(label, style: TextStyle(color: foreground, fontSize: 14)),
-          ],
+  Future<void> _openMenu(BuildContext cardContext) async {
+    final running = launcher.isRunning(profile);
+    final action = await showAnchoredMenu(
+      anchorContext: cardContext,
+      highlight: ListenableBuilder(
+        listenable: launcher,
+        builder: (_, _) => _ProfileCard(
+          launcher: launcher,
+          profile: profile,
+          interactive: false,
         ),
-      );
-    }
-
-    return PopupMenuButton<String>(
-      tooltip: 'Ещё',
-      icon: Icon(Icons.more_vert_rounded, color: p.muted),
-      position: PopupMenuPosition.under,
-      offset: const Offset(0, 4),
-      onSelected: (action) => switch (action) {
-        'edit' => _edit(context),
-        'folder' => launcher.host.revealFolder(launcher.dataDirOf(profile)),
-        'remove' => _remove(context),
-        _ => null,
-      },
-      itemBuilder: (_) => [
-        item('edit', Icons.edit_outlined, 'Изменить'),
-        const PopupMenuDivider(height: 1),
-        item(
-          'folder',
-          Icons.folder_open_outlined,
-          Platform.isMacOS ? 'Показать папку в Finder' : 'Открыть папку',
+      ),
+      entries: [
+        const MenuEntry(value: 'edit', icon: AppIcons.edit, label: 'Изменить'),
+        MenuEntry(
+          value: 'folder',
+          icon: AppIcons.folder,
+          label: Platform.isMacOS ? 'Показать папку в Finder' : 'Открыть папку',
         ),
-        const PopupMenuDivider(height: 1),
-        item(
-          'remove',
-          Icons.delete_outline_rounded,
-          'Убрать из списка',
-          color: p.danger,
+        MenuEntry(
+          value: 'remove',
+          icon: AppIcons.remove,
+          label: 'Убрать из списка',
+          destructive: true,
           enabled: !running,
         ),
       ],
     );
+    if (!cardContext.mounted) return;
+    switch (action) {
+      case 'edit':
+        await _edit(cardContext);
+      case 'folder':
+        await launcher.host.revealFolder(launcher.dataDirOf(profile));
+      case 'remove':
+        await _remove(cardContext);
+    }
   }
 
   Future<void> _edit(BuildContext context) async {
@@ -430,6 +478,7 @@ class _MoreButton extends StatelessWidget {
         email: draft.email,
         note: draft.note,
         marker: draft.marker,
+        icon: draft.icon,
       ),
     );
   }

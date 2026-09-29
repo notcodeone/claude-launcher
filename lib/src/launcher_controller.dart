@@ -60,7 +60,9 @@ class LauncherController extends ChangeNotifier {
     profiles = await store.load();
     if (profiles.isEmpty) {
       firstRun = true;
-      profiles = [const Profile(id: 'default', name: 'Основной')];
+      profiles = [
+        const Profile(id: 'default', name: 'Основной', icon: 'briefcase'),
+      ];
       await store.save(profiles);
     }
     claudePath = await host.locate();
@@ -231,6 +233,7 @@ class LauncherController extends ChangeNotifier {
     String email = '',
     String note = '',
     String marker = Profile.defaultMarker,
+    String icon = Profile.defaultIcon,
   }) async {
     final profile = Profile(
       id: _newId(),
@@ -238,6 +241,7 @@ class LauncherController extends ChangeNotifier {
       email: email,
       note: note,
       marker: marker,
+      icon: icon,
       folderName: folderNameFor(name, [
         for (final existing in profiles) ?existing.folderName,
       ]),

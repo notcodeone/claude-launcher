@@ -18,6 +18,7 @@ class Palette extends ThemeExtension<Palette> {
     required this.divider,
     required this.shadow,
     required this.cardBorder,
+    required this.scrim,
   });
 
   final Color background;
@@ -38,6 +39,9 @@ class Palette extends ThemeExtension<Palette> {
   /// В светлой теме карточки держатся на тени; в тёмной тень не видна — нужна рамка.
   final Color cardBorder;
 
+  /// Затемнение экрана под открытым меню.
+  final Color scrim;
+
   static const light = Palette(
     background: Color(0xFFFFFFFF),
     card: Color(0xFFFFFFFF),
@@ -52,6 +56,7 @@ class Palette extends ThemeExtension<Palette> {
     divider: Color(0xFFEAEAEC),
     shadow: Color(0x17000000),
     cardBorder: Color(0x00000000),
+    scrim: Color(0x40000000),
   );
 
   static const dark = Palette(
@@ -68,6 +73,7 @@ class Palette extends ThemeExtension<Palette> {
     divider: Color(0xFF2A2A2F),
     shadow: Color(0x66000000),
     cardBorder: Color(0xFF27272C),
+    scrim: Color(0x99000000),
   );
 
   List<BoxShadow> get softShadow => [

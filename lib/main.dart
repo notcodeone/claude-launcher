@@ -32,8 +32,8 @@ Future<void> main() async {
   await windowManager.waitUntilReadyToShow(
     WindowOptions(
       title: 'Claude Launcher',
-      size: const Size(560, 660),
-      minimumSize: const Size(460, 420),
+      size: const Size(580, 700),
+      minimumSize: const Size(480, 480),
       center: true,
       skipTaskbar: true,
       // На macOS контент заходит под заголовок, как в веб-проектах: белое окно без полосы.

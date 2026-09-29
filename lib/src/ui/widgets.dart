@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import 'profile_icons.dart';
 import 'theme.dart';
 
 /// Белая карточка на мягкой тени, без рамки.
@@ -10,20 +12,27 @@ class SoftCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
+    this.radius = 18,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
+  final double radius;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final borderRadius = BorderRadius.circular(radius);
     return Container(
       decoration: BoxDecoration(
         color: p.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: p.cardBorder),
+        borderRadius: borderRadius,
         boxShadow: p.softShadow,
+      ),
+      // Рамка поверх содержимого, а не вокруг: не меняет размеры (нужна только в тёмной теме).
+      foregroundDecoration: BoxDecoration(
+        borderRadius: borderRadius,
+        border: Border.all(color: p.cardBorder),
       ),
       padding: padding,
       child: child,
@@ -31,16 +40,20 @@ class SoftCard extends StatelessWidget {
   }
 }
 
+/// Размеры кнопок и таблеток: одинаковая высота у всех видов.
+const _buttonPadding = EdgeInsets.symmetric(horizontal: 16, vertical: 10);
+const _buttonTextStyle = TextStyle(
+  fontSize: 13.5,
+  fontWeight: FontWeight.w500,
+  height: 1.2,
+);
+
 enum AppButtonKind {
   /// Чёрная кнопка — главное действие.
   primary,
 
-  /// Плоская серая кнопка без тени — для второстепенных действий внутри карточек,
-  /// где тень на тени смотрится лишней.
+  /// Без фона и тени, как «Вернуться в корзину»; фон появляется только при наведении.
   secondary,
-
-  /// Просто текст, как «Вернуться в корзину».
-  text,
 }
 
 class AppButton extends StatelessWidget {
@@ -49,21 +62,17 @@ class AppButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.kind = AppButtonKind.primary,
-    this.icon,
     this.expand = false,
-    this.compact = false,
-    this.color,
+    this.large = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final AppButtonKind kind;
-  final IconData? icon;
   final bool expand;
-  final bool compact;
 
-  /// Цвет текста для текстовой кнопки (например, красный для опасного действия).
-  final Color? color;
+  /// Крупная кнопка на всю ширину — для диалогов, как «Войти» в sensomni.
+  final bool large;
 
   @override
   Widget build(BuildContext context) {
@@ -72,53 +81,155 @@ class AppButton extends StatelessWidget {
     final (background, foreground) = switch (kind) {
       AppButtonKind.primary =>
         enabled ? (p.primary, p.onPrimary) : (p.field, p.muted),
-      AppButtonKind.secondary => (p.field, enabled ? p.text : p.muted),
-      AppButtonKind.text => (
+      AppButtonKind.secondary => (
         Colors.transparent,
-        enabled ? (color ?? p.text) : p.muted,
+        enabled ? p.text : p.muted,
       ),
     };
-    final radius = BorderRadius.circular(12);
-
-    final content = Row(
-      mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 18, color: foreground),
-          const SizedBox(width: 8),
-        ],
-        Text(
-          label,
-          style: TextStyle(
-            color: foreground,
-            fontSize: compact ? 13.5 : 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-
-    return Container(
-      decoration: BoxDecoration(color: background, borderRadius: radius),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: radius,
-          hoverColor: foreground.withValues(alpha: 0.06),
-          highlightColor: foreground.withValues(alpha: 0.08),
-          splashColor: foreground.withValues(alpha: 0.10),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 14 : 18,
-              vertical: compact ? 9 : 12,
+    return _Pressable(
+      background: background,
+      foreground: foreground,
+      hover: kind == AppButtonKind.secondary ? p.field : null,
+      onTap: onPressed,
+      child: Padding(
+        padding: large
+            ? const EdgeInsets.symmetric(horizontal: 18, vertical: 13)
+            : _buttonPadding,
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              label,
+              style: _buttonTextStyle.copyWith(
+                color: foreground,
+                fontSize: large ? 14.5 : null,
+              ),
             ),
-            child: content,
-          ),
+          ],
         ),
       ),
     );
+  }
+}
+
+/// Скруглённая нажимаемая поверхность. Подсветка занимает всю площадь —
+/// без светлой каймы по краю.
+class _Pressable extends StatelessWidget {
+  const _Pressable({
+    required this.background,
+    required this.foreground,
+    required this.onTap,
+    required this.child,
+    this.hover,
+    this.shadow,
+  });
+
+  final Color background;
+  final Color foreground;
+  final VoidCallback? onTap;
+  final Widget child;
+
+  /// Цвет фона при наведении; по умолчанию — лёгкий оттенок цвета текста.
+  final Color? hover;
+  final List<BoxShadow>? shadow;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(12);
+    return DecoratedBox(
+      decoration: BoxDecoration(borderRadius: radius, boxShadow: shadow),
+      child: Material(
+        color: background,
+        borderRadius: radius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          hoverColor: hover ?? foreground.withValues(alpha: 0.07),
+          highlightColor: foreground.withValues(alpha: 0.08),
+          splashColor: foreground.withValues(alpha: 0.10),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Выбор одного из вариантов таблетками, как «E-mail | SMS»:
+/// выбранный — чёрный, остальные — белые на тени.
+class PillChoice<T> extends StatelessWidget {
+  const PillChoice({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<(T, String)> options;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final (option, label) in options)
+          _Pressable(
+            background: option == value ? p.primary : p.card,
+            foreground: option == value ? p.onPrimary : p.text,
+            shadow: option == value ? null : p.softShadow,
+            onTap: option == value ? null : () => onChanged(option),
+            child: Padding(
+              padding: _buttonPadding,
+              child: Text(
+                label,
+                style: _buttonTextStyle.copyWith(
+                  color: option == value ? p.onPrimary : p.text,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Круглая кнопка-иконка без фона (фон — только при наведении).
+class CircleIconButton extends StatelessWidget {
+  const CircleIconButton({
+    super.key,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+    this.size = 36,
+  });
+
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final String? tooltip;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final button = Material(
+      type: MaterialType.transparency,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPressed,
+        hoverColor: p.field,
+        highlightColor: p.text.withValues(alpha: 0.08),
+        child: SizedBox.square(
+          dimension: size,
+          child: Icon(icon, size: size * 0.55, color: p.text),
+        ),
+      ),
+    );
+    return tooltip == null ? button : Tooltip(message: tooltip!, child: button);
   }
 }
 
@@ -139,21 +250,19 @@ class AppFab extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final radius = BorderRadius.circular(16);
-    final button = Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
+    final button = DecoratedBox(
+      decoration: BoxDecoration(borderRadius: radius, boxShadow: p.softShadow),
+      child: Material(
         color: p.primary,
         borderRadius: radius,
-        boxShadow: p.softShadow,
-      ),
-      child: Material(
-        type: MaterialType.transparency,
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          borderRadius: radius,
           hoverColor: p.onPrimary.withValues(alpha: 0.08),
-          child: Icon(icon, color: p.onPrimary, size: 26),
+          child: SizedBox.square(
+            dimension: 52,
+            child: Icon(icon, color: p.onPrimary, size: 24),
+          ),
         ),
       ),
     );
@@ -161,7 +270,7 @@ class AppFab extends StatelessWidget {
   }
 }
 
-/// Цветной кружок метки профиля — как выбор цвета товара.
+/// Цветной кружок метки — как выбор цвета товара.
 class MarkerDot extends StatelessWidget {
   const MarkerDot({super.key, required this.marker, this.size = 22});
 
@@ -172,20 +281,59 @@ class MarkerDot extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = markerColor(marker);
-    // Светлый кружок на белом (и тёмный на тёмном) без обводки теряется.
-    final needsOutline =
-        (color.computeLuminance() - p.card.computeLuminance()).abs() < 0.2;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
-        border: needsOutline ? Border.all(color: p.divider, width: 1.5) : null,
+        border: _blendsIn(color, p.card)
+            ? Border.all(color: p.divider, width: 1.5)
+            : null,
       ),
     );
   }
 }
+
+/// Аватар профиля: кружок цвета метки с иконкой профиля.
+class ProfileAvatar extends StatelessWidget {
+  const ProfileAvatar({
+    super.key,
+    required this.marker,
+    required this.icon,
+    this.size = 40,
+  });
+
+  final String marker;
+  final String icon;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final color = markerColor(marker);
+    // На жёлтом и белом белая иконка не читается.
+    final iconColor = color.computeLuminance() > 0.5
+        ? const Color(0xFF0A0A0A)
+        : Colors.white;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: _blendsIn(color, p.card)
+            ? Border.all(color: p.divider, width: 1.5)
+            : null,
+      ),
+      child: Icon(profileIcon(icon), size: size * 0.5, color: iconColor),
+    );
+  }
+}
+
+/// Светлый кружок на белом (и тёмный на тёмном) без обводки теряется.
+bool _blendsIn(Color color, Color background) =>
+    (color.computeLuminance() - background.computeLuminance()).abs() < 0.2;
 
 /// «● Открыт» — как «● В наличии».
 class StatusDot extends StatelessWidget {
@@ -226,7 +374,7 @@ class FieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.only(bottom: 8),
     child: Text(
       text.toUpperCase(),
       style: Theme.of(context).textTheme.labelSmall,
@@ -266,12 +414,8 @@ class InfoBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(icon, size: 18, color: error ? p.danger : p.muted),
-              ),
+              Icon(icon, size: 20, color: error ? p.danger : p.muted),
               const SizedBox(width: 10),
               Expanded(
                 child: SelectableText(
@@ -297,6 +441,24 @@ class InfoBanner extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Иконки интерфейса — Lucide, в том же стиле, что и иконки профилей.
+abstract final class AppIcons {
+  static const add = LucideIcons.plus;
+  static const more = LucideIcons.ellipsisVertical;
+  static const edit = LucideIcons.pencil;
+  static const folder = LucideIcons.folderOpen;
+  static const remove = LucideIcons.trash2;
+  static const info = LucideIcons.info;
+  static const error = LucideIcons.circleAlert;
+  static const unknown = LucideIcons.circleHelp;
+  static const sync = LucideIcons.refreshCw;
+  static const hand = LucideIcons.hand;
+  static const check = LucideIcons.check;
+  static const themeSystem = LucideIcons.sunMoon;
+  static const themeLight = LucideIcons.sun;
+  static const themeDark = LucideIcons.moon;
 }
 
 enum FaceMood {
@@ -376,86 +538,4 @@ class _FacePainter extends CustomPainter {
   @override
   bool shouldRepaint(_FacePainter old) =>
       old.mood != mood || old.color != color;
-}
-
-/// Выбор одного из вариантов таблетками, как «E-mail | SMS»:
-/// выбранный — чёрный, остальные — белые на тени.
-class PillChoice<T> extends StatelessWidget {
-  const PillChoice({
-    super.key,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-  });
-
-  final T value;
-  final List<(T, String)> options;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final (option, label) in options)
-          _Pill(
-            label: label,
-            selected: option == value,
-            palette: p,
-            onTap: () => onChanged(option),
-          ),
-      ],
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.label,
-    required this.selected,
-    required this.palette,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final Palette palette;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = palette;
-    final radius = BorderRadius.circular(12);
-    final foreground = selected ? p.onPrimary : p.text;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      decoration: BoxDecoration(
-        color: selected ? p.primary : p.card,
-        borderRadius: radius,
-        border: selected ? null : Border.all(color: p.cardBorder),
-        boxShadow: selected ? null : p.softShadow,
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: selected ? null : onTap,
-          borderRadius: radius,
-          hoverColor: foreground.withValues(alpha: 0.06),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: foreground,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

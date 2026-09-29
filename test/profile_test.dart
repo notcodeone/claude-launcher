@@ -47,6 +47,7 @@ void main() {
         id: 'b',
         name: 'Личный',
         marker: '🔵',
+        icon: 'rocketLaunch',
         note: 'пет-проекты',
         folderName: 'Claude-Lichnyy',
         lastLaunchedAt: launched,
@@ -59,6 +60,8 @@ void main() {
     expect(loaded[0].email, 'me@work.com');
     expect(loaded[1].folderName, 'Claude-Lichnyy');
     expect(loaded[1].marker, '🔵');
+    expect(loaded[1].icon, 'rocketLaunch');
+    expect(loaded[0].icon, Profile.defaultIcon);
     expect(loaded[1].lastLaunchedAt, launched);
   });
 }

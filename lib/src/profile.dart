@@ -6,6 +6,7 @@ class Profile {
     this.email = '',
     this.note = '',
     this.marker = defaultMarker,
+    this.icon = defaultIcon,
     this.folderName,
     this.lastLaunchedAt,
   });
@@ -14,11 +15,15 @@ class Profile {
   static const markers = ['🟢', '🔵', '🟣', '🔴', '🟠', '🟡', '🟤', '⚫', '⚪'];
   static const defaultMarker = '🟢';
 
+  /// Ключ иконки профиля; сами иконки — в `ui/profile_icons.dart`.
+  static const defaultIcon = 'folder';
+
   final String id;
   final String name;
   final String email;
   final String note;
   final String marker;
+  final String icon;
 
   /// Имя папки данных рядом со стандартной папкой Claude.
   /// `null` — стандартная папка самого Claude (обычный запуск приложения).
@@ -36,6 +41,7 @@ class Profile {
     String? email,
     String? note,
     String? marker,
+    String? icon,
     DateTime? lastLaunchedAt,
   }) {
     return Profile(
@@ -44,6 +50,7 @@ class Profile {
       email: email ?? this.email,
       note: note ?? this.note,
       marker: marker ?? this.marker,
+      icon: icon ?? this.icon,
       folderName: folderName,
       lastLaunchedAt: lastLaunchedAt ?? this.lastLaunchedAt,
     );
@@ -55,6 +62,7 @@ class Profile {
     'email': email,
     'note': note,
     'marker': marker,
+    'icon': icon,
     'folderName': folderName,
     'lastLaunchedAt': lastLaunchedAt?.toIso8601String(),
   };
@@ -67,6 +75,7 @@ class Profile {
       email: json['email'] as String? ?? '',
       note: json['note'] as String? ?? '',
       marker: json['marker'] as String? ?? defaultMarker,
+      icon: json['icon'] as String? ?? defaultIcon,
       folderName: json['folderName'] as String?,
       lastLaunchedAt: lastLaunched == null
           ? null
