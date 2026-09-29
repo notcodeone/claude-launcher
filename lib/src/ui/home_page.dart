@@ -28,7 +28,7 @@ class HomePage extends StatelessWidget {
     return Scaffold(
       floatingActionButton: AppFab(
         icon: AppIcons.add,
-        tooltip: 'Добавить профиль',
+        label: 'Добавить профиль',
         onPressed: () => _addProfile(context),
       ),
       body: Column(
@@ -74,15 +74,11 @@ class HomePage extends StatelessWidget {
                     const SizedBox(height: 12),
                   ],
                   const SizedBox(height: 8),
-                  // Отступ справа — чтобы подсказку не перекрывала кнопка «+».
-                  Padding(
-                    padding: const EdgeInsets.only(right: 64),
-                    child: Text(
-                      'Переключение закрывает открытый Claude так же, как обычный выход '
-                      'из приложения, и открывает выбранный профиль. Одновременно открыт '
-                      'только один профиль — так вход через браузер всегда попадает в нужное окно.',
-                      style: theme.textTheme.bodySmall,
-                    ),
+                  Text(
+                    'Переключение закрывает открытый Claude так же, как обычный выход '
+                    'из приложения, и открывает выбранный профиль. Одновременно открыт '
+                    'только один профиль — так вход через браузер всегда попадает в нужное окно.',
+                    style: theme.textTheme.bodySmall,
                   ),
                 ],
               ),

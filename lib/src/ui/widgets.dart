@@ -237,24 +237,24 @@ class CircleIconButton extends StatelessWidget {
   }
 }
 
-/// Чёрная квадратная кнопка в углу, как «+» в NotNotes.
+/// Чёрная кнопка в углу, как «+» в NotNotes, но с подписью.
 class AppFab extends StatelessWidget {
   const AppFab({
     super.key,
     required this.icon,
+    required this.label,
     required this.onPressed,
-    this.tooltip,
   });
 
   final IconData icon;
+  final String label;
   final VoidCallback onPressed;
-  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final radius = BorderRadius.circular(16);
-    final button = DecoratedBox(
+    return DecoratedBox(
       decoration: BoxDecoration(borderRadius: radius, boxShadow: p.softShadow),
       child: Material(
         color: p.primary,
@@ -263,14 +263,132 @@ class AppFab extends StatelessWidget {
         child: InkWell(
           onTap: onPressed,
           hoverColor: p.onPrimary.withValues(alpha: 0.08),
-          child: SizedBox.square(
-            dimension: 52,
-            child: Icon(icon, color: p.onPrimary, size: 24),
+          child: SizedBox(
+            height: 52,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 18, right: 22),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, color: p.onPrimary, size: 20),
+                  const SizedBox(width: 10),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: p.onPrimary,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
-    return tooltip == null ? button : Tooltip(message: tooltip!, child: button);
+  }
+}
+
+/// Поле ввода: серая заливка без рамки; при фокусе плавно становится белым
+/// с рамкой 2 px. Рамка есть всегда (в цвет заливки), чтобы текст не прыгал.
+class AppTextField extends StatefulWidget {
+  const AppTextField({
+    super.key,
+    required this.controller,
+    this.hintText,
+    this.errorText,
+    this.autofocus = false,
+    this.minLines,
+    this.maxLines = 1,
+    this.onChanged,
+    this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final String? hintText;
+
+  /// Текст ошибки под полем; пока он задан, рамка красная.
+  final String? errorText;
+  final bool autofocus;
+  final int? minLines;
+  final int? maxLines;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<AppTextField> createState() => _AppTextFieldState();
+}
+
+class _AppTextFieldState extends State<AppTextField> {
+  final _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final focused = _focus.hasFocus;
+    final error = widget.errorText;
+    final borderColor = error != null
+        ? p.danger
+        : focused
+        ? p.primary
+        : p.field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: focused ? p.card : p.field,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: 2),
+          ),
+          child: TextField(
+            controller: widget.controller,
+            focusNode: _focus,
+            autofocus: widget.autofocus,
+            minLines: widget.minLines,
+            maxLines: widget.maxLines,
+            onChanged: widget.onChanged,
+            onSubmitted: widget.onSubmitted,
+            style: TextStyle(color: p.text, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: widget.hintText,
+              hintStyle: TextStyle(color: p.muted),
+              filled: false,
+              isDense: true,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              // На 2 px меньше прежних отступов — столько занимает рамка.
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 11,
+              ),
+            ),
+          ),
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 2),
+            child: Text(error, style: TextStyle(color: p.danger, fontSize: 12)),
+          ),
+      ],
+    );
   }
 }
 
@@ -452,7 +570,7 @@ abstract final class AppIcons {
   static const add = LucideIcons.plus;
   static const more = LucideIcons.ellipsisVertical;
   static const launch = LucideIcons.play;
-  static const show = LucideIcons.appWindow;
+  static const show = LucideIcons.eye;
   static const edit = LucideIcons.pencil;
   static const folder = LucideIcons.folderOpen;
   static const remove = LucideIcons.trash2;
