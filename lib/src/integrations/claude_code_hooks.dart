@@ -104,6 +104,25 @@ class ClaudeCodeHooks {
     );
   }
 
+  /// Как Claude Code в терминале сам сообщает, что ждёт или закончил.
+  static const notificationChannelKey = 'preferredNotifChannel';
+
+  /// Значение [notificationChannelKey]; `null` — не задано.
+  Future<Object?> notificationChannel() async =>
+      (await _read())[notificationChannelKey];
+
+  /// Меняет [notificationChannelKey]; `null` — убирает. Остальное не трогает.
+  Future<void> setNotificationChannel(Object? channel) async {
+    if (channel == null && !await settingsFile.exists()) return;
+    final settings = await _read();
+    if (channel == null) {
+      settings.remove(notificationChannelKey);
+    } else {
+      settings[notificationChannelKey] = channel;
+    }
+    await _write(settings);
+  }
+
   Future<Map<String, Object?>> _read() async {
     if (!await settingsFile.exists()) return {};
     final text = await settingsFile.readAsString();

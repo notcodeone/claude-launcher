@@ -10,10 +10,14 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // Один лаунчер на пользователя: второй экземпляр дал бы вторую иконку в трее.
-  // Кроме запуска с --cleanup от деинсталлятора: он окна и трея не создаёт.
+  // Кроме запуска с --cleanup от деинсталлятора и наблюдателя, который после
+  // выхода из лаунчера возвращает Claude уведомления: они окна и трея не
+  // создают, а лаунчер должен запускаться и при работающем наблюдателе.
   // Имя мьютекса знает и установщик (AppMutex), чтобы попросить закрыть лаунчер.
-  const bool cleanup = wcsstr(command_line, L"--cleanup") != nullptr;
-  if (!cleanup) {
+  const bool headless =
+      wcsstr(command_line, L"--cleanup") != nullptr ||
+      wcsstr(command_line, L"--return-claude-notifications") != nullptr;
+  if (!headless) {
     ::CreateMutexW(nullptr, TRUE, L"Local\\ClaudeLauncher.SingleInstance");
     if (::GetLastError() == ERROR_ALREADY_EXISTS) {
       return EXIT_SUCCESS;

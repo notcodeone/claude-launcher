@@ -59,6 +59,9 @@ abstract class ClaudeHost {
   /// его вперёд.
   Future<void> openLink(ClaudeInstance instance, Uri link);
 
+  /// Смотрит ли пользователь сейчас в окно [instance]: оно активно.
+  Future<bool> isFrontmost(ClaudeInstance instance) async => false;
+
   /// Просит экземпляр закрыться так же, как при обычном выходе из приложения.
   Future<void> requestQuit(ClaudeInstance instance);
 

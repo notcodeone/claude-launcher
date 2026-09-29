@@ -33,6 +33,7 @@ class ClaudeCodeEvent {
     this.hostSessionId = '',
     this.transcriptPath = '',
     this.message = '',
+    this.notificationType = '',
     this.cwd = '',
   });
 
@@ -45,6 +46,10 @@ class ClaudeCodeEvent {
     final kind = switch ((json['hook_event_name'], json['notification_type'])) {
       ('UserPromptSubmit', _) => ClaudeCodeEventKind.promptSubmitted,
       ('PostToolUse', _) => ClaudeCodeEventKind.toolUsed,
+      // Вопрос с вариантами ответа приходит как разрешение на AskUserQuestion.
+      ('Notification', 'permission_prompt')
+          when '${json['message']}'.contains('AskUserQuestion') =>
+        ClaudeCodeEventKind.needsAnswer,
       ('Notification', 'permission_prompt') =>
         ClaudeCodeEventKind.needsPermission,
       ('Notification', 'idle_prompt' || 'elicitation_dialog') =>
@@ -63,6 +68,7 @@ class ClaudeCodeEvent {
       transcriptPath: json['transcript_path'] as String? ?? '',
       // Текст запроса и ответа не сохраняем: там может быть код.
       message: json['message'] as String? ?? '',
+      notificationType: json['notification_type'] as String? ?? '',
       cwd: json['cwd'] as String? ?? '',
     );
   }
@@ -81,6 +87,9 @@ class ClaudeCodeEvent {
 
   /// Текст уведомления Claude Code (для ожидания).
   final String message;
+
+  /// Вид уведомления Claude Code (`permission_prompt`, `idle_prompt`, …).
+  final String notificationType;
 
   /// Папка проекта сессии.
   final String cwd;

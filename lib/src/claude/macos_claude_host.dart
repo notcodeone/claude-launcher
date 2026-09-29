@@ -98,6 +98,11 @@ class MacClaudeHost extends ClaudeHost {
     await _channel.invokeMethod<bool>('activate', {'pid': instance.pid});
   }
 
+  @override
+  Future<bool> isFrontmost(ClaudeInstance instance) async =>
+      await _channel.invokeMethod<bool>('isFrontmost', {'pid': instance.pid}) ??
+      false;
+
   /// Без `-n` ссылку получает уже запущенный Claude — лаунчер держит открытым
   /// один профиль, так что это [instance].
   @override

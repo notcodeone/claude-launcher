@@ -6,7 +6,9 @@ import 'package:claude_launcher/src/integrations/claude_code_events.dart';
 import 'package:claude_launcher/src/integrations/claude_code_hooks.dart';
 import 'package:claude_launcher/src/integrations/claude_code_integration.dart';
 import 'package:claude_launcher/src/integrations/claude_code_sessions.dart';
+import 'package:claude_launcher/src/integrations/notification_handoff.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
+import 'package:claude_launcher/src/notifications.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -42,6 +44,31 @@ Future<({int status, String body})> post(
   } finally {
     client.close();
   }
+}
+
+/// Уведомления записываются: «show <заголовок>: <текст> [<payload>]», «cancel».
+class FakeNotifier extends Notifier {
+  final log = <String>[];
+  bool permitted = true;
+
+  @override
+  Future<bool> allowed() async => permitted;
+
+  @override
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+    String payload = '',
+  }) async {
+    log.add('show $title: $body [$payload]');
+  }
+
+  @override
+  Future<void> cancel(int id) async => log.add('cancel');
+
+  @override
+  Future<void> openSettings() async {}
 }
 
 void main() {
@@ -283,4 +310,131 @@ void main() {
       );
     },
   );
+
+  test('уведомления: лаунчер забирает их у Claude и показывает сам', () async {
+    final dir = await Directory.systemTemp.createTemp('claude_launcher_ntf');
+    addTearDown(() => dir.delete(recursive: true));
+    final host = FakeHost();
+    final launcher = LauncherController(
+      host: host,
+      store: ProfileStore(File('${dir.path}/profiles.json')),
+    );
+    await launcher.init();
+    addTearDown(launcher.dispose);
+    final settings = AppSettings(File('${dir.path}/settings.json'));
+    await settings.load();
+    await settings.setEventsPort(0);
+    final hooks = ClaudeCodeHooks(File('${dir.path}/.claude/settings.json'));
+    final notifier = FakeNotifier();
+    final opened = <String>[];
+    final integration = ClaudeCodeIntegration(
+      settings: settings,
+      launcher: launcher,
+      hooks: hooks,
+      windowVisible: ValueNotifier(false),
+      handoff: NotificationHandoff(
+        stateFile: File('${dir.path}/claude-notifications.json'),
+        hooks: hooks,
+        samePath: host.samePath,
+      ),
+      notifier: notifier,
+      onOpenWindow: () => opened.add('window'),
+    );
+    addTearDown(integration.dispose);
+    launcher.beforeLaunch = integration.beforeLaunch;
+    final config = File('/support/Claude/claude_desktop_config.json');
+    expect(
+      config.existsSync(),
+      isFalse,
+      reason: 'папка FakeHost — не на диске',
+    );
+
+    await integration.start();
+    expect(integration.notifying, isFalse, reason: 'события выключены');
+    await integration.setEnabled(true);
+    expect(integration.notifying, isTrue);
+    expect(integration.notificationsError, isNull);
+    expect(await hooks.notificationChannel(), 'notifications_disabled');
+
+    final profile = launcher.profiles.single;
+    final token = settings.eventsToken;
+    Future<void> send(String event, {String type = '', String message = ''}) =>
+        post(
+          settings.eventsPort,
+          {
+            'hook_event_name': event,
+            'session_id': 's1',
+            'cwd': '/p/demo',
+            'notification_type': type,
+            'message': message,
+          },
+          token: token,
+          hostSession: 'local_abc',
+        );
+
+    // Терминал без открытого Claude: сессию на карточке не показать,
+    // а уведомить нужно.
+    await post(settings.eventsPort, {
+      'hook_event_name': 'Notification',
+      'notification_type': 'permission_prompt',
+      'message': 'Claude needs your permission to use Bash',
+      'session_id': 't1',
+      'cwd': '/p/cli',
+    }, token: token);
+    expect(notifier.log, ['show cli: Нужно разрешение: Bash []']);
+
+    host.start(null);
+    await launcher.refresh();
+    notifier.log.clear();
+    await send('UserPromptSubmit');
+    await send('Stop');
+    expect(notifier.log.single, startsWith('show demo: Готово за '));
+    expect(notifier.log.single, endsWith('[local_abc]'));
+    await send('Notification', type: 'idle_prompt');
+    expect(notifier.log, hasLength(1), reason: 'о готовом уже сказали');
+    expect(
+      integration.sessions.of(profile.id).single.state,
+      CodeSessionState.needsAnswer,
+    );
+
+    // Ответили — уведомление больше не нужно.
+    await send('UserPromptSubmit');
+    expect(notifier.log.last, 'cancel');
+
+    // Пользователь смотрит в Claude — как и сам Claude, молчим.
+    host.frontmostPid = host.instances.single.pid;
+    await send('Notification', type: 'permission_prompt');
+    expect(notifier.log.last, 'cancel');
+    host.frontmostPid = null;
+
+    // Нажатие открывает сессию в Claude, без ссылки — окно лаунчера.
+    notifier.onTap!('local_abc');
+    notifier.onTap!('');
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      host.calls,
+      contains(
+        'link ${host.instances.single.pid} claude://claude.ai/epitaxy/local_abc',
+      ),
+    );
+    expect(opened, ['window']);
+
+    // Система запретила уведомления лаунчеру — уведомляет сам Claude.
+    notifier.permitted = false;
+    await integration.setNotificationsEnabled(true);
+    expect(integration.notifying, isFalse);
+    expect(integration.notificationsDenied, isTrue);
+    expect(await hooks.notificationChannel(), isNull);
+    notifier.permitted = true;
+    await integration.setNotificationsEnabled(true);
+    expect(integration.notifying, isTrue);
+
+    // Выход при открытом Claude: вернуть можно только после его закрытия.
+    expect(
+      await integration.releaseOnQuit(),
+      isFalse,
+      reason: 'файла стандартного профиля нет — выключать было нечего',
+    );
+    expect(await hooks.notificationChannel(), isNull);
+  });
 }

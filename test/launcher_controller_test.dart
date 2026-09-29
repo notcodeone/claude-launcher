@@ -64,6 +64,13 @@ class FakeHost extends ClaudeHost {
     calls.add('link ${instance.pid} $link');
   }
 
+  /// Чьё окно сейчас активно.
+  int? frontmostPid;
+
+  @override
+  Future<bool> isFrontmost(ClaudeInstance instance) async =>
+      instance.pid == frontmostPid;
+
   @override
   bool get iconChangeNeedsRestart => false;
 
@@ -152,6 +159,25 @@ void main() {
 
     expect(host.calls, ['launch /support/Claude-Lichnyy']);
     expect(launcher.isRunning(personal), isTrue);
+  });
+
+  test('перед запуском — beforeLaunch, пока Claude ещё закрыт', () async {
+    final running = host.start(null);
+    launcher.beforeLaunch = (dir) async {
+      host.calls.add('before $dir');
+      expect(host.instances, isEmpty);
+    };
+    await launcher.switchTo(personal);
+    expect(host.calls, [
+      'quit ${running.pid}',
+      'before /support/Claude-Lichnyy',
+      'launch /support/Claude-Lichnyy',
+    ]);
+
+    // Уже открытый профиль не запускается — и beforeLaunch не нужен.
+    host.calls.clear();
+    await launcher.switchTo(personal);
+    expect(host.calls, ['activate ${host.instances.single.pid}']);
   });
 
   test('уже открытый профиль просто выводится вперёд', () async {

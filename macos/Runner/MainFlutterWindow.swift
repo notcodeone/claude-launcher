@@ -3,14 +3,21 @@ import FlutterMacOS
 import window_manager
 
 class MainFlutterWindow: NSWindow {
+  /// Канал к Dart: команды экземплярам Claude туда, `reopen` — обратно.
+  private(set) var nativeChannel: FlutterMethodChannel?
+
   override func awakeFromNib() {
-    let flutterViewController = FlutterViewController()
+    // Аргументы запуска — в main() на стороне Dart: с флагом запускается
+    // наблюдатель, который возвращает Claude уведомления.
+    let project = FlutterDartProject()
+    project.dartEntrypointArguments = Array(CommandLine.arguments.dropFirst())
+    let flutterViewController = FlutterViewController(project: project)
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
-    registerNativeChannel(messenger: flutterViewController.engine.binaryMessenger)
+    nativeChannel = registerNativeChannel(messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }
@@ -23,7 +30,7 @@ class MainFlutterWindow: NSWindow {
 
   /// Управление конкретным экземпляром Claude по pid: у нескольких экземпляров
   /// один bundle id, поэтому работаем через NSRunningApplication.
-  private func registerNativeChannel(messenger: FlutterBinaryMessenger) {
+  private func registerNativeChannel(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
     let channel = FlutterMethodChannel(name: "claude_launcher/native", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
       guard let args = call.arguments as? [String: Any],
@@ -40,9 +47,12 @@ class MainFlutterWindow: NSWindow {
       case "activate":
         app.unhide()
         result(app.activate(options: [.activateAllWindows]))
+      case "isFrontmost":
+        result(NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier)
       default:
         result(FlutterMethodNotImplemented)
       }
     }
+    return channel
   }
 }

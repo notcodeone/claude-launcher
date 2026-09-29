@@ -60,7 +60,11 @@ class CodeSession {
 
   /// Ссылка, которой приложение Claude открывает свою сессию извне (такую же
   /// оно выдаёт само). У сессий из терминала её нет.
-  Uri? get link => _hostIdPattern.hasMatch(hostSessionId)
+  Uri? get link => linkFor(hostSessionId);
+
+  /// Ссылка на сессию приложения Claude по её id (`local_…`).
+  static Uri? linkFor(String hostSessionId) =>
+      _hostIdPattern.hasMatch(hostSessionId)
       ? Uri.parse('claude://claude.ai/epitaxy/$hostSessionId')
       : null;
 
@@ -96,6 +100,8 @@ class ClaudeCodeSessions {
   ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
   Iterable<CodeSession> get all => _sessions.values;
+
+  CodeSession? byId(String sessionId) => _sessions[sessionId];
 
   bool get anyWorking => _sessions.values.any(
     (session) => session.state == CodeSessionState.working,
@@ -228,14 +234,32 @@ class ClaudeCodeSessions {
   Future<void> _scanTitle(CodeSession session) async {
     if (session._titleScanned) return;
     session._titleScanned = true;
-    final file = File(session.transcriptPath);
-    if (!await file.exists()) return;
-    final length = await file.length();
-    final from = max(0, length - 512 * 1024);
-    final bytes = await _readRange(file, from, length);
-    for (final line in _lines(bytes)) {
+    for (final line in await _tailLines(session.transcriptPath)) {
       _applyTitle(session, line);
     }
+  }
+
+  /// Название сессии по её переписке [transcriptPath] — для сессий, которые
+  /// не показываются на карточке (например, из терминала без открытого Claude).
+  static Future<String?> titleOf(String transcriptPath) async {
+    final session = CodeSession(id: '', profileId: '', startedAt: DateTime(0));
+    try {
+      for (final line in await _tailLines(transcriptPath)) {
+        _applyTitle(session, line);
+      }
+    } on FileSystemException {
+      return null;
+    }
+    return session._customTitle ?? session._aiTitle;
+  }
+
+  static Future<Iterable<Map<String, Object?>>> _tailLines(String path) async {
+    if (path.isEmpty) return const [];
+    final file = File(path);
+    if (!await file.exists()) return const [];
+    final length = await file.length();
+    final from = max(0, length - 512 * 1024);
+    return _lines(await _readRange(file, from, length));
   }
 
   /// Сколько с конца переписки просматривать в поисках начала задачи:

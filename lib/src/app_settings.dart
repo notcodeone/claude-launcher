@@ -24,6 +24,10 @@ class AppSettings extends ChangeNotifier {
   /// Получать события Claude Code через его хуки (задел для уведомлений в Telegram).
   bool claudeCodeEvents = false;
 
+  /// Уведомления Claude Code показывает лаунчер, а сам Claude — нет
+  /// (пока лаунчер запущен). Работает, только когда включены события.
+  bool launcherNotifications = true;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
@@ -43,6 +47,7 @@ class AppSettings extends ChangeNotifier {
         trayHintDismissed = json['trayHintDismissed'] as bool? ?? false;
         hideClaudeIcon = json['hideClaudeIcon'] as bool? ?? false;
         claudeCodeEvents = json['claudeCodeEvents'] as bool? ?? false;
+        launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
         eventsToken = json['eventsToken'] as String? ?? '';
@@ -73,6 +78,9 @@ class AppSettings extends ChangeNotifier {
   Future<void> setClaudeCodeEvents(bool enabled) =>
       _update(() => claudeCodeEvents = enabled);
 
+  Future<void> setLauncherNotifications(bool enabled) =>
+      _update(() => launcherNotifications = enabled);
+
   Future<void> setEventsPort(int port) => _update(() => eventsPort = port);
 
   Future<void> completeOnboarding() => _update(() => onboardingDone = true);
@@ -95,6 +103,7 @@ class AppSettings extends ChangeNotifier {
         'trayHintDismissed': trayHintDismissed,
         'hideClaudeIcon': hideClaudeIcon,
         'claudeCodeEvents': claudeCodeEvents,
+        'launcherNotifications': launcherNotifications,
         'startupProfileId': startupProfileId,
         'eventsPort': eventsPort,
         'eventsToken': eventsToken,

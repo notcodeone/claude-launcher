@@ -50,6 +50,9 @@ class LauncherController extends ChangeNotifier {
   /// Вызывается, когда нужно внимание пользователя: ошибка или ручное закрытие Claude.
   VoidCallback? onNeedsAttention;
 
+  /// Вызывается перед запуском Claude с папкой профиля — пока он ещё закрыт.
+  Future<void> Function(String dataDir)? beforeLaunch;
+
   Timer? _pollTimer;
   bool _cancelRequested = false;
 
@@ -167,6 +170,7 @@ class LauncherController extends ChangeNotifier {
       }
 
       _setStatus(SwitchStatus(target, SwitchPhase.launching));
+      await beforeLaunch?.call(targetDir);
       await host.launch(target.usesDefaultFolder ? null : targetDir);
       await _replace(target.copyWith(lastLaunchedAt: DateTime.now()));
       await _waitForLaunch(targetDir);

@@ -8,7 +8,8 @@ import '../launcher_controller.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Настройки лаунчера: значок Claude и события Claude Code. Меняются сразу.
+/// Настройки лаунчера: значок Claude, события и уведомления Claude Code.
+/// Меняются сразу.
 /// Профиль, который открывается при запуске, выбирается в меню его карточки.
 Future<void> showSettingsDialog(
   BuildContext context, {
@@ -45,6 +46,14 @@ Future<void> showSettingsDialog(
               claudeCode: claudeCode,
               onChanged: claudeCode.setEnabled,
             ),
+            if (settings.claudeCodeEvents) ...[
+              const SizedBox(height: 24),
+              _LauncherNotificationsSwitch(
+                value: settings.launcherNotifications,
+                claudeCode: claudeCode,
+                onChanged: claudeCode.setNotificationsEnabled,
+              ),
+            ],
             const SizedBox(height: 24),
             AppButton(
               label: 'Готово',
@@ -95,6 +104,7 @@ class _WelcomeDialog extends StatefulWidget {
 class _WelcomeDialogState extends State<_WelcomeDialog> {
   bool _hideIcon = true;
   bool _claudeCodeEvents = true;
+  bool _launcherNotifications = true;
 
   Future<void> _start() async {
     final settings = widget.settings;
@@ -109,6 +119,10 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
     if (_hideIcon != settings.hideClaudeIcon) {
       await settings.setHideClaudeIcon(_hideIcon);
       await widget.launcher.setClaudeIconHidden(_hideIcon);
+    }
+    // До событий: иначе лаунчер успел бы забрать уведомления у Claude и вернуть.
+    if (_launcherNotifications != settings.launcherNotifications) {
+      await widget.claudeCode.setNotificationsEnabled(_launcherNotifications);
     }
     if (_claudeCodeEvents != settings.claudeCodeEvents) {
       await widget.claudeCode.setEnabled(_claudeCodeEvents);
@@ -143,6 +157,14 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
           value: _claudeCodeEvents,
           onChanged: (enabled) => setState(() => _claudeCodeEvents = enabled),
         ),
+        if (_claudeCodeEvents) ...[
+          const SizedBox(height: 24),
+          _LauncherNotificationsSwitch(
+            value: _launcherNotifications,
+            onChanged: (enabled) =>
+                setState(() => _launcherNotifications = enabled),
+          ),
+        ],
         const SizedBox(height: 24),
         AppButton(
           label: 'Начать',
@@ -223,6 +245,54 @@ class _ClaudeCodeEventsSwitch extends StatelessWidget {
           style: TextStyle(color: p.danger, fontSize: 12.5),
         ),
         (null, true) => const StatusDot(label: 'Подключено'),
+        _ => null,
+      },
+    );
+  }
+}
+
+class _LauncherNotificationsSwitch extends StatelessWidget {
+  const _LauncherNotificationsSwitch({
+    required this.value,
+    required this.onChanged,
+    this.claudeCode,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  /// В настройках — чтобы показать, работает ли; в приветствии не нужен.
+  final ClaudeCodeIntegration? claudeCode;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final claudeCode = this.claudeCode;
+    return SettingSwitchRow(
+      title: 'Уведомления через ClaudeLauncher',
+      description:
+          'Пока лаунчер запущен, о разрешениях, вопросах и готовых задачах '
+          'Claude Code сообщает он, а сам Claude — нет. Открытый сейчас Claude '
+          'перестанет уведомлять сам после перезапуска. Выйдете из лаунчера — '
+          'Claude снова будет уведомлять сам, как только его закроют.',
+      value: value,
+      onChanged: onChanged,
+      link: switch (claudeCode) {
+        ClaudeCodeIntegration(notificationsError: final String message) => Text(
+          message,
+          style: TextStyle(color: p.danger, fontSize: 12.5),
+        ),
+        ClaudeCodeIntegration(notificationsDenied: true, :final notifier?)
+            when value =>
+          InlineLink(
+            label:
+                'Система не разрешает ClaudeLauncher уведомления, поэтому '
+                'уведомляет сам Claude. Открыть настройки уведомлений',
+            onTap: notifier.openSettings,
+          ),
+        ClaudeCodeIntegration(notifying: true) => const StatusDot(
+          label: 'Работает',
+        ),
         _ => null,
       },
     );

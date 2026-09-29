@@ -313,6 +313,18 @@ class WindowsClaudeHost extends ClaudeHost {
     await _start(samePath(dir, defaultDataDir) ? null : dir, link: link);
   }
 
+  /// Окна Electron принадлежат главному процессу — сравниваем с ним.
+  @override
+  Future<bool> isFrontmost(ClaudeInstance instance) async {
+    final ownerPid = calloc<Uint32>();
+    try {
+      GetWindowThreadProcessId(GetForegroundWindow(), ownerPid);
+      return ownerPid.value == instance.pid;
+    } finally {
+      calloc.free(ownerPid);
+    }
+  }
+
   /// Как нажатие на крестик: WM_CLOSE видимым окнам. Если Claude при этом
   /// сворачивается в трей, контроллер попросит закрыть его вручную.
   @override
