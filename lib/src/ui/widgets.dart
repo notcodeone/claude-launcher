@@ -385,3 +385,85 @@ class _FacePainter extends CustomPainter {
   bool shouldRepaint(_FacePainter old) =>
       old.mood != mood || old.color != color;
 }
+
+/// Выбор одного из вариантов таблетками, как «E-mail | SMS»:
+/// выбранный — чёрный, остальные — белые на тени.
+class PillChoice<T> extends StatelessWidget {
+  const PillChoice({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<(T, String)> options;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final (option, label) in options)
+          _Pill(
+            label: label,
+            selected: option == value,
+            palette: p,
+            onTap: () => onChanged(option),
+          ),
+      ],
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.label,
+    required this.selected,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Palette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = palette;
+    final radius = BorderRadius.circular(12);
+    final foreground = selected ? p.onPrimary : p.text;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        color: selected ? p.primary : p.card,
+        borderRadius: radius,
+        border: selected ? null : Border.all(color: p.cardBorder),
+        boxShadow: selected ? null : p.softShadow,
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: selected ? null : onTap,
+          borderRadius: radius,
+          hoverColor: foreground.withValues(alpha: 0.06),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

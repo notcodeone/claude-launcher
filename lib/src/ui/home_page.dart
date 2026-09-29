@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
+import '../app_settings.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'profile_dialog.dart';
@@ -11,9 +12,10 @@ import 'theme.dart';
 import 'widgets.dart';
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.launcher});
+  const HomePage({super.key, required this.launcher, required this.settings});
 
   final LauncherController launcher;
+  final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +73,18 @@ class HomePage extends StatelessWidget {
                     _ProfileCard(launcher: launcher, profile: profile),
                     const SizedBox(height: 12),
                   ],
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 20),
+                  const FieldLabel('Тема окна'),
+                  PillChoice<ThemeMode>(
+                    value: settings.themeMode,
+                    options: const [
+                      (ThemeMode.system, 'Как в системе'),
+                      (ThemeMode.light, 'Светлая'),
+                      (ThemeMode.dark, 'Тёмная'),
+                    ],
+                    onChanged: settings.setThemeMode,
+                  ),
+                  const SizedBox(height: 24),
                   // Отступ справа — чтобы подсказку не перекрывала кнопка «+».
                   Padding(
                     padding: const EdgeInsets.only(right: 64),

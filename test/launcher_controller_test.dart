@@ -90,24 +90,32 @@ void main() {
     expect(launcher.dataDirOf(personal), '/support/Claude-Lichnyy');
   });
 
-  test('экземпляр без --user-data-dir относится к стандартному профилю', () async {
-    host.start(null);
-    await launcher.refresh();
-    expect(launcher.isRunning(work), isTrue);
-    expect(launcher.isRunning(personal), isFalse);
-    expect(launcher.unknownInstances, isEmpty);
-  });
+  test(
+    'экземпляр без --user-data-dir относится к стандартному профилю',
+    () async {
+      host.start(null);
+      await launcher.refresh();
+      expect(launcher.isRunning(work), isTrue);
+      expect(launcher.isRunning(personal), isFalse);
+      expect(launcher.unknownInstances, isEmpty);
+    },
+  );
 
   test('переключение закрывает открытый профиль и запускает нужный', () async {
     final running = host.start(null);
     await launcher.switchTo(personal);
 
-    expect(host.calls, ['quit ${running.pid}', 'launch /support/Claude-Lichnyy']);
+    expect(host.calls, [
+      'quit ${running.pid}',
+      'launch /support/Claude-Lichnyy',
+    ]);
     expect(launcher.isRunning(personal), isTrue);
     expect(launcher.isRunning(work), isFalse);
     expect(launcher.switchStatus, isNull);
     expect(launcher.lastError, isNull);
-    final saved = launcher.profiles.firstWhere((profile) => profile.id == personal.id);
+    final saved = launcher.profiles.firstWhere(
+      (profile) => profile.id == personal.id,
+    );
     expect(saved.lastLaunchedAt, isNotNull);
   });
 
@@ -126,38 +134,48 @@ void main() {
     expect(host.calls, ['quit ${stranger.pid}', 'launch default']);
   });
 
-  test('если Claude не закрылся, просит пользователя; отмена не запускает профиль', () async {
-    host.quitsOnRequest = false;
-    host.start(null);
-    var attention = 0;
-    launcher.onNeedsAttention = () => attention++;
+  test(
+    'если Claude не закрылся, просит пользователя; отмена не запускает профиль',
+    () async {
+      host.quitsOnRequest = false;
+      host.start(null);
+      var attention = 0;
+      launcher.onNeedsAttention = () => attention++;
 
-    final switching = launcher.switchTo(personal);
-    await Future<void>.delayed(const Duration(milliseconds: 700));
-    expect(launcher.switchStatus?.phase, SwitchPhase.waitingForUser);
-    expect(attention, 1);
+      final switching = launcher.switchTo(personal);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      expect(launcher.switchStatus?.phase, SwitchPhase.waitingForUser);
+      expect(attention, 1);
 
-    launcher.cancelSwitch();
-    await switching;
-    expect(launcher.switchStatus, isNull);
-    expect(host.calls.where((call) => call.startsWith('launch')), isEmpty);
-  });
+      launcher.cancelSwitch();
+      await switching;
+      expect(launcher.switchStatus, isNull);
+      expect(host.calls.where((call) => call.startsWith('launch')), isEmpty);
+    },
+  );
 
-  test('если пользователь закрыл Claude сам, переключение продолжается', () async {
-    host.quitsOnRequest = false;
-    final stuck = host.start(null);
+  test(
+    'если пользователь закрыл Claude сам, переключение продолжается',
+    () async {
+      host.quitsOnRequest = false;
+      final stuck = host.start(null);
 
-    final switching = launcher.switchTo(personal);
-    await Future<void>.delayed(const Duration(milliseconds: 700));
-    host.instances.remove(stuck); // пользователь закрыл Claude из трея
-    await switching;
+      final switching = launcher.switchTo(personal);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      host.instances.remove(stuck); // пользователь закрыл Claude из трея
+      await switching;
 
-    expect(host.calls.last, 'launch /support/Claude-Lichnyy');
-  });
+      expect(host.calls.last, 'launch /support/Claude-Lichnyy');
+    },
+  );
 
   test('профили сохраняются между запусками', () async {
-    await launcher.updateProfile(work.copyWith(name: 'Рабочий', email: 'me@work.com'));
-    final reloaded = await ProfileStore(File('${dir.path}/profiles.json')).load();
+    await launcher.updateProfile(
+      work.copyWith(name: 'Рабочий', email: 'me@work.com'),
+    );
+    final reloaded = await ProfileStore(
+      File('${dir.path}/profiles.json'),
+    ).load();
     expect(reloaded.map((profile) => profile.name), ['Рабочий', 'Личный']);
     expect(reloaded.first.email, 'me@work.com');
   });

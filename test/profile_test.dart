@@ -9,7 +9,10 @@ void main() {
     test('латиница и транслитерация', () {
       expect(folderNameFor('Work', []), 'Claude-Work');
       expect(folderNameFor('Личный', []), 'Claude-Lichnyy');
-      expect(folderNameFor('Клиент: ООО «Ромашка»', []), 'Claude-Klient-ooo-romashka');
+      expect(
+        folderNameFor('Клиент: ООО «Ромашка»', []),
+        'Claude-Klient-ooo-romashka',
+      );
     });
 
     test('пустое или нелатинское имя', () {
@@ -19,7 +22,10 @@ void main() {
 
     test('уникальность без учёта регистра', () {
       expect(folderNameFor('Work', ['claude-work']), 'Claude-Work-2');
-      expect(folderNameFor('Work', ['Claude-Work', 'Claude-Work-2']), 'Claude-Work-3');
+      expect(
+        folderNameFor('Work', ['Claude-Work', 'Claude-Work-2']),
+        'Claude-Work-3',
+      );
     });
 
     test('никогда не совпадает со стандартной папкой Claude', () {

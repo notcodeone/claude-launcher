@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'src/app_settings.dart';
 import 'src/app_window.dart';
 import 'src/claude/claude_host.dart';
 import 'src/launcher_controller.dart';
@@ -22,6 +23,8 @@ Future<void> main() async {
     host: ClaudeHost.forCurrentPlatform(),
     store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
   );
+  final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
+  await settings.load();
   final window = AppWindow();
   launcher.onNeedsAttention = window.show;
 
@@ -51,7 +54,7 @@ Future<void> main() async {
     },
   );
 
-  runApp(ClaudeLauncherApp(launcher: launcher));
+  runApp(ClaudeLauncherApp(launcher: launcher, settings: settings));
   await tray.init();
   try {
     await launcher.init();
@@ -64,18 +67,27 @@ Future<void> main() async {
 }
 
 class ClaudeLauncherApp extends StatelessWidget {
-  const ClaudeLauncherApp({super.key, required this.launcher});
+  const ClaudeLauncherApp({
+    super.key,
+    required this.launcher,
+    required this.settings,
+  });
 
   final LauncherController launcher;
+  final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Claude Launcher',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
-      home: HomePage(launcher: launcher),
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Claude Launcher',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: settings.themeMode,
+        home: HomePage(launcher: launcher, settings: settings),
+      ),
     );
   }
 }
