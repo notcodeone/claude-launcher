@@ -47,8 +47,13 @@ class CodeSession {
   /// Текст уведомления, пока сессия ожидает.
   String message = '';
 
-  /// Выходные токены текущей задачи — как «↓ N tokens» в самом Claude Code.
-  int outputTokens = 0;
+  /// Токены, которые Claude написал за текущую задачу, — как «↓ N tokens»
+  /// в самом Claude Code: оценка по длине ответов (символы / 4).
+  ///
+  /// Не `usage.output_tokens` из переписки: там ещё и скрытые рассуждения
+  /// модели, которых в переписке нет, — это число в несколько раз больше
+  /// того, что показывает Claude Code.
+  int tokens = 0;
 
   String? _customTitle;
   String? _aiTitle;
@@ -68,7 +73,8 @@ class CodeSession {
   // Чтение файла переписки по мере роста.
   int _offset = 0;
   List<int> _carry = const [];
-  final Map<String, int> _tokensById = {};
+  /// Символы ответа по строкам переписки (у каждой строки свой uuid).
+  final Map<String, int> _charsByLine = {};
   bool _titleScanned = false;
 }
 
@@ -157,8 +163,8 @@ class ClaudeCodeSessions {
       ..state = CodeSessionState.working
       ..startedAt = time
       ..message = ''
-      ..outputTokens = 0
-      .._tokensById.clear()
+      ..tokens = 0
+      .._charsByLine.clear()
       // Токены считаем с этого места: всё раньше — прошлые задачи.
       .._offset = _lengthOf(session.transcriptPath)
       .._carry = const [];
@@ -171,11 +177,11 @@ class ClaudeCodeSessions {
     for (final session in _sessions.values) {
       if (session.transcriptPath.isEmpty) continue;
       final nameBefore = session.name;
-      final tokensBefore = session.outputTokens;
+      final tokensBefore = session.tokens;
       await _scanTitle(session);
       await _readNew(session);
       changed |=
-          session.name != nameBefore || session.outputTokens != tokensBefore;
+          session.name != nameBefore || session.tokens != tokensBefore;
     }
     return changed;
   }
@@ -228,9 +234,10 @@ class ClaudeCodeSessions {
     if (lastNewline < 0) return;
     for (final line in _lines(bytes.sublist(0, lastNewline))) {
       _applyTitle(session, line);
-      _applyUsage(session, line);
+      _applyAnswer(session, line);
     }
-    session.outputTokens = session._tokensById.values.fold(0, (a, b) => a + b);
+    final chars = session._charsByLine.values.fold(0, (a, b) => a + b);
+    session.tokens = (chars / 4).round();
   }
 
   static void _applyTitle(CodeSession session, Map<String, Object?> line) {
@@ -247,18 +254,28 @@ class ClaudeCodeSessions {
     }
   }
 
-  /// Один ответ записывается несколькими строками с одинаковым расходом —
-  /// считаем по уникальному id ответа.
-  static void _applyUsage(CodeSession session, Map<String, Object?> line) {
-    if (line['type'] != 'assistant') return;
+  /// Ответ записывается по строке на блок: текст, рассуждения (если их видно),
+  /// вызов инструмента. Считаем их длину, как Claude Code — полученный поток.
+  /// Строки субагентов — не ответ самой сессии.
+  static void _applyAnswer(CodeSession session, Map<String, Object?> line) {
+    if (line['type'] != 'assistant' || line['isSidechain'] == true) return;
     final message = line['message'];
     if (message is! Map) return;
-    final id = message['id'];
-    final usage = message['usage'];
-    if (id is! String || usage is! Map) return;
-    final output = usage['output_tokens'];
-    if (output is! int) return;
-    session._tokensById[id] = max(session._tokensById[id] ?? 0, output);
+    final content = message['content'];
+    if (content is! List) return;
+    var chars = 0;
+    for (final block in content) {
+      if (block is! Map) continue;
+      chars += switch (block['type']) {
+        'text' => (block['text'] as String? ?? '').length,
+        'thinking' => (block['thinking'] as String? ?? '').length,
+        'tool_use' => jsonEncode(block['input'] ?? const {}).length,
+        _ => 0,
+      };
+    }
+    // Если строку перезапишут, по uuid она не посчитается дважды.
+    final key = line['uuid'] as String? ?? '#${session._charsByLine.length}';
+    session._charsByLine[key] = chars;
   }
 
   static Iterable<Map<String, Object?>> _lines(List<int> bytes) sync* {

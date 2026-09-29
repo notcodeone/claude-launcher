@@ -45,13 +45,24 @@ void main() {
     );
   }
 
-  Map<String, Object?> answer(String id, int outputTokens) => {
+  /// Строка ответа, как её пишет Claude Code: один блок на строку. В расходе
+  /// много токенов — там и скрытые рассуждения, которых в переписке нет.
+  var nextUuid = 0;
+  Map<String, Object?> answer(
+    Map<String, Object?> block, {
+    String? uuid,
+    bool sidechain = false,
+  }) => {
     'type': 'assistant',
+    'uuid': uuid ?? 'u${nextUuid++}',
+    'isSidechain': sidechain,
     'message': {
-      'id': id,
-      'usage': {'input_tokens': 3, 'output_tokens': outputTokens},
+      'id': 'msg',
+      'content': [block],
+      'usage': {'input_tokens': 3, 'output_tokens': 5000},
     },
   };
+  Map<String, Object?> text(int chars) => {'type': 'text', 'text': 'я' * chars};
 
   CodeSession only() => sessions.of('work').single;
 
@@ -113,28 +124,43 @@ void main() {
   });
 
   group('переписка', () {
-    test('токены — по уникальным ответам, только текущей задачи', () async {
-      write([answer('old', 900)]); // прошлая задача, до знакомства с сессией
-      event(ClaudeCodeEventKind.promptSubmitted);
-      // Один ответ пишется несколькими строками с одинаковым id.
-      write([answer('m1', 10), answer('m1', 25), answer('m2', 5)]);
-      await sessions.readTranscripts();
-      expect(only().outputTokens, 30);
+    test(
+      'токены — как в Claude Code: длина ответа / 4, только текущей задачи',
+      () async {
+        write([answer(text(4000))]); // прошлая задача, до знакомства с сессией
+        event(ClaudeCodeEventKind.promptSubmitted);
+        write([
+          answer({'type': 'thinking', 'thinking': '', 'signature': 'скрыто'}),
+          answer(text(40), uuid: 'text'),
+          // {"command":"ls -la"} — 20 символов.
+          answer({
+            'type': 'tool_use',
+            'name': 'Bash',
+            'input': {'command': 'ls -la'},
+          }),
+          answer(text(400), sidechain: true), // субагент
+        ]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 15);
 
-      // Недописанная строка ждёт конца.
-      write([answer('m3', 100)], finished: false);
-      await sessions.readTranscripts();
-      expect(only().outputTokens, 30);
-      transcript.writeAsStringSync('\n', mode: FileMode.append);
-      await sessions.readTranscripts();
-      expect(only().outputTokens, 130);
+        // Недописанная строка ждёт конца; перезаписанная не считается дважды.
+        write([answer(text(40), uuid: 'text')], finished: false);
+        await sessions.readTranscripts();
+        expect(only().tokens, 15);
+        transcript.writeAsStringSync('\n', mode: FileMode.append);
+        await sessions.readTranscripts();
+        expect(only().tokens, 15);
+        write([answer(text(200))]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 65);
 
-      // Новая задача считается с нуля.
-      event(ClaudeCodeEventKind.promptSubmitted, minute: 10);
-      write([answer('m4', 7)]);
-      await sessions.readTranscripts();
-      expect(only().outputTokens, 7);
-    });
+        // Новая задача считается с нуля.
+        event(ClaudeCodeEventKind.promptSubmitted, minute: 10);
+        write([answer(text(28))]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 7);
+      },
+    );
 
     test('название: своё, иначе от Claude, иначе папка проекта', () async {
       event(ClaudeCodeEventKind.promptSubmitted);
@@ -163,7 +189,7 @@ void main() {
       event(ClaudeCodeEventKind.toolUsed);
       await sessions.readTranscripts();
       expect(only().name, 'Парковка');
-      expect(only().outputTokens, 0);
+      expect(only().tokens, 0);
     });
   });
 

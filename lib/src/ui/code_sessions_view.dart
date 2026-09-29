@@ -101,6 +101,9 @@ class CodeSessionsSection extends StatelessWidget {
   }
 }
 
+const _iconBox = 14.0;
+const _iconGap = 6.0;
+
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
     required this.session,
@@ -122,7 +125,7 @@ class _SessionRow extends StatelessWidget {
     final meta = working
         ? [
             formatElapsed(now.difference(session.startedAt)),
-            if (session.outputTokens > 0) formatTokens(session.outputTokens),
+            if (session.tokens > 0) formatTokens(session.tokens),
           ].join(' · ')
         : _clock(session.updatedAt);
 
@@ -150,12 +153,14 @@ class _SessionRow extends StatelessWidget {
       height: 28,
       child: Row(
         children: [
-          // Значки состояний стоят под аватаром, текст — по краю имени профиля.
+          // Текст — по краю имени профиля (аватар 40 + 12), значок — сразу
+          // слева от текста, как маркер списка.
+          const SizedBox(width: 40 + 12 - _iconGap - _iconBox),
           SizedBox(
-            width: 40,
+            width: _iconBox,
             child: Center(child: _StateIcon(state: session.state)),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: _iconGap),
           label,
           Expanded(
             child: Align(
