@@ -153,11 +153,18 @@ class _Footer extends StatelessWidget {
     final style = Theme.of(
       context,
     ).textTheme.bodySmall!.copyWith(color: p.muted, fontSize: 11.5);
+    // Отступы кнопки «NotCode» — ровно в ширину пробела: «Designed by NotCode»
+    // читается как обычная фраза, а подложка при наведении не липнет к буквам.
+    final space = (TextPainter(
+      text: TextSpan(text: ' ', style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout()).width;
     return SafeArea(
       top: false,
       child: Padding(
-        // Справа меньше: у кнопки «NotCode» свой внутренний отступ.
-        padding: const EdgeInsets.fromLTRB(24, 8, 18, 10),
+        // Справа меньше на ширину пробела, чтобы текст стоял на отступе 24, как слева.
+        padding: EdgeInsets.fromLTRB(24, 8, 24 - space, 10),
         child: Row(
           children: [
             Expanded(
@@ -171,7 +178,8 @@ class _Footer extends StatelessWidget {
             // Пока без действия, но нажимается и подсвечивается.
             _FooterButton(
               label: 'NotCode',
-              style: style.copyWith(color: p.text, fontWeight: FontWeight.w500),
+              style: style,
+              horizontalPadding: space,
               onTap: () {},
             ),
           ],
@@ -186,11 +194,13 @@ class _FooterButton extends StatelessWidget {
   const _FooterButton({
     required this.label,
     required this.style,
+    required this.horizontalPadding,
     required this.onTap,
   });
 
   final String label;
   final TextStyle style;
+  final double horizontalPadding;
   final VoidCallback onTap;
 
   @override
@@ -206,7 +216,10 @@ class _FooterButton extends StatelessWidget {
         highlightColor: p.text.withValues(alpha: 0.08),
         splashColor: p.text.withValues(alpha: 0.10),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
+            vertical: 3,
+          ),
           child: Text(label, style: style),
         ),
       ),
