@@ -55,6 +55,10 @@ abstract class ClaudeHost {
   /// Выводит уже запущенный экземпляр на передний план.
   Future<void> activate(ClaudeInstance instance);
 
+  /// Передаёт ссылку `claude://` запущенному экземпляру [instance] и выводит
+  /// его вперёд.
+  Future<void> openLink(ClaudeInstance instance, Uri link);
+
   /// Просит экземпляр закрыться так же, как при обычном выходе из приложения.
   Future<void> requestQuit(ClaudeInstance instance);
 

@@ -60,6 +60,11 @@ class FakeHost extends ClaudeHost {
   }
 
   @override
+  Future<void> openLink(ClaudeInstance instance, Uri link) async {
+    calls.add('link ${instance.pid} $link');
+  }
+
+  @override
   bool get iconChangeNeedsRestart => false;
 
   @override
@@ -296,6 +301,17 @@ void main() {
     host.start(null);
     await launcher.forceClose();
     expect(host.calls, isEmpty);
+  });
+
+  test('ссылка открывается в экземпляре своего профиля', () async {
+    final link = Uri.parse('claude://claude.ai/epitaxy/local_1');
+    await launcher.openLink(personal, link);
+    expect(host.calls, isEmpty, reason: 'профиль не открыт');
+
+    final running = host.start('/support/Claude-Lichnyy');
+    await launcher.refresh();
+    await launcher.openLink(personal, link);
+    expect(host.calls, ['link ${running.pid} $link']);
   });
 
   test('профиль со стандартной папкой Claude убрать нельзя', () async {

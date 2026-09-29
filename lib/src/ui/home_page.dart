@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
+import '../integrations/claude_code_sessions.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
@@ -626,7 +627,7 @@ class _ProfileCard extends StatelessWidget {
                         ? const SizedBox(width: double.infinity)
                         : CodeSessionsSection(
                             sessions: sessions,
-                            onOpen: canShow ? show : null,
+                            onOpen: canShow ? _openSession : null,
                             now: DateTime.now(),
                           ),
                   ),
@@ -637,6 +638,16 @@ class _ProfileCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _openSession(CodeSession session) {
+    if (!interactive) return;
+    switch (session.link) {
+      case final link?:
+        launcher.openLink(profile, link);
+      case null:
+        launcher.switchTo(profile);
+    }
   }
 
   Future<void> _toggleSessions() => launcher.updateProfile(

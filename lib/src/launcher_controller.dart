@@ -183,6 +183,22 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
+  /// Открывает ссылку `claude://` (например, сессию Claude Code) в окне
+  /// открытого профиля [profile].
+  Future<void> openLink(Profile profile, Uri link) async {
+    if (switchStatus != null) return;
+    final instance = instances
+        .where((instance) => profileOf(instance)?.id == profile.id)
+        .firstOrNull;
+    if (instance == null) return;
+    try {
+      await host.openLink(instance, link);
+    } catch (error) {
+      lastError = 'Не удалось открыть в Claude: $error';
+      _notify();
+    }
+  }
+
   /// При запуске лаунчера: открывает профиль [profileId], если Claude сейчас
   /// не открыт. Уже открытый Claude не трогаем.
   Future<void> openOnStartup(String? profileId) async {

@@ -98,6 +98,24 @@ class MacClaudeHost extends ClaudeHost {
     await _channel.invokeMethod<bool>('activate', {'pid': instance.pid});
   }
 
+  /// Без `-n` ссылку получает уже запущенный Claude — лаунчер держит открытым
+  /// один профиль, так что это [instance].
+  @override
+  Future<void> openLink(ClaudeInstance instance, Uri link) async {
+    final appPath = _appPath ?? await locate();
+    if (appPath == null) throw StateError('Claude не найден');
+    final result = await Process.run('open', ['-a', appPath, '$link']);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        'open',
+        const [],
+        '${result.stderr}',
+        result.exitCode,
+      );
+    }
+    await activate(instance);
+  }
+
   /// Настройка AppKit «значок строки меню скрыт». Публичного способа скрыть
   /// значок чужого приложения нет; эту настройку уважают не все приложения,
   /// поэтому в интерфейсе рядом есть кнопка системных настроек.

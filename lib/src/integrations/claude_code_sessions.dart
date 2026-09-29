@@ -53,6 +53,14 @@ class CodeSession {
   String? _customTitle;
   String? _aiTitle;
 
+  /// Ссылка, которой приложение Claude открывает свою сессию извне (такую же
+  /// оно выдаёт само). У сессий из терминала её нет.
+  Uri? get link => _hostIdPattern.hasMatch(hostSessionId)
+      ? Uri.parse('claude://claude.ai/epitaxy/$hostSessionId')
+      : null;
+
+  static final _hostIdPattern = RegExp(r'^local_[A-Za-z0-9-]+$');
+
   /// Название из боковой панели Claude, иначе — папка проекта.
   String get name =>
       _customTitle ?? _aiTitle ?? (cwd.isEmpty ? 'Сессия' : p.basename(cwd));

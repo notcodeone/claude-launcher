@@ -167,6 +167,34 @@ void main() {
     });
   });
 
+  test('ссылка — только на сессии приложения Claude', () {
+    ClaudeCodeEvent from(String session, String host) => ClaudeCodeEvent(
+      kind: ClaudeCodeEventKind.promptSubmitted,
+      time: start,
+      sessionId: session,
+      hostSessionId: host,
+    );
+    sessions
+      ..handle(
+        from('app', 'local_d1f7d51d-ea2a-415c-a8a6-108bdc6f7492'),
+        'work',
+      )
+      ..handle(from('terminal', ''), 'work')
+      // Если переменной нет, заголовок может прийти неподставленным.
+      ..handle(from('odd', r'$CLAUDE_CODE_HOST_SESSION_ID'), 'work');
+    final links = {
+      for (final session in sessions.of('work')) session.id: session.link,
+    };
+    expect(
+      links['app'],
+      Uri.parse(
+        'claude://claude.ai/epitaxy/local_d1f7d51d-ea2a-415c-a8a6-108bdc6f7492',
+      ),
+    );
+    expect(links['terminal'], isNull);
+    expect(links['odd'], isNull);
+  });
+
   test('уборка: закрытые профили и давно готовые задачи', () {
     event(ClaudeCodeEventKind.promptSubmitted, session: 'working');
     event(ClaudeCodeEventKind.finished, session: 'done');

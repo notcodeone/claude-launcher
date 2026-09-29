@@ -274,19 +274,24 @@ class WindowsClaudeHost extends ClaudeHost {
   // ----------------------------------------------------------------- запуск
 
   @override
-  Future<void> launch(String? dataDir) async {
+  Future<void> launch(String? dataDir) => _start(dataDir);
+
+  /// Стандартный профиль — из пакета MSIX, как из «Пуска»; ссылку ему передаёт
+  /// протокол `claude:`, тоже от имени пакета. Остальные — напрямую с папкой.
+  Future<void> _start(String? dataDir, {Uri? link}) async {
     final installation = await locate().then((_) => _installation);
     if (installation == null) throw StateError('Claude не найден');
 
     final aumid = installation.aumid;
     if (dataDir == null && aumid != null) {
       await Process.start('explorer.exe', [
-        'shell:AppsFolder\\$aumid',
+        link?.toString() ?? 'shell:AppsFolder\\$aumid',
       ], mode: ProcessStartMode.detached);
       return;
     }
     await Process.start(installation.exe, [
       if (dataDir != null) '--user-data-dir=$dataDir',
+      if (link != null) '$link',
     ], mode: ProcessStartMode.detached);
   }
 
@@ -297,6 +302,15 @@ class WindowsClaudeHost extends ClaudeHost {
     AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY
     final dir = dataDirOf(instance);
     await launch(samePath(dir, defaultDataDir) ? null : dir);
+  }
+
+  /// Как [activate], но с ссылкой: её вместе с остальными аргументами получит
+  /// открытый экземпляр той же папки.
+  @override
+  Future<void> openLink(ClaudeInstance instance, Uri link) async {
+    AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY
+    final dir = dataDirOf(instance);
+    await _start(samePath(dir, defaultDataDir) ? null : dir, link: link);
   }
 
   /// Как нажатие на крестик: WM_CLOSE видимым окнам. Если Claude при этом

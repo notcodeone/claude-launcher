@@ -76,8 +76,8 @@ class CodeSessionsSection extends StatelessWidget {
   /// Последние сверху.
   final List<CodeSession> sessions;
 
-  /// Показывает окно Claude; null — сейчас нельзя (идёт переключение).
-  final VoidCallback? onOpen;
+  /// Открывает сессию в Claude; null — сейчас нельзя (идёт переключение).
+  final void Function(CodeSession session)? onOpen;
   final DateTime now;
 
   @override
@@ -109,7 +109,7 @@ class _SessionRow extends StatelessWidget {
   });
 
   final CodeSession session;
-  final VoidCallback? onOpen;
+  final void Function(CodeSession session)? onOpen;
   final DateTime now;
 
   @override
@@ -161,7 +161,12 @@ class _SessionRow extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Tooltip(
-                message: onOpen == null ? '' : 'Показать окно Claude',
+                message: onOpen == null
+                    ? ''
+                    : session.link == null
+                    // Сессию из терминала в приложении Claude не открыть.
+                    ? 'Показать окно Claude'
+                    : 'Открыть сессию в Claude',
                 child: QuietTextButton(
                   label: session.name,
                   style: textStyle,
@@ -169,7 +174,7 @@ class _SessionRow extends StatelessWidget {
                     context,
                     textStyle,
                   ),
-                  onTap: onOpen,
+                  onTap: onOpen == null ? null : () => onOpen!(session),
                 ),
               ),
             ),
