@@ -143,28 +143,37 @@ class HomePage extends StatelessWidget {
   }
 }
 
-/// Нижняя строка, как подвал сайта sensomni: копирайт слева, ссылки справа.
+/// Нижняя строка, как подвал сайта sensomni: копирайт слева, автор справа.
 class _Footer extends StatelessWidget {
   const _Footer();
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final style = Theme.of(
+      context,
+    ).textTheme.bodySmall!.copyWith(color: p.muted, fontSize: 11.5);
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 10, 16, 12),
+        // Справа меньше: у кнопки «NotCode» свой внутренний отступ.
+        padding: const EdgeInsets.fromLTRB(24, 8, 18, 10),
         child: Row(
           children: [
             Expanded(
               child: Text(
-                '© ${DateTime.now().year} ClaudeLauncher - Designed by NotCode',
-                style: TextStyle(color: p.muted, fontSize: 12.5),
+                '© ${DateTime.now().year} ClaudeLauncher',
+                style: style,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            // Пока без действия, но выглядит и реагирует как активная ссылка.
-            _FooterLink(label: 'Контакты', onTap: () {}),
+            Text('Designed by', style: style),
+            // Пока без действия, но нажимается и подсвечивается.
+            _FooterButton(
+              label: 'NotCode',
+              style: style.copyWith(color: p.text, fontWeight: FontWeight.w500),
+              onTap: () {},
+            ),
           ],
         ),
       ),
@@ -172,40 +181,33 @@ class _Footer extends StatelessWidget {
   }
 }
 
-/// Текстовая ссылка подвала: серая, при наведении — цвета текста.
-class _FooterLink extends StatefulWidget {
-  const _FooterLink({required this.label, required this.onTap});
+/// Текстовая кнопка подвала: без фона, при наведении — серая скруглённая подложка.
+class _FooterButton extends StatelessWidget {
+  const _FooterButton({
+    required this.label,
+    required this.style,
+    required this.onTap,
+  });
 
   final String label;
+  final TextStyle style;
   final VoidCallback onTap;
-
-  @override
-  State<_FooterLink> createState() => _FooterLinkState();
-}
-
-class _FooterLinkState extends State<_FooterLink> {
-  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
+    return Material(
+      type: MaterialType.transparency,
+      borderRadius: BorderRadius.circular(6),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: p.field,
+        highlightColor: p.text.withValues(alpha: 0.08),
+        splashColor: p.text.withValues(alpha: 0.10),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 150),
-            // От стиля темы — чтобы был тот же шрифт, что у остального текста.
-            style: Theme.of(context).textTheme.bodySmall!.copyWith(
-              color: _hovered ? p.text : p.muted,
-              fontSize: 12.5,
-            ),
-            child: Text(widget.label),
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          child: Text(label, style: style),
         ),
       ),
     );
