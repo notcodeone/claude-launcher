@@ -135,6 +135,17 @@ tool/make_dmg.sh 1.0.0                                      # macOS
 iscc /DAppVersion=1.0.0 windows\installer\claude_launcher.iss  # Windows, Inno Setup 6
 ```
 
+Окно DMG (фон, размер, положение значков) берётся из шаблона `tool/dmg/template.dmg`.
+`make_dmg.sh` только кладёт в него приложение, поэтому Finder для сборки не нужен, и она
+работает в CI. Фон в macOS 26 должен задать сам Finder: записи `dmgbuild`, AppleScript и
+ссылку на скрытый файл он не показывает. Поэтому шаблон готовится отдельно, с одним
+ручным шагом в Finder:
+
+```bash
+python3 tool/generate_dmg_background.py   # фон: tool/dmg/background.tiff (нужен Pillow)
+tool/make_dmg_template.sh                 # шаблон: tool/dmg/template.dmg
+```
+
 ## Ограничения
 
 - `--user-data-dir` — неофициальный способ; обновление Claude может его сломать.
