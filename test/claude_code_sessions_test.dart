@@ -155,12 +155,103 @@ void main() {
         expect(only().tokens, 65);
 
         // Новая задача считается с нуля.
+        event(ClaudeCodeEventKind.finished, minute: 9);
         event(ClaudeCodeEventKind.promptSubmitted, minute: 10);
         write([answer(text(28))]);
         await sessions.readTranscripts();
         expect(only().tokens, 7);
       },
     );
+
+    test(
+      'сообщение посреди работы задачу не начинает: время и токены идут дальше',
+      () async {
+        event(ClaudeCodeEventKind.promptSubmitted);
+        write([answer(text(400))]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 100);
+
+        // Так приходят и своя дописка, и отчёт фонового агента: хук срабатывает,
+        // а в переписку сообщение попадает вложением, не сообщением пользователя.
+        event(ClaudeCodeEventKind.promptSubmitted, minute: 5);
+        write([
+          {'type': 'queue-operation', 'operation': 'remove'},
+          {
+            'type': 'attachment',
+            'attachment': {'type': 'queued_command', 'prompt': 'и ещё вот что'},
+          },
+          answer(text(40)),
+        ]);
+        await sessions.readTranscripts();
+        expect(only().startedAt, start);
+        expect(only().tokens, 110);
+        expect(only().state, CodeSessionState.working);
+
+        // Посреди ожидания разрешения — тоже, и разрешение всё ещё ждут.
+        event(
+          ClaudeCodeEventKind.needsPermission,
+          minute: 6,
+          message: 'Claude needs your permission to use Bash',
+        );
+        event(ClaudeCodeEventKind.promptSubmitted, minute: 7);
+        expect(only().startedAt, start);
+        expect(only().state, CodeSessionState.needsPermission);
+        expect(only().message, contains('Bash'));
+      },
+    );
+
+    test('после прерывания новую задачу видно по переписке', () async {
+      event(ClaudeCodeEventKind.promptSubmitted);
+      write([answer(text(400))]);
+      await sessions.readTranscripts();
+
+      // Прервали — Stop не приходит; следом новая задача.
+      write([
+        {
+          'type': 'user',
+          'timestamp': '2026-09-29T11:04:00.000Z',
+          'message': {
+            'content': [
+              {'type': 'text', 'text': '[Request interrupted by user]'},
+            ],
+          },
+        },
+      ]);
+      await sessions.readTranscripts();
+      expect(only().startedAt, start, reason: 'прерывание — не новая задача');
+      expect(only().tokens, 100);
+
+      event(ClaudeCodeEventKind.promptSubmitted, minute: 5);
+      write([
+        {
+          'type': 'user',
+          'timestamp': '2026-09-29T11:05:00.000Z',
+          'origin': {'kind': 'human'},
+          'message': {'content': 'сделай иначе'},
+        },
+        answer(text(40)),
+      ]);
+      await sessions.readTranscripts();
+      expect(only().startedAt, DateTime.utc(2026, 9, 29, 11, 5).toLocal());
+      expect(only().tokens, 10);
+    });
+
+    test('пересказ после сжатия контекста — не новая задача', () async {
+      event(ClaudeCodeEventKind.promptSubmitted);
+      write([
+        answer(text(400)),
+        {
+          'type': 'user',
+          'isCompactSummary': true,
+          'timestamp': '2026-09-29T11:05:00.000Z',
+          'message': {'content': 'This session is being continued…'},
+        },
+        answer(text(40)),
+      ]);
+      await sessions.readTranscripts();
+      expect(only().startedAt, start);
+      expect(only().tokens, 110);
+    });
 
     test(
       'знакомство посреди задачи: начало — последнее сообщение пользователя',

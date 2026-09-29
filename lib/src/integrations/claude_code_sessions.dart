@@ -143,7 +143,14 @@ class ClaudeCodeSessions {
 
     switch (event.kind) {
       case ClaudeCodeEventKind.promptSubmitted:
-        _startTask(session, event.time);
+        // Этот хук срабатывает и на сообщения, отправленные посреди работы:
+        // своё, отчёт фонового агента, уведомление фоновой задачи. Задачу они
+        // продолжают, а не начинают, и ожидание разрешения не снимают. Если же
+        // работу прервали (тогда Stop не приходит) и дали новую, её начало
+        // найдётся в переписке.
+        if (isNew || !_inProgress(session.state)) {
+          _startTask(session, event.time);
+        }
       case ClaudeCodeEventKind.toolUsed:
         // После разрешения или ответа продолжается та же задача; после
         // «Готово» (или если начало задачи не пришло) — это уже новая.
@@ -168,6 +175,11 @@ class ClaudeCodeSessions {
         break;
     }
   }
+
+  /// Задача ещё идёт: работает или ждёт разрешения посреди работы.
+  static bool _inProgress(CodeSessionState state) =>
+      state == CodeSessionState.working ||
+      state == CodeSessionState.needsPermission;
 
   void _startTask(CodeSession session, DateTime time) {
     session
@@ -268,27 +280,45 @@ class ClaudeCodeSessions {
     }
   }
 
+  static void _restartAt(CodeSession session, Map<String, Object?> line) {
+    final time = DateTime.tryParse(line['timestamp'] as String? ?? '');
+    if (time != null) session.startedAt = time.toLocal();
+    session._charsByLine.clear();
+  }
+
   /// Сообщение пользователя, с которого начинается задача: текст, а не
   /// результат инструмента. Сообщения, отправленные во время работы, пишутся
-  /// в переписку иначе (`queue-operation`) — задачу они не начинают.
+  /// в переписку иначе (`queue-operation`, `queued_command`) — задачу они не
+  /// начинают. Не начинают её и отметка о прерывании, и пересказ разговора
+  /// после сжатия контекста.
   static bool _isPrompt(Map<String, Object?> line) {
     if (line['type'] != 'user' ||
         line['isMeta'] == true ||
-        line['isSidechain'] == true) {
+        line['isSidechain'] == true ||
+        line['isCompactSummary'] == true) {
       return false;
     }
     final message = line['message'];
     if (message is! Map) return false;
     final content = message['content'];
-    if (content is String) return content.trim().isNotEmpty;
+    if (content is String) return _isPromptText(content);
     if (content is! List) return false;
     var hasText = false;
     for (final block in content) {
       if (block is! Map) continue;
       if (block['type'] == 'tool_result') return false;
-      if (block['type'] == 'text') hasText = true;
+      if (block['type'] == 'text' && _isPromptText(block['text'])) {
+        hasText = true;
+      }
     }
     return hasText;
+  }
+
+  static bool _isPromptText(Object? text) {
+    if (text is! String) return false;
+    final trimmed = text.trim();
+    return trimmed.isNotEmpty &&
+        !trimmed.startsWith('[Request interrupted by user');
   }
 
   Future<void> _readNew(CodeSession session) async {
@@ -312,6 +342,9 @@ class ClaudeCodeSessions {
     if (lastNewline < 0) return;
     for (final line in _lines(bytes.sublist(0, lastNewline))) {
       _applyTitle(session, line);
+      // Новое сообщение пользователя — новая задача. Хуки об этом сообщают не
+      // всегда: после прерывания задача для них так и не закончилась.
+      if (_isPrompt(line)) _restartAt(session, line);
       _applyAnswer(session, line);
     }
     final chars = session._charsByLine.values.fold(0, (a, b) => a + b);
