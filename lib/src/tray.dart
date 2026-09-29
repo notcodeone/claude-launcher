@@ -41,7 +41,14 @@ class TrayController with TrayListener {
     final tooltip = 'Claude Launcher — ${_statusText()}';
 
     // Меню пересобирается при каждом опросе процессов; трогаем трей только при изменениях.
-    final state = jsonEncode([menu.toJson(), title, tooltip]);
+    // Сравниваем без id пунктов: они новые у каждого MenuItem, а клик по уже открытому
+    // меню приходит с id, который Dart ищет в последнем отправленном меню.
+    final state = jsonEncode([
+      for (final item in menu.items ?? const <MenuItem>[])
+        [item.type, item.key, item.label, item.checked, item.disabled],
+      title,
+      tooltip,
+    ]);
     if (state == _lastState) return;
     _lastState = state;
 
