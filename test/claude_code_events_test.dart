@@ -5,6 +5,7 @@ import 'package:claude_launcher/src/app_settings.dart';
 import 'package:claude_launcher/src/integrations/claude_code_events.dart';
 import 'package:claude_launcher/src/integrations/claude_code_hooks.dart';
 import 'package:claude_launcher/src/integrations/claude_code_integration.dart';
+import 'package:claude_launcher/src/integrations/claude_code_sessions.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,7 @@ Future<({int status, String body})> post(
   String? token,
   String path = '/claude-launcher/v1/event',
   String method = 'POST',
+  String? hostSession,
 }) async {
   final client = HttpClient();
   try {
@@ -27,6 +29,9 @@ Future<({int status, String body})> post(
     );
     request.headers.contentType = ContentType.json;
     if (token != null) request.headers.set('X-Claude-Launcher-Token', token);
+    if (hostSession != null) {
+      request.headers.set('X-Claude-Host-Session', hostSession);
+    }
     request.write(jsonEncode(json));
     final response = await request.close();
     return (
@@ -43,13 +48,40 @@ void main() {
     test('Stop — задача завершена, текст ответа не сохраняется', () {
       final event = ClaudeCodeEvent.fromHookJson({
         'hook_event_name': 'Stop',
+        'session_id': 's1',
+        'transcript_path': '/t/s1.jsonl',
         'cwd': '/Users/me/project',
         'last_assistant_message': 'секретный код',
-      });
+      }, hostSessionId: 'local_1');
       expect(event?.kind, ClaudeCodeEventKind.finished);
+      expect(event?.sessionId, 's1');
+      expect(event?.hostSessionId, 'local_1');
+      expect(event?.transcriptPath, '/t/s1.jsonl');
       expect(event?.cwd, '/Users/me/project');
       expect(event?.message, isEmpty);
     });
+
+    test(
+      'начало задачи, инструмент, закрытие сессии; текст задачи не сохраняется',
+      () {
+        ClaudeCodeEventKind? kind(Map<String, Object?> json) =>
+            ClaudeCodeEvent.fromHookJson(json)?.kind;
+        final prompt = ClaudeCodeEvent.fromHookJson({
+          'hook_event_name': 'UserPromptSubmit',
+          'prompt': 'секретная задача',
+        });
+        expect(prompt?.kind, ClaudeCodeEventKind.promptSubmitted);
+        expect(prompt?.message, isEmpty);
+        expect(
+          kind({'hook_event_name': 'PostToolUse', 'tool_name': 'Bash'}),
+          ClaudeCodeEventKind.toolUsed,
+        );
+        expect(
+          kind({'hook_event_name': 'SessionEnd', 'reason': 'clear'}),
+          ClaudeCodeEventKind.sessionEnded,
+        );
+      },
+    );
 
     test('Notification — разрешение или ожидание ввода', () {
       expect(
@@ -60,12 +92,22 @@ void main() {
         })?.kind,
         ClaudeCodeEventKind.needsPermission,
       );
+      for (final type in ['idle_prompt', 'elicitation_dialog']) {
+        expect(
+          ClaudeCodeEvent.fromHookJson({
+            'hook_event_name': 'Notification',
+            'notification_type': type,
+          })?.kind,
+          ClaudeCodeEventKind.needsAnswer,
+        );
+      }
       expect(
         ClaudeCodeEvent.fromHookJson({
           'hook_event_name': 'Notification',
-          'notification_type': 'idle_prompt',
-        })?.kind,
-        ClaudeCodeEventKind.waiting,
+          'notification_type': 'auth_success',
+        }),
+        isNull,
+        reason: 'ни о чём не просит',
       );
     });
 
@@ -90,9 +132,12 @@ void main() {
     tearDown(() => server.stop());
 
     test('с верным ключом — 200 с пустым телом и событие', () async {
-      final response = await post(port, {
-        'hook_event_name': 'Stop',
-      }, token: 'secret');
+      final response = await post(
+        port,
+        {'hook_event_name': 'Stop'},
+        token: 'secret',
+        hostSession: 'local_42',
+      );
       expect(response.status, 200);
       expect(
         response.body,
@@ -100,6 +145,7 @@ void main() {
         reason: 'иначе Claude Code сочтёт хук упавшим',
       );
       expect(events.single.kind, ClaudeCodeEventKind.finished);
+      expect(events.single.hostSessionId, 'local_42');
     });
 
     test('без ключа, с чужим ключом или не тем запросом — 404', () async {
@@ -140,6 +186,7 @@ void main() {
         settings: settings,
         launcher: launcher,
         hooks: hooks,
+        tickInterval: const Duration(milliseconds: 20),
       );
       addTearDown(integration.dispose);
 
@@ -156,16 +203,31 @@ void main() {
 
       host.start(null);
       await launcher.refresh();
-      await post(port, {
-        'hook_event_name': 'Stop',
+      final profile = launcher.profiles.single;
+      Future<void> send(String event) => post(port, {
+        'hook_event_name': event,
+        'session_id': 's1',
         'cwd': '/p/demo',
       }, token: settings.eventsToken);
-      final profile = launcher.profiles.single;
-      expect(integration.lastEvents[profile.id]?.cwd, '/p/demo');
 
+      await send('UserPromptSubmit');
+      final session = integration.sessions.of(profile.id).single;
+      expect(session.name, 'demo');
+      expect(session.state, CodeSessionState.working);
+      await send('Stop');
+      expect(session.state, CodeSessionState.done);
+
+      // Профиль закрыли — его сессии больше не показываем.
+      host.instances.clear();
+      await launcher.refresh();
+      expect(integration.sessions.of(profile.id), isEmpty);
+
+      host.start(null);
+      await launcher.refresh();
+      await send('UserPromptSubmit');
       await integration.setEnabled(false);
       expect(integration.connected, isFalse);
-      expect(integration.lastEvents, isEmpty);
+      expect(integration.sessions.isEmpty, isTrue);
       expect(
         await hooks.isInstalled(port: port, token: settings.eventsToken),
         isFalse,

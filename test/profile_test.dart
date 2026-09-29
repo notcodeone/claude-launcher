@@ -51,6 +51,7 @@ void main() {
         note: 'пет-проекты',
         folderName: 'Claude-Lichnyy',
         lastLaunchedAt: launched,
+        sessionsCollapsed: true,
       ),
     ]);
 
@@ -63,5 +64,7 @@ void main() {
     expect(loaded[1].icon, 'rocketLaunch');
     expect(loaded[0].icon, Profile.defaultIcon);
     expect(loaded[1].lastLaunchedAt, launched);
+    expect(loaded[0].sessionsCollapsed, isFalse);
+    expect(loaded[1].sessionsCollapsed, isTrue);
   });
 }

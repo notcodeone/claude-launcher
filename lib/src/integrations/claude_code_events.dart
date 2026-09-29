@@ -5,14 +5,23 @@ import 'dart:io';
 import 'claude_code_hooks.dart';
 
 enum ClaudeCodeEventKind {
-  /// Claude закончил ответ (`Stop`).
-  finished,
+  /// Отправлена задача (`UserPromptSubmit`).
+  promptSubmitted,
+
+  /// Отработал инструмент (`PostToolUse`) — значит, Claude работает.
+  toolUsed,
 
   /// Claude ждёт разрешения (`Notification` с `permission_prompt`).
   needsPermission,
 
-  /// Claude ждёт ввода (остальные `Notification`).
-  waiting,
+  /// Claude ждёт ответа (`Notification` с `idle_prompt` или вопросом).
+  needsAnswer,
+
+  /// Claude закончил ответ (`Stop`).
+  finished,
+
+  /// Сессию закрыли (`SessionEnd`).
+  sessionEnded,
 }
 
 /// Событие Claude Code, пришедшее от хука.
@@ -20,6 +29,9 @@ class ClaudeCodeEvent {
   const ClaudeCodeEvent({
     required this.kind,
     required this.time,
+    this.sessionId = '',
+    this.hostSessionId = '',
+    this.transcriptPath = '',
     this.message = '',
     this.cwd = '',
   });
@@ -27,20 +39,29 @@ class ClaudeCodeEvent {
   /// Разбор тела запроса хука; поля — по документации хуков Claude Code.
   static ClaudeCodeEvent? fromHookJson(
     Map<String, Object?> json, {
+    String hostSessionId = '',
     DateTime? time,
   }) {
     final kind = switch ((json['hook_event_name'], json['notification_type'])) {
-      ('Stop', _) => ClaudeCodeEventKind.finished,
+      ('UserPromptSubmit', _) => ClaudeCodeEventKind.promptSubmitted,
+      ('PostToolUse', _) => ClaudeCodeEventKind.toolUsed,
       ('Notification', 'permission_prompt') =>
         ClaudeCodeEventKind.needsPermission,
-      ('Notification', _) => ClaudeCodeEventKind.waiting,
+      ('Notification', 'idle_prompt' || 'elicitation_dialog') =>
+        ClaudeCodeEventKind.needsAnswer,
+      ('Stop', _) => ClaudeCodeEventKind.finished,
+      ('SessionEnd', _) => ClaudeCodeEventKind.sessionEnded,
+      // Прочие уведомления (auth_success и т.п.) ни о чём не просят.
       _ => null,
     };
     if (kind == null) return null;
     return ClaudeCodeEvent(
       kind: kind,
       time: time ?? DateTime.now(),
-      // Текст ответа (`last_assistant_message`) не сохраняем: там может быть код.
+      sessionId: json['session_id'] as String? ?? '',
+      hostSessionId: hostSessionId,
+      transcriptPath: json['transcript_path'] as String? ?? '',
+      // Текст запроса и ответа не сохраняем: там может быть код.
       message: json['message'] as String? ?? '',
       cwd: json['cwd'] as String? ?? '',
     );
@@ -49,7 +70,16 @@ class ClaudeCodeEvent {
   final ClaudeCodeEventKind kind;
   final DateTime time;
 
-  /// Текст уведомления Claude Code (для `Notification`).
+  /// Сессия Claude Code (как в имени файла переписки).
+  final String sessionId;
+
+  /// Сессия в приложении Claude (`local_…`); пусто для терминала.
+  final String hostSessionId;
+
+  /// Файл переписки — из него берутся название сессии и токены.
+  final String transcriptPath;
+
+  /// Текст уведомления Claude Code (для ожидания).
   final String message;
 
   /// Папка проекта сессии.
@@ -61,7 +91,7 @@ class ClaudeCodeEvent {
 class ClaudeCodeEventServer {
   ClaudeCodeEventServer({required this.token, required this.onEvent});
 
-  static const tokenHeader = 'X-Claude-Launcher-Token';
+  static const tokenHeader = ClaudeCodeHooks.tokenHeader;
 
   final String token;
   final void Function(ClaudeCodeEvent event) onEvent;
@@ -106,7 +136,11 @@ class ClaudeCodeEventServer {
       }
       final json = jsonDecode(await utf8.decoder.bind(request).join());
       if (json is Map<String, Object?>) {
-        final event = ClaudeCodeEvent.fromHookJson(json);
+        final event = ClaudeCodeEvent.fromHookJson(
+          json,
+          hostSessionId:
+              request.headers.value(ClaudeCodeHooks.hostSessionHeader) ?? '',
+        );
         if (event != null) onEvent(event);
       }
       // Пустое тело и 200: для Claude Code это «хук отработал успешно».

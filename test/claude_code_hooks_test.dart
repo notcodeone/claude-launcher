@@ -22,11 +22,17 @@ void main() {
   test('создаёт файл, если его нет', () async {
     await hooks.install(port: 5000, token: 'secret');
     expect(await hooks.isInstalled(port: 5000, token: 'secret'), isTrue);
-    final stop = (read()['hooks'] as Map)['Stop'] as List;
+    final section = read()['hooks'] as Map;
+    expect(section.keys, ClaudeCodeHooks.events);
+    final stop = section['Stop'] as List;
     final hook = ((stop.single as Map)['hooks'] as List).single as Map;
     expect(hook['type'], 'http');
     expect(hook['url'], 'http://127.0.0.1:5000/claude-launcher/v1/event');
-    expect(hook['headers'], {'X-Claude-Launcher-Token': 'secret'});
+    expect(hook['headers'], {
+      'X-Claude-Launcher-Token': 'secret',
+      'X-Claude-Host-Session': r'$CLAUDE_CODE_HOST_SESSION_ID',
+    });
+    expect(hook['allowedEnvVars'], ['CLAUDE_CODE_HOST_SESSION_ID']);
     expect(
       hooks.backup.existsSync(),
       isFalse,
@@ -87,6 +93,37 @@ void main() {
       expect(await hooks.isInstalled(port: 5001, token: 'b'), isTrue);
       expect(await hooks.isInstalled(port: 5000, token: 'a'), isFalse);
       expect(await hooks.isInstalled(port: 5001, token: 'a'), isFalse);
+    },
+  );
+
+  test(
+    'хуки прошлой версии обновляются: лишние убираются, новые добавляются',
+    () async {
+      file.parent.createSync(recursive: true);
+      final old = {
+        'hooks': [
+          {
+            'type': 'http',
+            'url': 'http://127.0.0.1:5000/claude-launcher/v1/event',
+          },
+        ],
+      };
+      file.writeAsStringSync(
+        jsonEncode({
+          'hooks': {
+            'Stop': [old],
+            // Прошлая версия слушала и то, что теперь не нужно.
+            'PreCompact': [old],
+          },
+        }),
+      );
+      expect(await hooks.isInstalled(port: 5000, token: 't'), isFalse);
+
+      await hooks.install(port: 5000, token: 't');
+      final section = read()['hooks'] as Map;
+      expect(section.keys, ClaudeCodeHooks.events);
+      expect(section['Stop'] as List, hasLength(1));
+      expect(await hooks.isInstalled(port: 5000, token: 't'), isTrue);
     },
   );
 

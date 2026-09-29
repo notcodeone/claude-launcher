@@ -205,12 +205,16 @@ class CircleIconButton extends StatelessWidget {
     required this.onPressed,
     this.tooltip,
     this.size = 36,
+    this.badge,
   });
 
   final IconData icon;
   final VoidCallback? onPressed;
   final String? tooltip;
   final double size;
+
+  /// Цветная точка справа сверху от значка.
+  final Color? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -225,15 +229,98 @@ class CircleIconButton extends StatelessWidget {
         highlightColor: p.text.withValues(alpha: 0.08),
         child: SizedBox.square(
           dimension: size,
-          child: Icon(
-            icon,
-            size: size * 0.55,
-            color: onPressed == null ? p.muted.withValues(alpha: 0.5) : p.text,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                icon,
+                size: size * 0.55,
+                color: onPressed == null
+                    ? p.muted.withValues(alpha: 0.5)
+                    : p.text,
+              ),
+              Positioned(
+                top: size * 0.14,
+                right: size * 0.14,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  transitionBuilder: (child, animation) =>
+                      ScaleTransition(scale: animation, child: child),
+                  child: badge == null
+                      ? const SizedBox.square(dimension: 9)
+                      // Обводка цветом карточки отделяет точку от значка.
+                      : Container(
+                          key: ValueKey(badge),
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: badge,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: p.card, width: 1.5),
+                          ),
+                        ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
     return tooltip == null ? button : Tooltip(message: tooltip!, child: button);
+  }
+}
+
+/// Текст-кнопка без фона: при наведении — серая скруглённая подложка.
+/// Отступы по бокам [horizontalPadding] — обычно в ширину пробела, чтобы
+/// кнопка читалась как слово во фразе.
+class QuietTextButton extends StatelessWidget {
+  const QuietTextButton({
+    super.key,
+    required this.label,
+    required this.style,
+    required this.horizontalPadding,
+    required this.onTap,
+  });
+
+  final String label;
+  final TextStyle style;
+  final double horizontalPadding;
+  final VoidCallback? onTap;
+
+  /// Ширина пробела в [style] — для [horizontalPadding].
+  static double spaceWidth(BuildContext context, TextStyle style) =>
+      (TextPainter(
+        text: TextSpan(text: ' ', style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout()).width;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Material(
+      type: MaterialType.transparency,
+      borderRadius: BorderRadius.circular(6),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: p.field,
+        highlightColor: p.text.withValues(alpha: 0.08),
+        splashColor: p.text.withValues(alpha: 0.10),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
+            vertical: 3,
+          ),
+          child: Text(
+            label,
+            style: style,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
   }
 }
 

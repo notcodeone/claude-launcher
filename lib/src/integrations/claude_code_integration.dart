@@ -1,27 +1,36 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../app_settings.dart';
 import '../launcher_controller.dart';
 import 'claude_code_events.dart';
 import 'claude_code_hooks.dart';
+import 'claude_code_sessions.dart';
 
-/// События Claude Code: подключение хуков и приём событий. Задел для
-/// уведомлений в Telegram — сейчас последнее событие видно на карточке профиля.
+/// События Claude Code: подключение хуков, приём событий и сессии открытого
+/// профиля (показываются на его карточке). Задел для уведомлений в Telegram.
 class ClaudeCodeIntegration extends ChangeNotifier {
   ClaudeCodeIntegration({
     required this.settings,
     required this.launcher,
     ClaudeCodeHooks? hooks,
-  }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser();
+    this.tickInterval = const Duration(seconds: 2),
+  }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser() {
+    launcher.addListener(_prune);
+  }
 
   final AppSettings settings;
   final LauncherController launcher;
   final ClaudeCodeHooks hooks;
 
-  ClaudeCodeEventServer? _server;
+  /// Как часто дочитывать переписку работающих сессий (время и токены).
+  final Duration tickInterval;
 
-  /// Последнее событие для каждого профиля (по id).
-  final Map<String, ClaudeCodeEvent> lastEvents = {};
+  ClaudeCodeEventServer? _server;
+  Timer? _ticker;
+
+  final sessions = ClaudeCodeSessions();
 
   /// Почему не удалось подключить или отключить события — видно в настройках.
   String? error;
@@ -51,6 +60,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       final port = await server.start(settings.eventsPort);
       if (port != settings.eventsPort) await settings.setEventsPort(port);
       final token = settings.eventsToken;
+      // Обновление лаунчера с новыми событиями тоже переустановит хуки.
       if (!await hooks.isInstalled(port: port, token: token)) {
         await hooks.install(port: port, token: token);
       }
@@ -66,7 +76,9 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   Future<void> _disconnect() async {
     await _server?.stop();
     _server = null;
-    lastEvents.clear();
+    _ticker?.cancel();
+    _ticker = null;
+    sessions.clear();
     try {
       await hooks.uninstall();
       error = null;
@@ -77,15 +89,43 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   /// Одновременно открыт один профиль — событие относится к нему.
-  void _onEvent(ClaudeCodeEvent event) {
+  Future<void> _onEvent(ClaudeCodeEvent event) async {
     final running = launcher.runningProfiles;
     if (running.length != 1) return;
-    lastEvents[running.single.id] = event;
+    sessions.handle(event, running.single.id);
+    await sessions.readTranscripts();
+    _ensureTicker();
     notifyListeners();
+  }
+
+  /// Пока Claude работает, раз в [tickInterval] обновляем время и токены.
+  void _ensureTicker() {
+    if (_ticker != null || !sessions.anyWorking) return;
+    _ticker = Timer.periodic(tickInterval, (_) async {
+      await sessions.readTranscripts();
+      if (!sessions.anyWorking) {
+        _ticker?.cancel();
+        _ticker = null;
+      }
+      notifyListeners();
+    });
+  }
+
+  /// Сессии закрытого профиля и давно выполненные задачи убираем.
+  void _prune() {
+    final changed = sessions.prune(
+      runningProfileIds: {
+        for (final profile in launcher.runningProfiles) profile.id,
+      },
+      now: DateTime.now(),
+    );
+    if (changed) notifyListeners();
   }
 
   @override
   void dispose() {
+    launcher.removeListener(_prune);
+    _ticker?.cancel();
     _server?.stop();
     super.dispose();
   }

@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Хуки Claude Code, через которые лаунчер узнаёт о событиях: задача завершена
-/// (`Stop`) и Claude ждёт пользователя (`Notification`).
+/// Хуки Claude Code, через которые лаунчер узнаёт, что делает Claude Code:
+/// работает, ждёт пользователя или закончил задачу (см. [events]).
 ///
 /// Хуки — официальный механизм Claude Code: работают и в терминале, и во вкладке
 /// Code приложения Claude. Лаунчер добавляет HTTP-хуки на свой локальный адрес;
@@ -25,29 +25,51 @@ class ClaudeCodeHooks {
   final File settingsFile;
 
   static const marker = '/claude-launcher/';
-  static const events = ['Stop', 'Notification'];
+
+  /// Начало задачи, работа инструментов (запасной признак «работает»: в
+  /// приложении начало задачи приходит не всегда), ожидание, конец, закрытие сессии.
+  static const events = [
+    'UserPromptSubmit',
+    'PostToolUse',
+    'Notification',
+    'Stop',
+    'SessionEnd',
+  ];
+
+  /// Заголовок с идентификатором сессии в приложении Claude (`local_…`).
+  static const hostSessionHeader = 'X-Claude-Host-Session';
+  static const tokenHeader = 'X-Claude-Launcher-Token';
 
   static String endpoint(int port) => 'http://127.0.0.1:$port${marker}v1/event';
 
   /// Исходный файл до первого изменения лаунчером.
   File get backup => File('${settingsFile.path}.claude-launcher-backup');
 
+  /// Хук лаунчера. Короткий таймаут: если лаунчер завис, Claude Code ждёт недолго.
+  static Map<String, Object?> hookFor({
+    required int port,
+    required String token,
+  }) => {
+    'type': 'http',
+    'url': endpoint(port),
+    'timeout': 2,
+    'headers': {
+      tokenHeader: token,
+      hostSessionHeader: r'$CLAUDE_CODE_HOST_SESSION_ID',
+    },
+    'allowedEnvVars': ['CLAUDE_CODE_HOST_SESSION_ID'],
+  };
+
   /// Добавляет (или обновляет) хуки лаунчера. Остальное содержимое не меняется.
   Future<void> install({required int port, required String token}) async {
     final settings = await _read();
-    final hooks = _hooksOf(settings);
+    // Сначала убираем свои записи отовсюду — в том числе от прошлых версий.
+    final hooks = _withoutOursEverywhere(_hooksOf(settings));
     for (final event in events) {
       hooks[event] = [
-        ..._withoutOurs(hooks[event]),
+        ...?hooks[event] as List?,
         {
-          'hooks': [
-            {
-              'type': 'http',
-              'url': endpoint(port),
-              'timeout': 5,
-              'headers': {'X-Claude-Launcher-Token': token},
-            },
-          ],
+          'hooks': [hookFor(port: port, token: token)],
         },
       ];
     }
@@ -59,21 +81,9 @@ class ClaudeCodeHooks {
   Future<void> uninstall() async {
     if (!await settingsFile.exists()) return;
     final settings = await _read();
-    final hooks = _hooksOf(settings);
-    var changed = false;
-    for (final event in events) {
-      final before = hooks[event];
-      if (before == null) continue;
-      final after = _withoutOurs(before);
-      if (after.length == (before as List).length) continue;
-      changed = true;
-      if (after.isEmpty) {
-        hooks.remove(event);
-      } else {
-        hooks[event] = after;
-      }
-    }
-    if (!changed) return;
+    final before = _hooksOf(settings);
+    final hooks = _withoutOursEverywhere(before);
+    if (jsonEncode(hooks) == jsonEncode(before)) return;
     if (hooks.isEmpty) {
       settings.remove('hooks');
     } else {
@@ -82,17 +92,14 @@ class ClaudeCodeHooks {
     await _write(settings);
   }
 
-  /// Стоят ли хуки лаунчера на [port] с ключом [token].
+  /// Стоят ли ровно такие хуки лаунчера, как ставит [install] для [port] и [token].
   Future<bool> isInstalled({required int port, required String token}) async {
     if (!await settingsFile.exists()) return false;
     final hooks = _hooksOf(await _read());
+    final expected = jsonEncode(hookFor(port: port, token: token));
     return events.every(
       (event) => (hooks[event] as List? ?? const []).any(
-        (group) => _ours(group).any(
-          (hook) =>
-              hook['url'] == endpoint(port) &&
-              (hook['headers'] as Map?)?['X-Claude-Launcher-Token'] == token,
-        ),
+        (group) => _ours(group).any((hook) => jsonEncode(hook) == expected),
       ),
     );
   }
@@ -129,6 +136,17 @@ class ClaudeCodeHooks {
     }
     return Map.of(hooks);
   }
+
+  /// Все разделы без записей лаунчера; опустевшие разделы убираются.
+  static Map<String, Object?> _withoutOursEverywhere(
+    Map<String, Object?> hooks,
+  ) => {
+    for (final MapEntry(:key, :value) in hooks.entries)
+      if (value is! List)
+        key: value
+      else if (_withoutOurs(value) case final rest when rest.isNotEmpty)
+        key: rest,
+  };
 
   static List<Object?> _withoutOurs(Object? groups) => [
     for (final group in groups as List? ?? const [])

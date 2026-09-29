@@ -9,6 +9,7 @@ class Profile {
     this.icon = defaultIcon,
     this.folderName,
     this.lastLaunchedAt,
+    this.sessionsCollapsed = false,
   });
 
   /// Цветные метки: видны и в меню трея, и в строке меню macOS.
@@ -32,6 +33,9 @@ class Profile {
   /// Когда профиль запускали через лаунчер; `null` — ни разу (нужен первый вход).
   final DateTime? lastLaunchedAt;
 
+  /// Сессии Claude Code на карточке свёрнуты.
+  final bool sessionsCollapsed;
+
   bool get usesDefaultFolder => folderName == null;
 
   String get title => '$marker $name';
@@ -43,6 +47,7 @@ class Profile {
     String? marker,
     String? icon,
     DateTime? lastLaunchedAt,
+    bool? sessionsCollapsed,
   }) {
     return Profile(
       id: id,
@@ -53,6 +58,7 @@ class Profile {
       icon: icon ?? this.icon,
       folderName: folderName,
       lastLaunchedAt: lastLaunchedAt ?? this.lastLaunchedAt,
+      sessionsCollapsed: sessionsCollapsed ?? this.sessionsCollapsed,
     );
   }
 
@@ -65,6 +71,7 @@ class Profile {
     'icon': icon,
     'folderName': folderName,
     'lastLaunchedAt': lastLaunchedAt?.toIso8601String(),
+    'sessionsCollapsed': sessionsCollapsed,
   };
 
   factory Profile.fromJson(Map<String, Object?> json) {
@@ -80,6 +87,7 @@ class Profile {
       lastLaunchedAt: lastLaunched == null
           ? null
           : DateTime.parse(lastLaunched),
+      sessionsCollapsed: json['sessionsCollapsed'] as bool? ?? false,
     );
   }
 }

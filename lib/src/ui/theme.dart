@@ -13,6 +13,8 @@ class Palette extends ThemeExtension<Palette> {
     required this.primary,
     required this.onPrimary,
     required this.success,
+    required this.warning,
+    required this.info,
     required this.danger,
     required this.dangerSurface,
     required this.divider,
@@ -31,6 +33,12 @@ class Palette extends ThemeExtension<Palette> {
   final Color primary;
   final Color onPrimary;
   final Color success;
+
+  /// «Ожидает»: Claude просит разрешение.
+  final Color warning;
+
+  /// «Ожидает»: Claude ждёт ответа.
+  final Color info;
   final Color danger;
   final Color dangerSurface;
   final Color divider;
@@ -51,6 +59,8 @@ class Palette extends ThemeExtension<Palette> {
     primary: Color(0xFF0A0A0A),
     onPrimary: Color(0xFFFFFFFF),
     success: Color(0xFF12A150),
+    warning: Color(0xFFD97706),
+    info: Color(0xFF2563EB),
     danger: Color(0xFFD93025),
     dangerSurface: Color(0xFFFDECEA),
     divider: Color(0xFFEAEAEC),
@@ -68,6 +78,8 @@ class Palette extends ThemeExtension<Palette> {
     primary: Color(0xFFF4F4F5),
     onPrimary: Color(0xFF0A0A0A),
     success: Color(0xFF34C77B),
+    warning: Color(0xFFF59E0B),
+    info: Color(0xFF60A5FA),
     danger: Color(0xFFFF6B5E),
     dangerSurface: Color(0xFF3A1714),
     divider: Color(0xFF2A2A2F),

@@ -5,11 +5,11 @@ import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
-import '../integrations/claude_code_events.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
+import 'code_sessions_view.dart';
 import 'profile_dialog.dart';
 import 'settings_dialog.dart';
 import 'theme.dart';
@@ -245,11 +245,7 @@ class _Footer extends StatelessWidget {
     ).textTheme.bodySmall!.copyWith(color: p.muted, fontSize: 11.5);
     // Отступы кнопки «NotCode» — ровно в ширину пробела: «Designed by NotCode»
     // читается как обычная фраза, а подложка при наведении не липнет к буквам.
-    final space = (TextPainter(
-      text: TextSpan(text: ' ', style: style),
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout()).width;
+    final space = QuietTextButton.spaceWidth(context, style);
     return Padding(
       // Справа меньше на ширину пробела, чтобы текст стоял на отступе 24, как слева.
       padding: EdgeInsets.fromLTRB(
@@ -269,51 +265,13 @@ class _Footer extends StatelessWidget {
           ),
           Text('Designed by', style: style),
           // Пока без действия, но нажимается и подсвечивается.
-          _FooterButton(
+          QuietTextButton(
             label: 'NotCode',
             style: style,
             horizontalPadding: space,
             onTap: () {},
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Текстовая кнопка подвала: без фона, при наведении — серая скруглённая подложка.
-class _FooterButton extends StatelessWidget {
-  const _FooterButton({
-    required this.label,
-    required this.style,
-    required this.horizontalPadding,
-    required this.onTap,
-  });
-
-  final String label;
-  final TextStyle style;
-  final double horizontalPadding;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Material(
-      type: MaterialType.transparency,
-      borderRadius: BorderRadius.circular(6),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        hoverColor: p.field,
-        highlightColor: p.text.withValues(alpha: 0.08),
-        splashColor: p.text.withValues(alpha: 0.10),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding,
-            vertical: 3,
-          ),
-          child: Text(label, style: style),
-        ),
       ),
     );
   }
@@ -533,6 +491,7 @@ class _ProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final palette = context.palette;
     final running = launcher.isRunning(profile);
     final switching = launcher.switchStatus != null;
     final details = [
@@ -543,106 +502,153 @@ class _ProfileCard extends StatelessWidget {
       else
         'Папка ${profile.folderName}',
       if (profile.note.isNotEmpty) profile.note,
-      ?_eventLine(claudeCode.lastEvents[profile.id]),
     ];
+    final sessions = claudeCode.sessions.of(profile.id);
+    final collapsed = profile.sessionsCollapsed;
+    final canShow = !switching && launcher.claudePath != null;
+    void show() {
+      if (interactive) launcher.switchTo(profile);
+    }
+
+    final header = Row(
+      children: [
+        ProfileAvatar(marker: profile.marker, icon: profile.icon),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      profile.name,
+                      style: theme.textTheme.titleMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (running) ...[
+                    const SizedBox(width: 8),
+                    const StatusDot(label: 'Открыт'),
+                  ],
+                  // Профиль, который лаунчер открывает при своём запуске.
+                  if (settings.startupProfileId == profile.id) ...[
+                    const SizedBox(width: 8),
+                    const Tooltip(
+                      message: 'Открывается при запуске лаунчера',
+                      child: Tag(label: 'По умолчанию'),
+                    ),
+                  ],
+                ],
+              ),
+              if (profile.email.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  profile.email,
+                  style: theme.textTheme.bodyMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 4),
+              for (final line in details)
+                Text(line, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ],
+    );
 
     return Builder(
       builder: (cardContext) => SoftCard(
-        // Справа 8: у кнопок-иконок свои 8 px вокруг значка — визуально те же 16.
-        padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
-        child: Row(
-          children: [
-            ProfileAvatar(marker: profile.marker, icon: profile.icon),
-            const SizedBox(width: 12),
-            Expanded(
+        padding: EdgeInsets.zero,
+        // Сессии сворачиваются нажатием на карточку.
+        child: Material(
+          type: MaterialType.transparency,
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: sessions.isEmpty
+                ? null
+                : () {
+                    if (interactive) _toggleSessions();
+                  },
+            hoverColor: palette.text.withValues(alpha: 0.018),
+            highlightColor: palette.text.withValues(alpha: 0.03),
+            splashColor: palette.text.withValues(alpha: 0.04),
+            child: Padding(
+              // Справа 8: у кнопок-иконок свои 8 px вокруг значка — визуально те же 16.
+              padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Flexible(
-                        child: Text(
-                          profile.name,
-                          style: theme.textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      Expanded(
+                        child: sessions.isEmpty || !interactive
+                            ? header
+                            : Tooltip(
+                                message: collapsed
+                                    ? 'Показать сессии (${sessions.length})'
+                                    : 'Скрыть сессии',
+                                waitDuration: const Duration(milliseconds: 700),
+                                child: header,
+                              ),
                       ),
-                      if (running) ...[
-                        const SizedBox(width: 8),
-                        const StatusDot(label: 'Открыт'),
-                      ],
-                      // Профиль, который лаунчер открывает при своём запуске.
-                      if (settings.startupProfileId == profile.id) ...[
-                        const SizedBox(width: 8),
-                        const Tooltip(
-                          message: 'Открывается при запуске лаунчера',
-                          child: Tag(label: 'По умолчанию'),
-                        ),
-                      ],
+                      const SizedBox(width: 12),
+                      CircleIconButton(
+                        icon: running ? AppIcons.show : AppIcons.launch,
+                        tooltip: !interactive
+                            ? null
+                            : running
+                            ? 'Показать окно Claude'
+                            : 'Открыть профиль',
+                        // Свёрнуто — последнее состояние видно точкой на глазе.
+                        badge: collapsed && sessions.isNotEmpty
+                            ? sessionColor(palette, sessions.first.state)
+                            : null,
+                        // У копии карточки кнопка выглядит активной, но клики до неё не доходят.
+                        onPressed: canShow ? show : null,
+                      ),
+                      CircleIconButton(
+                        icon: AppIcons.more,
+                        tooltip: interactive ? 'Ещё' : null,
+                        onPressed: () {
+                          if (interactive) _openMenu(cardContext);
+                        },
+                      ),
                     ],
                   ),
-                  if (profile.email.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      profile.email,
-                      style: theme.textTheme.bodyMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  for (final line in details)
-                    Text(line, style: theme.textTheme.bodySmall),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: collapsed || sessions.isEmpty
+                        ? const SizedBox(width: double.infinity)
+                        : CodeSessionsSection(
+                            sessions: sessions,
+                            onOpen: canShow ? show : null,
+                            now: DateTime.now(),
+                          ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            CircleIconButton(
-              icon: running ? AppIcons.show : AppIcons.launch,
-              tooltip: !interactive
-                  ? null
-                  : running
-                  ? 'Показать окно Claude'
-                  : 'Открыть профиль',
-              // У копии карточки кнопка выглядит активной, но клики до неё не доходят.
-              onPressed: switching || launcher.claudePath == null
-                  ? null
-                  : () {
-                      if (interactive) launcher.switchTo(profile);
-                    },
-            ),
-            CircleIconButton(
-              icon: AppIcons.more,
-              tooltip: interactive ? 'Ещё' : null,
-              onPressed: () {
-                if (interactive) _openMenu(cardContext);
-              },
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  /// «Claude Code завершил задачу · claude-launcher · 14:32».
-  static String? _eventLine(ClaudeCodeEvent? event) {
-    if (event == null) return null;
-    final what = switch (event.kind) {
-      ClaudeCodeEventKind.finished => 'Claude Code завершил задачу',
-      ClaudeCodeEventKind.needsPermission => 'Claude Code ждёт разрешения',
-      ClaudeCodeEventKind.waiting => 'Claude Code ждёт ответа',
-    };
-    final project = event.cwd.isEmpty ? '' : ' · ${p.basename(event.cwd)}';
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '$what$project · ${two(event.time.hour)}:${two(event.time.minute)}';
-  }
+  Future<void> _toggleSessions() => launcher.updateProfile(
+    profile.copyWith(sessionsCollapsed: !profile.sessionsCollapsed),
+  );
 
   Future<void> _openMenu(BuildContext cardContext) async {
     final running = launcher.isRunning(profile);
     final action = await showAnchoredMenu(
       anchorContext: cardContext,
       highlight: ListenableBuilder(
-        listenable: launcher,
+        listenable: Listenable.merge([launcher, claudeCode]),
         builder: (_, _) => _ProfileCard(
           launcher: launcher,
           settings: settings,
