@@ -35,7 +35,8 @@ enum AppButtonKind {
   /// Чёрная кнопка — главное действие.
   primary,
 
-  /// Белая кнопка на тени.
+  /// Плоская серая кнопка без тени — для второстепенных действий внутри карточек,
+  /// где тень на тени смотрится лишней.
   secondary,
 
   /// Просто текст, как «Вернуться в корзину».
@@ -71,7 +72,7 @@ class AppButton extends StatelessWidget {
     final (background, foreground) = switch (kind) {
       AppButtonKind.primary =>
         enabled ? (p.primary, p.onPrimary) : (p.field, p.muted),
-      AppButtonKind.secondary => (p.card, enabled ? p.text : p.muted),
+      AppButtonKind.secondary => (p.field, enabled ? p.text : p.muted),
       AppButtonKind.text => (
         Colors.transparent,
         enabled ? (color ?? p.text) : p.muted,
@@ -99,16 +100,7 @@ class AppButton extends StatelessWidget {
     );
 
     return Container(
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: radius,
-        border: kind == AppButtonKind.secondary
-            ? Border.all(color: p.cardBorder)
-            : null,
-        boxShadow: kind == AppButtonKind.secondary && enabled
-            ? p.softShadow
-            : null,
-      ),
+      decoration: BoxDecoration(color: background, borderRadius: radius),
       child: Material(
         type: MaterialType.transparency,
         child: InkWell(
