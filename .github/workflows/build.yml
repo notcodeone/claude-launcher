@@ -24,14 +24,14 @@ jobs:
       # Юнит-тесты используют POSIX-пути, поэтому гоняем их здесь.
       - run: flutter test
       - run: flutter build macos --release
-      # .app упаковываем сами: при загрузке папки теряются права на запуск и
-      # ссылки внутри бандла.
-      - name: Упаковать .app
-        run: ditto -c -k --keepParent "build/macos/Build/Products/Release/Claude Launcher.app" ClaudeLauncher-macos.zip
-      # archive: false — архив уходит как есть, без второй обёртки от GitHub.
+      - name: Версия из pubspec.yaml
+        run: echo "APP_VERSION=$(sed -nE 's/^version:[[:space:]]*([0-9.]+).*/\1/p' pubspec.yaml)" >> "$GITHUB_ENV"
+      - name: DMG-образ
+        run: tool/make_dmg.sh "$APP_VERSION"
+      # archive: false — образ скачивается как есть, без обёртки в zip.
       - uses: actions/upload-artifact@v7
         with:
-          path: ClaudeLauncher-macos.zip
+          path: build/installer/ClaudeLauncher-${{ env.APP_VERSION }}.dmg
           archive: false
 
   windows:
@@ -45,7 +45,24 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
+      - name: Версия из pubspec.yaml
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Установщик (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$env:APP_VERSION" windows\installer\claude_launcher.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
-          name: ClaudeLauncher-windows
+          path: build/installer/ClaudeLauncher-Setup-${{ env.APP_VERSION }}.exe
+          archive: false
+      # Переносная версия: распаковать папку целиком и запустить claude_launcher.exe.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ClaudeLauncher-windows-portable
           path: build/windows/x64/runner/Release/

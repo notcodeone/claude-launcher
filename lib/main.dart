@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'src/app_settings.dart';
 import 'src/app_window.dart';
 import 'src/claude/claude_host.dart';
+import 'src/integrations/claude_code_hooks.dart';
 import 'src/integrations/claude_code_integration.dart';
 import 'src/launcher_controller.dart';
 import 'src/profile_store.dart';
@@ -19,11 +20,17 @@ import 'src/ui/theme.dart';
 /// Нужен, чтобы показать окно приветствия из main(), вне дерева виджетов.
 final _navigatorKey = GlobalKey<NavigatorState>();
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await windowManager.ensureInitialized();
-
   final supportDir = await getApplicationSupportDirectory();
+
+  // Запускает деинсталлятор Windows: убираем за собой и выходим, окно не показываем.
+  if (args.contains('--cleanup')) {
+    await _cleanup(supportDir);
+    exit(0);
+  }
+
+  await windowManager.ensureInitialized();
   final launcher = LauncherController(
     host: ClaudeHost.forCurrentPlatform(),
     store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
@@ -102,6 +109,25 @@ Future<void> main() async {
   }
 
   await launcher.openOnStartup(settings.startupProfileId);
+}
+
+/// Удаление лаунчера: убирает его хуки из `~/.claude/settings.json` и
+/// возвращает значок Claude. Профили Claude и их данные не трогает.
+Future<void> _cleanup(Directory supportDir) async {
+  final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
+  await settings.load();
+  try {
+    await ClaudeCodeHooks.forCurrentUser().uninstall();
+  } catch (error) {
+    debugPrint('Не удалось убрать хуки Claude Code: $error');
+  }
+  if (settings.hideClaudeIcon) {
+    try {
+      await ClaudeHost.forCurrentPlatform().setClaudeIconHidden(false);
+    } catch (error) {
+      debugPrint('Не удалось вернуть значок Claude: $error');
+    }
+  }
 }
 
 class ClaudeLauncherApp extends StatelessWidget {
