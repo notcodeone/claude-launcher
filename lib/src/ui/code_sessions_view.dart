@@ -35,10 +35,16 @@ String formatElapsed(Duration elapsed) {
 
 /// «850 токенов», «3,1 тыс. токенов», «1,2 млн токенов».
 String formatTokens(int count) {
-  if (count < 1000) return '$count ${_tokensWord(count)}';
+  final (number, unit) = tokenParts(count);
+  return '$number $unit';
+}
+
+/// Число и подпись по отдельности: «3,1» и «тыс. токенов».
+(String, String) tokenParts(int count) {
+  if (count < 1000) return ('$count', _tokensWord(count));
   final thousands = count / 1000;
-  if (thousands.round() < 1000) return '${_short(thousands)} тыс. токенов';
-  return '${_short(count / 1000000)} млн токенов';
+  if (thousands.round() < 1000) return (_short(thousands), 'тыс. токенов');
+  return (_short(count / 1000000), 'млн токенов');
 }
 
 /// Одна цифра после запятой — только у небольших чисел: «3,1», «12», «125».
@@ -208,56 +214,55 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-/// Токены набегают к новому значению за секунду, а не перескакивают: в
-/// переписку ответ попадает целиком, ступенькой. Новая задача — сразу с нуля.
-class _TokenCount extends StatefulWidget {
+/// Токены: новое значение сменяет прежнее затуханием. Число и подпись меняются
+/// по отдельности — пока растёт только число, «тыс. токенов» стоит на месте.
+class _TokenCount extends StatelessWidget {
   const _TokenCount({required this.tokens, required this.style});
 
   final int tokens;
   final TextStyle style;
 
   @override
-  State<_TokenCount> createState() => _TokenCountState();
+  Widget build(BuildContext context) {
+    final (number, unit) = tokenParts(tokens);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _FadingText(number, style: style),
+        Text(' ', style: style),
+        _FadingText(unit, style: style),
+      ],
+    );
+  }
 }
 
-class _TokenCountState extends State<_TokenCount>
-    with SingleTickerProviderStateMixin {
-  late final _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  );
-  late int _from = widget.tokens;
-  late int _to = widget.tokens;
+/// Текст, который при смене сначала гаснет, потом проявляется новым. Ширина
+/// меняется плавно, поэтому соседи по строке не прыгают. Строка прижата к
+/// правому краю — подстраивается левая сторона.
+class _FadingText extends StatelessWidget {
+  const _FadingText(this.text, {required this.style});
 
-  int get _value =>
-      (_from + (_to - _from) * Curves.easeOutCubic.transform(_controller.value))
-          .round();
+  final String text;
+  final TextStyle style;
+
+  static const _duration = Duration(milliseconds: 400);
 
   @override
-  void didUpdateWidget(_TokenCount old) {
-    super.didUpdateWidget(old);
-    if (widget.tokens == _to) return;
-    final shown = _value;
-    _to = widget.tokens;
-    if (_to < shown) {
-      _from = _to;
-      _controller.value = 1;
-    } else {
-      _from = shown;
-      _controller.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _controller,
-    builder: (_, _) => Text(formatTokens(_value), style: widget.style),
+  Widget build(BuildContext context) => AnimatedSize(
+    duration: _duration,
+    curve: Curves.easeInOut,
+    alignment: Alignment.centerRight,
+    child: AnimatedSwitcher(
+      duration: _duration,
+      // Прежний текст гаснет в первой половине, новый проявляется во второй.
+      switchInCurve: const Interval(0.5, 1, curve: Curves.easeOut),
+      switchOutCurve: const Interval(0.5, 1, curve: Curves.easeIn),
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.centerRight,
+        children: [...previous, ?current],
+      ),
+      child: Text(text, key: ValueKey(text), style: style),
+    ),
   );
 }
 

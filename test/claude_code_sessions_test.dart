@@ -449,5 +449,11 @@ void main() {
       expect(formatTokens(999600), '1 млн токенов');
       expect(formatTokens(1260000), '1,3 млн токенов');
     });
+
+    test('число и подпись токенов по отдельности', () {
+      expect(tokenParts(22), ('22', 'токена'));
+      expect(tokenParts(3142), ('3,1', 'тыс. токенов'));
+      expect(tokenParts(1260000), ('1,3', 'млн токенов'));
+    });
   });
 }
