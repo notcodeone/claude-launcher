@@ -94,7 +94,9 @@ jobs:
             echo "::error::В CHANGELOG.md нет раздела ## $APP_VERSION"
             exit 1
           fi
-      - uses: actions/download-artifact@v7
+      # v8: артефакты без zip (archive: false — DMG и установщик) скачиваются как
+      # есть; v7 пытался распаковать их и падал.
+      - uses: actions/download-artifact@v8
         with:
           path: dist
       - name: Файлы выпуска
