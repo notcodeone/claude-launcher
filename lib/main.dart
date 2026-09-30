@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -120,12 +121,15 @@ Future<void> main(List<String> args) async {
     },
   );
 
+  // Версия из самого приложения — её Flutter берёт из pubspec.yaml.
+  final version = (await PackageInfo.fromPlatform()).version;
   runApp(
     ClaudeLauncherApp(
       launcher: launcher,
       settings: settings,
       claudeCode: claudeCode,
       location: location,
+      version: version,
     ),
   );
   // Экран лаунчера — сразу: на нём видно, как проверяется страна и
@@ -320,12 +324,14 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.settings,
     required this.claudeCode,
     required this.location,
+    required this.version,
   });
 
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
+  final String version;
 
   @override
   Widget build(BuildContext context) {
@@ -343,6 +349,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           settings: settings,
           claudeCode: claudeCode,
           location: location,
+          version: version,
         ),
       ),
     );

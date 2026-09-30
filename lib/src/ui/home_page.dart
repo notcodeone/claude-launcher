@@ -24,12 +24,16 @@ class HomePage extends StatelessWidget {
     required this.settings,
     required this.claudeCode,
     required this.location,
+    this.version = '',
   });
 
   final LauncherController launcher;
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
+
+  /// Версия приложения — в подвале.
+  final String version;
 
   /// Поля окна: по ним выровнены шапка, заголовок, карточки, кнопка и подвал.
   static const gutter = 24.0;
@@ -168,12 +172,12 @@ class HomePage extends StatelessWidget {
             ),
           ),
           // Подвал в стиле sensomni.
-          const Positioned(
+          Positioned(
             left: 0,
             right: 0,
             bottom: 0,
             height: _footerHeight,
-            child: _Footer(),
+            child: _Footer(version: version),
           ),
           // Кнопка по полю окна, над подвалом.
           Positioned(
@@ -266,7 +270,9 @@ class HomePage extends StatelessWidget {
 
 /// Нижняя строка, как подвал сайта sensomni: копирайт слева, автор справа.
 class _Footer extends StatelessWidget {
-  const _Footer();
+  const _Footer({required this.version});
+
+  final String version;
 
   @override
   Widget build(BuildContext context) {
@@ -289,7 +295,10 @@ class _Footer extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              '© ${DateTime.now().year} ClaudeLauncher',
+              [
+                '© ${DateTime.now().year} ClaudeLauncher',
+                if (version.isNotEmpty) version,
+              ].join(' · '),
               style: style,
               overflow: TextOverflow.ellipsis,
             ),

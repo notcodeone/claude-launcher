@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: [main]
+    # Тег vX.Y.Z — выпуск версии (см. задачу release и README, «Версии»).
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -66,3 +68,43 @@ jobs:
         with:
           name: ClaudeLauncher-windows-portable
           path: build/windows/x64/runner/Release/
+
+  # Выпуск версии по тегу vX.Y.Z: GitHub Release с установщиками, текст — раздел
+  # этой версии из CHANGELOG.md. Тег должен совпадать с версией в pubspec.yaml.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Версия тега и pubspec.yaml совпадают
+        run: |
+          version=$(sed -nE 's/^version:[[:space:]]*([0-9.]+).*/\1/p' pubspec.yaml)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Тег $GITHUB_REF_NAME, а в pubspec.yaml версия $version"
+            exit 1
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Текст выпуска из CHANGELOG.md
+        run: |
+          awk -v v="$APP_VERSION" '/^## / { on = ($2 == v); next } on' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::В CHANGELOG.md нет раздела ## $APP_VERSION"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+      - name: Файлы выпуска
+        run: |
+          mkdir release
+          find dist -type f \( -name '*.dmg' -o -name 'ClaudeLauncher-Setup-*.exe' \) -exec cp {} release/ \;
+          (cd dist/ClaudeLauncher-windows-portable && zip -qr "$GITHUB_WORKSPACE/release/ClaudeLauncher-$APP_VERSION-windows-portable.zip" .)
+          ls -la release
+          test "$(ls release | wc -l)" -eq 3
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "ClaudeLauncher $APP_VERSION" --notes-file notes.md
