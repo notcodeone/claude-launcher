@@ -48,11 +48,12 @@ class CodeSession {
   String message = '';
 
   /// Токены, которые Claude написал за текущую задачу, — как «↓ N tokens»
-  /// в самом Claude Code: оценка по длине ответов (символы / 4).
+  /// в самом Claude Code: каждый ответ модели — по его `usage.output_tokens`
+  /// (со скрытыми рассуждениями, которых в переписке нет), а если их нет —
+  /// по длине ответа (символы / 4).
   ///
-  /// Не `usage.output_tokens` из переписки: там ещё и скрытые рассуждения
-  /// модели, которых в переписке нет, — это число в несколько раз больше
-  /// того, что показывает Claude Code.
+  /// Claude Code растит своё число по ходу печати, а лаунчер видит ответ, только
+  /// когда тот записан в переписку, — поэтому здесь число растёт ступеньками.
   int tokens = 0;
 
   String? _customTitle;
@@ -78,8 +79,19 @@ class CodeSession {
   int _offset = 0;
   List<int> _carry = const [];
 
-  /// Символы ответа по строкам переписки (у каждой строки свой uuid).
-  final Map<String, int> _charsByLine = {};
+  /// Строки ответа в переписке (у каждой свой uuid): к какому ответу модели
+  /// относится и сколько в ней символов.
+  final Map<String, ({String message, int chars})> _answerLines = {};
+
+  /// `usage.output_tokens` ответов модели по их id.
+  final Map<String, int> _outputTokens = {};
+
+  void _resetTokens() {
+    tokens = 0;
+    _answerLines.clear();
+    _outputTokens.clear();
+  }
+
   bool _titleScanned = false;
 
   /// С сессией познакомились посреди задачи — начало ищем в переписке.
@@ -192,8 +204,7 @@ class ClaudeCodeSessions {
       ..state = CodeSessionState.working
       ..startedAt = time
       ..message = ''
-      ..tokens = 0
-      .._charsByLine.clear()
+      .._resetTokens()
       // Токены считаем с этого места: всё раньше — прошлые задачи.
       .._offset = _lengthOf(session.transcriptPath)
       .._carry = const []
@@ -292,8 +303,7 @@ class ClaudeCodeSessions {
           final time = DateTime.tryParse(line['timestamp'] as String? ?? '');
           session
             ..startedAt = time?.toLocal() ?? session.startedAt
-            ..tokens = 0
-            .._charsByLine.clear()
+            .._resetTokens()
             .._offset = from + end + 1
             .._carry = const [];
           return;
@@ -307,7 +317,7 @@ class ClaudeCodeSessions {
   static void _restartAt(CodeSession session, Map<String, Object?> line) {
     final time = DateTime.tryParse(line['timestamp'] as String? ?? '');
     if (time != null) session.startedAt = time.toLocal();
-    session._charsByLine.clear();
+    session._resetTokens();
   }
 
   /// Сообщение пользователя, с которого начинается задача: текст, а не
@@ -371,8 +381,21 @@ class ClaudeCodeSessions {
       if (_isPrompt(line)) _restartAt(session, line);
       _applyAnswer(session, line);
     }
-    final chars = session._charsByLine.values.fold(0, (a, b) => a + b);
-    session.tokens = (chars / 4).round();
+    session.tokens = _countTokens(session);
+  }
+
+  /// Как Claude Code: ответ модели — не меньше его `output_tokens`, а пока их
+  /// нет — по длине записанного (символы / 4).
+  static int _countTokens(CodeSession session) {
+    final chars = <String, int>{};
+    for (final line in session._answerLines.values) {
+      chars[line.message] = (chars[line.message] ?? 0) + line.chars;
+    }
+    var total = 0.0;
+    for (final MapEntry(key: message, value: count) in chars.entries) {
+      total += max(count / 4, session._outputTokens[message] ?? 0);
+    }
+    return total.round();
   }
 
   static void _applyTitle(CodeSession session, Map<String, Object?> line) {
@@ -390,8 +413,8 @@ class ClaudeCodeSessions {
   }
 
   /// Ответ записывается по строке на блок: текст, рассуждения (если их видно),
-  /// вызов инструмента. Считаем их длину, как Claude Code — полученный поток.
-  /// Строки субагентов — не ответ самой сессии.
+  /// вызов инструмента; в каждой строке — `usage` всего ответа. Строки
+  /// субагентов — не ответ самой сессии: их Claude Code в своё число не берёт.
   static void _applyAnswer(CodeSession session, Map<String, Object?> line) {
     if (line['type'] != 'assistant' || line['isSidechain'] == true) return;
     final message = line['message'];
@@ -409,8 +432,12 @@ class ClaudeCodeSessions {
       };
     }
     // Если строку перезапишут, по uuid она не посчитается дважды.
-    final key = line['uuid'] as String? ?? '#${session._charsByLine.length}';
-    session._charsByLine[key] = chars;
+    final key = line['uuid'] as String? ?? '#${session._answerLines.length}';
+    final id = message['id'] as String? ?? key;
+    session._answerLines[key] = (message: id, chars: chars);
+    if (message['usage'] case {'output_tokens': final int output}) {
+      session._outputTokens[id] = max(session._outputTokens[id] ?? 0, output);
+    }
   }
 
   static Iterable<Map<String, Object?>> _lines(List<int> bytes) sync* {

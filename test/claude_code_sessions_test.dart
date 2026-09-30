@@ -45,23 +45,30 @@ void main() {
     );
   }
 
-  /// Строка ответа, как её пишет Claude Code: один блок на строку. В расходе
-  /// много токенов — там и скрытые рассуждения, которых в переписке нет.
+  /// Строка ответа, как её пишет Claude Code: один блок на строку, в каждой —
+  /// `usage` всего ответа модели [message]. По умолчанию у строки свой ответ
+  /// без `usage`.
   var nextUuid = 0;
   Map<String, Object?> answer(
     Map<String, Object?> block, {
     String? uuid,
     bool sidechain = false,
-  }) => {
-    'type': 'assistant',
-    'uuid': uuid ?? 'u${nextUuid++}',
-    'isSidechain': sidechain,
-    'message': {
-      'id': 'msg',
-      'content': [block],
-      'usage': {'input_tokens': 3, 'output_tokens': 5000},
-    },
-  };
+    String? message,
+    int? output,
+  }) {
+    final id = uuid ?? 'u${nextUuid++}';
+    return {
+      'type': 'assistant',
+      'uuid': id,
+      'isSidechain': sidechain,
+      'message': {
+        'id': message ?? 'msg-$id',
+        'content': [block],
+        'usage': ?(output == null ? null : {'output_tokens': output}),
+      },
+    };
+  }
+
   Map<String, Object?> text(int chars) => {'type': 'text', 'text': 'я' * chars};
 
   CodeSession only() => sessions.of('work').single;
@@ -160,6 +167,28 @@ void main() {
         write([answer(text(28))]);
         await sessions.readTranscripts();
         expect(only().tokens, 7);
+      },
+    );
+
+    test(
+      'скрытые рассуждения — по output_tokens ответа, как в Claude Code',
+      () async {
+        event(ClaudeCodeEventKind.promptSubmitted);
+        write([
+          // Ответ m1: рассуждение скрыто, но в usage оно есть — 1200 на весь ответ.
+          answer(
+            {'type': 'thinking', 'thinking': '', 'signature': 'скрыто'},
+            message: 'm1',
+            output: 1200,
+          ),
+          answer(text(400), message: 'm1', output: 1200),
+          // Ответ m2: usage меньше записанного — берём записанное.
+          answer(text(400), message: 'm2', output: 50),
+          // Субагент в число сессии не входит.
+          answer(text(40), message: 'm3', output: 9999, sidechain: true),
+        ]);
+        await sessions.readTranscripts();
+        expect(only().tokens, 1200 + 100);
       },
     );
 

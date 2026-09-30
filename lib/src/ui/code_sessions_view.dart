@@ -96,7 +96,13 @@ class CodeSessionsSection extends StatelessWidget {
           Divider(height: 1, thickness: 1, color: p.divider),
           const SizedBox(height: 8),
           for (final session in sessions)
-            _SessionRow(session: session, onOpen: onOpen, now: now),
+            // Ключ — чтобы при пересортировке счётчик не перескочил к другой сессии.
+            _SessionRow(
+              key: ValueKey(session.id),
+              session: session,
+              onOpen: onOpen,
+              now: now,
+            ),
         ],
       ),
     );
@@ -108,6 +114,7 @@ const _iconGap = 8.0;
 
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
+    super.key,
     required this.session,
     required this.onOpen,
     required this.now,
@@ -124,12 +131,10 @@ class _SessionRow extends StatelessWidget {
     final textStyle = base.copyWith(fontSize: 13, color: p.text);
     final color = sessionColor(p, session.state);
     final working = session.state == CodeSessionState.working;
-    final meta = working
-        ? [
-            formatElapsed(now.difference(session.startedAt)),
-            if (session.tokens > 0) formatTokens(session.tokens),
-          ].join(' · ')
-        : _clock(session.updatedAt);
+    // Цифры одной ширины: подпись не дёргается каждую секунду.
+    final metaStyle = base.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
     Widget label = Text.rich(
       TextSpan(
@@ -185,17 +190,75 @@ class _SessionRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          // Цифры одной ширины: подпись не дёргается каждую секунду.
-          Text(
-            meta,
-            style: base.copyWith(
-              fontFeatures: const [FontFeature.tabularFigures()],
+          if (!working)
+            Text(_clock(session.updatedAt), style: metaStyle)
+          else ...[
+            Text(
+              formatElapsed(now.difference(session.startedAt)),
+              style: metaStyle,
             ),
-          ),
+            if (session.tokens > 0) ...[
+              Text(' · ', style: metaStyle),
+              _TokenCount(tokens: session.tokens, style: metaStyle),
+            ],
+          ],
         ],
       ),
     );
   }
+}
+
+/// Токены набегают к новому значению за секунду, а не перескакивают: в
+/// переписку ответ попадает целиком, ступенькой. Новая задача — сразу с нуля.
+class _TokenCount extends StatefulWidget {
+  const _TokenCount({required this.tokens, required this.style});
+
+  final int tokens;
+  final TextStyle style;
+
+  @override
+  State<_TokenCount> createState() => _TokenCountState();
+}
+
+class _TokenCountState extends State<_TokenCount>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+  late int _from = widget.tokens;
+  late int _to = widget.tokens;
+
+  int get _value =>
+      (_from + (_to - _from) * Curves.easeOutCubic.transform(_controller.value))
+          .round();
+
+  @override
+  void didUpdateWidget(_TokenCount old) {
+    super.didUpdateWidget(old);
+    if (widget.tokens == _to) return;
+    final shown = _value;
+    _to = widget.tokens;
+    if (_to < shown) {
+      _from = _to;
+      _controller.value = 1;
+    } else {
+      _from = shown;
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (_, _) => Text(formatTokens(_value), style: widget.style),
+  );
 }
 
 class _StateIcon extends StatelessWidget {
