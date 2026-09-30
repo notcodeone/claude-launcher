@@ -16,6 +16,7 @@ import 'windows_package.dart';
 /// Стандартный профиль запускаем через пакет (как из меню «Пуск»), чтобы Claude
 /// видел свою обычную папку данных. Остальные — прямым запуском `Claude.exe`
 /// с `--user-data-dir` в `%APPDATA%`: там её ищет виртуальная машина Cowork.
+/// Если Windows прямой запуск запрещает, — тоже через пакет, с аргументами.
 ///
 /// Всё — через API Windows, без PowerShell: из приложения без консоли он
 /// запускается ненадёжно, а консольные окна мелькали бы при каждом опросе.
@@ -289,10 +290,50 @@ class WindowsClaudeHost extends ClaudeHost {
       ], mode: ProcessStartMode.detached);
       return;
     }
-    await Process.start(installation.exe, [
+    final arguments = [
       if (dataDir != null) '--user-data-dir=$dataDir',
       if (link != null) '$link',
-    ], mode: ProcessStartMode.detached);
+    ];
+    try {
+      await Process.start(
+        installation.exe,
+        arguments,
+        mode: ProcessStartMode.detached,
+      );
+    } on ProcessException catch (error) {
+      // На части компьютеров Windows не даёт запускать программы из папки
+      // пакета напрямую — «Отказано в доступе». Тогда запускаем через пакет.
+      if (error.errorCode != ERROR_ACCESS_DENIED || aumid == null) rethrow;
+      _activatePackaged(aumid, arguments);
+    }
+  }
+
+  /// Запуск из пакета, как из «Пуска», но с аргументами командной строки.
+  /// Claude работает тогда от имени пакета, и новые файлы в папке профиля
+  /// Windows может складывать в папку пакета (`LocalCache\Roaming`), а для
+  /// Claude — показывать их на месте.
+  void _activatePackaged(String aumid, List<String> arguments) {
+    final com = CoInitializeEx(COINIT_APARTMENTTHREADED);
+    try {
+      final manager = createInstance<IApplicationActivationManager>(
+        ApplicationActivationManager,
+      );
+      try {
+        using(
+          (arena) => manager.activateApplication(
+            arena.pcwstr(aumid),
+            // Пути бывают с пробелами; в конце пути обратной косой черты нет.
+            arena.pcwstr(arguments.map((argument) => '"$argument"').join(' ')),
+            AO_NONE,
+          ),
+        );
+      } finally {
+        manager.release();
+      }
+    } finally {
+      // S_FALSE (COM на потоке уже был) тоже требует парного вызова.
+      if (com.isOk) CoUninitialize();
+    }
   }
 
   /// Повторный запуск с той же папкой: Claude держит блокировку «один экземпляр
