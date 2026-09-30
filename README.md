@@ -182,7 +182,8 @@ DMG, установщик и переносную версию для Windows, �
 
 ## Разработка
 
-Flutter 3.44, Dart 3.12.
+Flutter 3.44, Dart 3.12. Сборка для macOS — в Xcode 26 или новее: значок приложения
+(`macos/Runner/AppIcon.icon`) — в формате Icon Composer.
 
 ```bash
 flutter run -d macos          # или -d windows

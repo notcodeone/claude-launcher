@@ -1,8 +1,8 @@
 """Генерирует все значки лаунчера из одного знака — «искры» Claude и спереди
 справа снизу «играть», как на кнопке запуска профиля:
 
-- иконка приложения: белый знак на чёрной плитке (macOS, Windows, уведомления
-  Windows, картинка мастера установки);
+- иконка приложения: белый знак на чёрной плитке — на macOS в формате Icon
+  Composer, на Windows, в её уведомлениях и мастере установки — картинками;
 - строка меню macOS: чёрный шаблон без фона — цвет подставляет система;
 - трей Windows: без фона, чёрный для светлой панели задач и белый для тёмной;
 - шапка окна лаунчера: знак без фона, приложение красит его цветом текста.
@@ -12,6 +12,7 @@
 
 Запуск на macOS: python3 tool/generate_icons.py  (нужны Pillow и tiffutil)
 """
+import json
 import math
 import subprocess
 import tempfile
@@ -83,6 +84,31 @@ def app_icon(size):
     return img.resize((size, size), Image.LANCZOS)
 
 
+def macos_icon(path):
+    """Иконка приложения macOS в формате Icon Composer (.icon): чёрная заливка
+    и белый знак на весь холст — форму плитки и поля задаёт система. Значки
+    в прежнем формате macOS 26 уменьшает и кладёт на серую подложку; для
+    старых macOS Xcode сам соберёт из .icon обычный AppIcon.icns.
+    Без «жидкого стекла»: знак остаётся плоским белым, как на остальных значках."""
+    s = 1024
+    image = Image.new("RGBA", (s, s), WHITE[:3] + (0,))
+    image.putalpha(mark(s * SS // 2).resize((s, s), Image.LANCZOS))
+    (path / "Assets").mkdir(parents=True, exist_ok=True)
+    image.save(path / "Assets" / "mark.png")
+    r, g, b = (round(c / 255, 5) for c in BLACK[:3])
+    icon = {
+        "fill": {"solid": f"srgb:{r:.5f},{g:.5f},{b:.5f},1.00000"},
+        "groups": [
+            {
+                "layers": [{"image-name": "mark.png", "name": "mark", "glass": False}],
+                "specular": False,
+            }
+        ],
+        "supported-platforms": {"squares": "shared"},
+    }
+    (path / "icon.json").write_text(json.dumps(icon, indent=2) + "\n")
+
+
 def bare_mark(size, color, margin=0.06):
     """Знак без фона на весь квадрат (с полем [margin]) — для строки меню и трея.
     В 16–44 px «играть» крупнее и зазор шире, иначе они сливаются с лучами."""
@@ -118,9 +144,7 @@ def main():
     bare_mark(256, BLACK).save(tray / "tray_icon_light.ico", sizes=ico_sizes)
     bare_mark(256, WHITE).save(tray / "tray_icon_dark.ico", sizes=ico_sizes)
 
-    appiconset = ROOT / "macos" / "Runner" / "Assets.xcassets" / "AppIcon.appiconset"
-    for n in [16, 32, 64, 128, 256, 512, 1024]:
-        app_icon(n).save(appiconset / f"app_icon_{n}.png")
+    macos_icon(ROOT / "macos" / "Runner" / "AppIcon.icon")
     app_icon(256).save(
         ROOT / "windows" / "runner" / "resources" / "app_icon.ico",
         sizes=[(n, n) for n in [16, 24, 32, 48, 64, 128, 256]],

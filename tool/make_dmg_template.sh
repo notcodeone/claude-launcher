@@ -7,14 +7,14 @@
 # откроет окно и подскажет, что сделать. Запускать на macOS 26 или новее — на
 # них фон, заданный в прежних версиях, не виден.
 #
-# Запуск из корня репозитория (нужны python3 и Xcode Command Line Tools):
+# Запуск из корня репозитория (нужны python3 и Xcode 26 или новее):
 #   python3 tool/generate_dmg_background.py   # если менялся фон
 #   tool/make_dmg_template.sh
 set -euo pipefail
 
 out="tool/dmg/template.dmg"
 background="tool/dmg/background.tiff"
-icons="macos/Runner/Assets.xcassets/AppIcon.appiconset"
+icon="macos/Runner/AppIcon.icon"
 volume="/Volumes/ClaudeLauncher"
 
 [ -e "$volume" ] && { echo "Уже смонтирован $volume — извлеките его" >&2; exit 1; }
@@ -30,14 +30,10 @@ if [ ! -x "$venv/bin/python" ]; then
     "ds_store==1.3.1" "mac_alias==2.2.2"
 fi
 
-# Значок тома — значок приложения.
-iconset="$work/AppIcon.iconset"
-mkdir "$iconset"
-for size in 16 32 128 256 512; do
-  cp "$icons/app_icon_$size.png" "$iconset/icon_${size}x${size}.png"
-  cp "$icons/app_icon_$((size * 2)).png" "$iconset/icon_${size}x${size}@2x.png"
-done
-iconutil -c icns "$iconset" -o "$work/AppIcon.icns"
+# Значок тома — значок приложения: AppIcon.icns, как его собирает Xcode.
+xcrun actool "$icon" --compile "$work" --platform macosx \
+  --minimum-deployment-target 10.15 --app-icon AppIcon \
+  --output-partial-info-plist "$work/icon.plist" >/dev/null
 
 # Том: заглушка приложения (make_dmg.sh заменит её), ссылка на «Программы», фон.
 hdiutil create -size 40m -fs HFS+ -volname ClaudeLauncher -layout SPUD \

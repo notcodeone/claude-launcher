@@ -13,7 +13,8 @@ env:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    # Xcode 26: значок приложения в формате Icon Composer (.icon).
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
