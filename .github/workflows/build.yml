@@ -89,7 +89,7 @@ jobs:
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
       - name: Текст выпуска из CHANGELOG.md
         run: |
-          awk -v v="$APP_VERSION" '/^## / { on = ($2 == v); next } on' CHANGELOG.md > notes.md
+          tool/release_notes.sh "$APP_VERSION" > notes.md
           if ! grep -q '[^[:space:]]' notes.md; then
             echo "::error::В CHANGELOG.md нет раздела ## $APP_VERSION"
             exit 1
