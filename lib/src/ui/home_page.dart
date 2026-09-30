@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
@@ -274,6 +275,8 @@ class _Footer extends StatelessWidget {
 
   final String version;
 
+  static final _notCodeUrl = Uri.parse('https://github.com/notcodeone');
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -298,18 +301,17 @@ class _Footer extends StatelessWidget {
               [
                 '© ${DateTime.now().year} ClaudeLauncher',
                 if (version.isNotEmpty) version,
-              ].join(' · '),
+              ].join(' '),
               style: style,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text('Designed by', style: style),
-          // Пока без действия, но нажимается и подсвечивается.
           QuietTextButton(
             label: 'NotCode',
             style: style,
             horizontalPadding: space,
-            onTap: () {},
+            onTap: () => launchUrl(_notCodeUrl),
           ),
         ],
       ),
