@@ -29,10 +29,32 @@ class MainFlutterWindow: NSWindow {
   }
 
   /// Управление конкретным экземпляром Claude по pid: у нескольких экземпляров
-  /// один bundle id, поэтому работаем через NSRunningApplication.
+  /// один bundle id, поэтому работаем через NSRunningApplication. И окно самого
+  /// лаунчера — для AppWindow.keepInFrontDuring.
   private func registerNativeChannel(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
     let channel = FlutterMethodChannel(name: "claude_launcher/native", binaryMessenger: messenger)
-    channel.setMethodCallHandler { call, result in
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      // Секунды с последнего клика или нажатия клавиши (движение мыши не в счёт):
+      // так лаунчер отличает переключение пользователя от того, что приложение
+      // вышло вперёд само.
+      case "secondsSinceInput":
+        let types: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        result(types.map {
+          CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+        }.min())
+        return
+      // Окно лаунчера — вперёд. Из фона система может не дать приложению стать
+      // активным, а обычный orderFront тогда кладёт окно под активное приложение.
+      case "bringToFront":
+        self?.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        self?.makeKeyAndOrderFront(nil)
+        result(nil)
+        return
+      default:
+        break
+      }
       guard let args = call.arguments as? [String: Any],
             let pid = args["pid"] as? Int,
             let app = NSRunningApplication(processIdentifier: pid_t(pid))

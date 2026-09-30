@@ -165,8 +165,10 @@ Future<void> main(List<String> args) async {
   }
 
   // Перед запуском профиль ждёт проверку страны (LocationGuard.ensureCanLaunch),
-  // а она идёт с самого начала запуска.
-  await launcher.openOnStartup(settings.startupProfileId);
+  // а она идёт с самого начала запуска. Окно лаунчера остаётся над Claude.
+  await window.keepInFrontDuring(
+    launcher.openOnStartup(settings.startupProfileId),
+  );
 }
 
 /// До переименования в ClaudeLauncher папка данных на Windows называлась

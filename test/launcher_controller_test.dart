@@ -284,20 +284,20 @@ void main() {
 
   group('профиль при запуске лаунчера', () {
     test('открывается, если Claude не запущен', () async {
-      await launcher.openOnStartup(personal.id);
+      expect(await launcher.openOnStartup(personal.id), isTrue);
       expect(host.calls, ['launch /support/Claude-Lichnyy']);
     });
 
     test('не трогает уже открытый Claude', () async {
       host.start(null);
       await launcher.refresh();
-      await launcher.openOnStartup(personal.id);
+      expect(await launcher.openOnStartup(personal.id), isFalse);
       expect(host.calls, isEmpty);
     });
 
     test('ничего не делает без выбранного или с удалённым профилем', () async {
-      await launcher.openOnStartup(null);
-      await launcher.openOnStartup('нет такого');
+      expect(await launcher.openOnStartup(null), isFalse);
+      expect(await launcher.openOnStartup('нет такого'), isFalse);
       expect(host.calls, isEmpty);
     });
   });

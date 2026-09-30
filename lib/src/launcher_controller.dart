@@ -229,12 +229,16 @@ class LauncherController extends ChangeNotifier {
   }
 
   /// При запуске лаунчера: открывает профиль [profileId], если Claude сейчас
-  /// не открыт. Уже открытый Claude не трогаем.
-  Future<void> openOnStartup(String? profileId) async {
-    if (profileId == null || instances.isNotEmpty) return;
+  /// не открыт. Уже открытый Claude не трогаем. true — если открывал.
+  Future<bool> openOnStartup(String? profileId) async {
+    if (profileId == null || instances.isNotEmpty) return false;
     for (final profile in profiles) {
-      if (profile.id == profileId) return switchTo(profile, strict: true);
+      if (profile.id == profileId) {
+        await switchTo(profile, strict: true);
+        return true;
+      }
     }
+    return false;
   }
 
   /// Прячет или возвращает значок самого Claude; ошибка не мешает работе лаунчера.
