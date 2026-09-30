@@ -31,6 +31,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\build\installer
 OutputBaseFilename=ClaudeLauncher-Setup-{#AppVersion}
 SetupIconFile=..\runner\resources\app_icon.ico
+; Значок приложения в углу мастера: область 58 px при 100 % масштаба, до 159 px
+; при 250 % — установщик выберет подходящий файл (рисует tool/generate_icons.py).
+WizardSmallImageFile=wizard_small_58.bmp,wizard_small_87.bmp,wizard_small_116.bmp,wizard_small_159.bmp
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 Compression=lzma2

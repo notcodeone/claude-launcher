@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:path/path.dart' as p;
 
 /// Системные уведомления лаунчера.
 abstract class Notifier {
@@ -31,9 +32,9 @@ class SystemNotifier extends Notifier {
 
   Future<void> _init() => _initialized ??= _plugin
       .initialize(
-        settings: const InitializationSettings(
+        settings: InitializationSettings(
           // Разрешение спрашиваем сами — когда лаунчер берёт уведомления на себя.
-          macOS: DarwinInitializationSettings(
+          macOS: const DarwinInitializationSettings(
             requestAlertPermission: false,
             requestBadgePermission: false,
             requestSoundPermission: false,
@@ -42,6 +43,15 @@ class SystemNotifier extends Notifier {
             appName: 'ClaudeLauncher',
             appUserModelId: 'NotCode.ClaudeLauncher',
             guid: 'd0cc905a-995e-4349-aa39-dc9f260a3fe9',
+            // Значок в уведомлениях. На macOS система берёт значок приложения сама.
+            iconPath: p.join(
+              p.dirname(Platform.resolvedExecutable),
+              'data',
+              'flutter_assets',
+              'assets',
+              'icon',
+              'app_icon.png',
+            ),
           ),
         ),
         onDidReceiveNotificationResponse: (response) =>

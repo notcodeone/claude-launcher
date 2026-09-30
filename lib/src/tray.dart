@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:tray_manager/tray_manager.dart';
+import 'package:win32/win32.dart' show WindowsException;
+import 'package:win32_registry/win32_registry.dart';
 
 import 'launcher_controller.dart';
 import 'location/location_guard.dart';
@@ -32,12 +34,14 @@ class TrayController with TrayListener {
   String _lastState = '';
 
   Future<void> init() async {
-    await trayManager.setIcon(
-      Platform.isWindows
-          ? 'assets/tray/tray_icon.ico'
-          : 'assets/tray/tray_icon_template.png',
-      isTemplate: true,
-    );
+    await _setIcon();
+    // Тему панели задач Windows могут сменить в любой момент — значок следом.
+    if (Platform.isWindows) {
+      _themeTimer = Timer.periodic(
+        const Duration(seconds: 3),
+        (_) => _setIcon(),
+      );
+    }
     trayManager.addListener(this);
     launcher.addListener(_update);
     location.addListener(_update);
@@ -45,11 +49,46 @@ class TrayController with TrayListener {
   }
 
   Future<void> dispose() async {
+    _themeTimer?.cancel();
     _clicks.cancel();
     launcher.removeListener(_update);
     location.removeListener(_update);
     trayManager.removeListener(this);
     await trayManager.destroy();
+  }
+
+  Timer? _themeTimer;
+  String? _icon;
+
+  /// Знак без фона. macOS красит шаблон сама; на Windows — чёрный знак для
+  /// светлой панели задач и белый для тёмной.
+  Future<void> _setIcon() async {
+    final icon = !Platform.isWindows
+        ? 'assets/tray/tray_icon_template.tiff'
+        : _lightTaskbar()
+        ? 'assets/tray/tray_icon_light.ico'
+        : 'assets/tray/tray_icon_dark.ico';
+    if (icon == _icon) return;
+    _icon = icon;
+    // 22 pt — наибольший значок, который строка меню вмещает без обрезки
+    // (шаблон нарисован под этот размер, см. tool/generate_icons.py).
+    await trayManager.setIcon(icon, isTemplate: true, iconSize: 22);
+  }
+
+  /// Панель задач Windows светлая. Параметра нет — значит, тёмная (так по умолчанию).
+  static bool _lightTaskbar() {
+    try {
+      final key = CURRENT_USER.open(
+        r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+      );
+      try {
+        return key.getInt('SystemUsesLightTheme') == 1;
+      } finally {
+        key.close();
+      }
+    } on WindowsException {
+      return false;
+    }
   }
 
   Future<void> _update() async {

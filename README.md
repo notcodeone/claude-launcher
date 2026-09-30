@@ -170,7 +170,7 @@ flutter run -d macos          # или -d windows
 flutter analyze
 flutter test                  # юнит-тесты
 flutter test integration_test/macos_host_test.dart -d macos   # на настоящем Claude
-python3 tool/generate_icons.py   # перегенерировать иконки (нужен Pillow)
+python3 tool/generate_icons.py   # перегенерировать все значки (macOS, нужен Pillow)
 ```
 
 Интеграционный тест запускает отдельный тестовый профиль Claude во временной папке,

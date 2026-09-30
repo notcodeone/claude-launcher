@@ -205,8 +205,8 @@ class HomePage extends StatelessWidget {
           icon: AppIcons.info,
           onClose: settings.dismissTrayHint,
           text: Platform.isMacOS
-              ? 'ClaudeLauncher живёт в строке меню — ищите иконку с двумя кружками '
-                    'вверху экрана. Это окно можно закрыть.'
+              ? 'ClaudeLauncher живёт в строке меню — ищите вверху экрана его значок, '
+                    'как в шапке этого окна. Это окно можно закрыть.'
               : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой ▲). '
                     'Это окно можно закрыть.',
         ),
@@ -333,16 +333,27 @@ class _HeaderBar extends StatelessWidget {
       ThemeMode.light => AppIcons.themeLight,
       ThemeMode.dark => AppIcons.themeDark,
     };
-    final title = Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        'ClaudeLauncher',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
+    final title = Row(
+      children: [
+        // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
+        Image.asset(
+          'assets/icon/mark.png',
+          width: 20,
+          height: 20,
+          color: context.palette.text,
+          colorBlendMode: BlendMode.srcIn,
+          filterQuality: FilterQuality.medium,
         ),
-      ),
+        const SizedBox(width: 8),
+        Text(
+          'ClaudeLauncher',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+        ),
+      ],
     );
     return Builder(
       builder: (cardContext) => SoftCard(

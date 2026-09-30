@@ -47,6 +47,8 @@ codesign --verify --deep --strict "$work/ClaudeLauncher.app"
 # положение значка.
 rm -rf "$mnt/ClaudeLauncher.app"
 ditto "$work/ClaudeLauncher.app" "$mnt/ClaudeLauncher.app"
+# Значок тома — всегда нынешний значок приложения, а не тот, что был в шаблоне.
+cp "$work/ClaudeLauncher.app/Contents/Resources/AppIcon.icns" "$mnt/.VolumeIcon.icns"
 
 hdiutil detach "$mnt" -quiet
 mkdir -p "$out_dir"
