@@ -37,7 +37,8 @@ Future<void> main(List<String> args) async {
   final supportDir = await getApplicationSupportDirectory();
   await _moveRenamedSupportDir(supportDir);
 
-  // Запускает деинсталлятор Windows: убираем за собой и выходим, окно не показываем.
+  // Удаление: флаг передаёт деинсталлятор Windows, на macOS — пользователь (README).
+  // Убираем за собой и выходим, окно не показываем.
   if (args.contains('--cleanup')) {
     await _cleanup(supportDir);
     exit(0);
