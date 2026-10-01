@@ -104,6 +104,11 @@ abstract class ClaudeHost {
   String dataDirOf(ClaudeInstance instance) =>
       instance.dataDir ?? defaultDataDir;
 
+  /// Физические папки профиля для чтения данных. MSIX может виртуализировать путь.
+  List<String> readableDataDirs(ClaudeInstance instance) => [
+    dataDirOf(instance),
+  ];
+
   /// Сравнение путей без учёта регистра: и APFS, и NTFS по умолчанию к нему нечувствительны.
   bool samePath(String a, String b) => _normalize(a) == _normalize(b);
 

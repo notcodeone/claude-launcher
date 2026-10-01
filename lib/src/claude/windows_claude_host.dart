@@ -74,6 +74,24 @@ class WindowsClaudeHost extends ClaudeHost {
   // ------------------------------------------------------------------- поиск
 
   @override
+  List<String> readableDataDirs(ClaudeInstance instance) {
+    final dir = dataDirOf(instance);
+    final family = _installation?.familyName;
+    return [
+      dir,
+      if (family != null && p.isWithin(_appData, dir))
+        p.join(
+          _localAppData,
+          'Packages',
+          family,
+          'LocalCache',
+          'Roaming',
+          p.relative(dir, from: _appData),
+        ),
+    ];
+  }
+
+  @override
   Future<String?> locate() async {
     _installation =
         _locatePackaged() ?? _locateFromRunning() ?? await _locateLegacy();

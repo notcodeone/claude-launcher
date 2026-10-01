@@ -33,8 +33,10 @@ class MenuEntry<T> {
 Future<T?> showAnchoredMenu<T>({
   required BuildContext anchorContext,
   required Widget highlight,
-  required List<MenuEntry<T>> entries,
+  List<MenuEntry<T>> entries = const [],
   Widget? caption,
+  Widget? content,
+  double maxWidth = 300,
 }) {
   final navigator = Navigator.of(anchorContext);
   final overlayBox =
@@ -50,6 +52,8 @@ Future<T?> showAnchoredMenu<T>({
       highlight: highlight,
       entries: entries,
       caption: caption,
+      content: content,
+      maxWidth: maxWidth,
       scrim: anchorContext.palette.scrim,
       capturedThemes: InheritedTheme.capture(
         from: anchorContext,
@@ -65,6 +69,8 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
     required this.highlight,
     required this.entries,
     required this.caption,
+    required this.content,
+    required this.maxWidth,
     required this.scrim,
     required this.capturedThemes,
   });
@@ -73,6 +79,8 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
   final Widget highlight;
   final List<MenuEntry<T>> entries;
   final Widget? caption;
+  final Widget? content;
+  final double maxWidth;
   final Color scrim;
   final CapturedThemes capturedThemes;
 
@@ -114,13 +122,17 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
           ),
           Positioned.fill(
             child: CustomSingleChildLayout(
-              delegate: _MenuLayout(anchorRect, _gap),
+              delegate: _MenuLayout(anchorRect, _gap, maxWidth),
               child: FadeTransition(
                 opacity: curved,
                 child: ScaleTransition(
                   scale: Tween(begin: 0.96, end: 1.0).animate(curved),
                   alignment: Alignment.topRight,
-                  child: _MenuPanel<T>(entries: entries, caption: caption),
+                  child: _MenuPanel<T>(
+                    entries: entries,
+                    caption: caption,
+                    content: content,
+                  ),
                 ),
               ),
             ),
@@ -132,18 +144,21 @@ class _AnchoredMenuRoute<T> extends PopupRoute<T> {
 }
 
 class _MenuLayout extends SingleChildLayoutDelegate {
-  _MenuLayout(this.anchor, this.gap);
+  _MenuLayout(this.anchor, this.gap, this.maxWidth);
 
   final Rect anchor;
   final double gap;
+  final double maxWidth;
 
   static const _margin = 12.0;
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
       BoxConstraints(
-        minWidth: 220,
-        maxWidth: 300,
+        minWidth: 220.clamp(0, constraints.maxWidth - _margin * 2).toDouble(),
+        maxWidth: maxWidth
+            .clamp(0, constraints.maxWidth - _margin * 2)
+            .toDouble(),
         maxHeight: constraints.maxHeight - _margin * 2,
       );
 
@@ -164,14 +179,15 @@ class _MenuLayout extends SingleChildLayoutDelegate {
 
   @override
   bool shouldRelayout(_MenuLayout old) =>
-      old.anchor != anchor || old.gap != gap;
+      old.anchor != anchor || old.gap != gap || old.maxWidth != maxWidth;
 }
 
 class _MenuPanel<T> extends StatelessWidget {
-  const _MenuPanel({required this.entries, this.caption});
+  const _MenuPanel({required this.entries, this.caption, this.content});
 
   final List<MenuEntry<T>> entries;
   final Widget? caption;
+  final Widget? content;
 
   @override
   Widget build(BuildContext context) {
@@ -196,25 +212,27 @@ class _MenuPanel<T> extends StatelessWidget {
         color: p.card,
         borderRadius: radius,
         clipBehavior: Clip.antiAlias,
-        child: IntrinsicWidth(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (caption case final caption?) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                  child: caption,
-                ),
-                const Divider(),
-              ],
-              for (final (index, entry) in entries.indexed) ...[
-                if (index > 0) const Divider(),
-                _MenuItem(entry: entry),
-              ],
-            ],
-          ),
-        ),
+        child:
+            content ??
+            IntrinsicWidth(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (caption case final caption?) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                      child: caption,
+                    ),
+                    const Divider(),
+                  ],
+                  for (final (index, entry) in entries.indexed) ...[
+                    if (index > 0) const Divider(),
+                    _MenuItem(entry: entry),
+                  ],
+                ],
+              ),
+            ),
       ),
     );
   }
@@ -226,27 +244,62 @@ class _MenuItem<T> extends StatelessWidget {
   final MenuEntry<T> entry;
 
   @override
+  Widget build(BuildContext context) => AnchoredMenuAction(
+    icon: entry.icon,
+    label: entry.label,
+    destructive: entry.destructive,
+    selected: entry.selected,
+    onPressed: entry.enabled
+        ? () => Navigator.of(context).pop(entry.value)
+        : null,
+  );
+}
+
+/// Та же строка действия для меню с произвольным содержимым.
+class AnchoredMenuAction extends StatelessWidget {
+  const AnchoredMenuAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.destructive = false,
+    this.selected = false,
+    this.loading = false,
+    this.backgroundColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool destructive;
+  final bool selected;
+  final bool loading;
+  final Color? backgroundColor;
+
+  @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final color = entry.destructive ? p.danger : p.text;
+    final color = destructive ? p.danger : p.text;
     final item = InkWell(
-      onTap: entry.enabled
-          ? () => Navigator.of(context).pop(entry.value)
-          : null,
+      onTap: onPressed,
       hoverColor: p.field,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(
           children: [
-            Icon(entry.icon, size: 20, color: color),
+            if (loading)
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: color),
+              )
+            else
+              Icon(icon, size: 20, color: color),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                entry.label,
-                style: TextStyle(color: color, fontSize: 14),
-              ),
+              child: Text(label, style: TextStyle(color: color, fontSize: 14)),
             ),
-            if (entry.selected) ...[
+            if (selected) ...[
               const SizedBox(width: 16),
               Icon(AppIcons.check, size: 16, color: color),
             ],
@@ -255,6 +308,10 @@ class _MenuItem<T> extends StatelessWidget {
       ),
     );
     // Неактивный пункт сохраняет свой цвет (у опасного — красный), но приглушён.
-    return entry.enabled ? item : Opacity(opacity: 0.4, child: item);
+    final enabled = onPressed != null || loading;
+    final row = enabled ? item : Opacity(opacity: 0.4, child: item);
+    return backgroundColor == null
+        ? row
+        : Material(color: backgroundColor!, child: row);
   }
 }

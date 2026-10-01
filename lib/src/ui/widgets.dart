@@ -794,6 +794,7 @@ abstract final class AppIcons {
   static const more = LucideIcons.ellipsisVertical;
   static const launch = LucideIcons.play;
   static const show = LucideIcons.eye;
+  static const charts = LucideIcons.chartColumn;
   static const edit = LucideIcons.pencil;
   static const folder = LucideIcons.folderOpen;
   static const remove = LucideIcons.trash2;

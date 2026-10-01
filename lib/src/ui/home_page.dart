@@ -8,12 +8,14 @@ import 'package:window_manager/window_manager.dart';
 import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
+import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
 import '../location/location_guard.dart';
 import '../profile.dart';
 import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
 import 'profile_dialog.dart';
+import 'profile_usage_menu.dart';
 import 'settings_dialog.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -795,6 +797,27 @@ class _ProfileCard extends StatelessWidget {
                               ),
                       ),
                       const SizedBox(width: 12),
+                      if (running)
+                        ProfileUsageButton(
+                          menuAnchorContext: cardContext,
+                          menuHighlight: _menuHighlight,
+                          enabled: !switching,
+                          interactive: interactive,
+                          activity: launcher,
+                          isRunning: () => launcher.isRunning(profile),
+                          load: () async {
+                            final instance = launcher.instances
+                                .where(
+                                  (i) =>
+                                      launcher.profileOf(i)?.id == profile.id,
+                                )
+                                .firstOrNull;
+                            if (instance == null) return null;
+                            return const ProfileUsageReader().read(
+                              launcher.host.readableDataDirs(instance),
+                            );
+                          },
+                        ),
                       CircleIconButton(
                         icon: running ? AppIcons.show : AppIcons.launch,
                         loading: opening,
@@ -856,21 +879,23 @@ class _ProfileCard extends StatelessWidget {
     profile.copyWith(sessionsCollapsed: !profile.sessionsCollapsed),
   );
 
+  Widget get _menuHighlight => ListenableBuilder(
+    listenable: Listenable.merge([launcher, claudeCode, location]),
+    builder: (_, _) => _ProfileCard(
+      launcher: launcher,
+      settings: settings,
+      claudeCode: claudeCode,
+      location: location,
+      profile: profile,
+      interactive: false,
+    ),
+  );
+
   Future<void> _openMenu(BuildContext cardContext) async {
     final running = launcher.isRunning(profile);
     final action = await showAnchoredMenu(
       anchorContext: cardContext,
-      highlight: ListenableBuilder(
-        listenable: Listenable.merge([launcher, claudeCode, location]),
-        builder: (_, _) => _ProfileCard(
-          launcher: launcher,
-          settings: settings,
-          claudeCode: claudeCode,
-          location: location,
-          profile: profile,
-          interactive: false,
-        ),
-      ),
+      highlight: _menuHighlight,
       entries: [
         const MenuEntry(value: 'edit', icon: AppIcons.edit, label: 'Изменить'),
         MenuEntry(
