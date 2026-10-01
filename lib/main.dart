@@ -104,10 +104,13 @@ Future<void> main(List<String> args) async {
   );
 
   late final TrayController tray;
-  // Выход — из меню значка и перед установкой обновления.
-  Future<void> quit() async {
+  // Выход — из меню значка и перед установкой обновления. При обновлении
+  // уведомления у Claude не забираем назад и наблюдателя не запускаем: новая
+  // версия запустится сразу и заберёт их сама, а наблюдатель — тот же exe —
+  // на Windows не дал бы установщику заменить файлы.
+  Future<void> quit({bool updating = false}) async {
     try {
-      if (await claudeCode.releaseOnQuit()) {
+      if (!updating && await claudeCode.releaseOnQuit()) {
         await _startWatcher([
           for (final instance in launcher.instances) instance.pid,
         ]);
@@ -124,7 +127,7 @@ Future<void> main(List<String> args) async {
   final updater = AppUpdater(
     currentVersion: version,
     settings: settings,
-    quit: quit,
+    quit: () => quit(updating: true),
   );
   tray = TrayController(
     launcher: launcher,
@@ -249,8 +252,12 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
   final executable = File(Platform.resolvedExecutable);
   final startedAs = executable.statSync();
   final reopened = Completer<void>();
+  // Только macOS: на Windows повторный запуск будит запущенный лаунчер, а не
+  // наблюдателя — тот уйдёт сам, когда новый лаунчер заберёт настройки.
   _nativeChannel.setMethodCallHandler((call) async {
-    if (call.method == 'reopen' && !reopened.isCompleted) reopened.complete();
+    if (Platform.isMacOS && call.method == 'reopen' && !reopened.isCompleted) {
+      reopened.complete();
+    }
   });
   final host = ClaudeHost.forCurrentPlatform();
   final handoff = _handoff(supportDir, host);

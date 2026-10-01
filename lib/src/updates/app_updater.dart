@@ -109,6 +109,7 @@ class AppUpdater extends ChangeNotifier {
 
   /// Проверяет сейчас и затем раз в 6 часов, пока проверка включена.
   void start() {
+    unawaited(_removeLeftovers());
     _timer?.cancel();
     _timer = Timer.periodic(_checkEvery, (_) => check());
     Timer(const Duration(seconds: 15), check);
@@ -122,6 +123,23 @@ class AppUpdater extends ChangeNotifier {
   void _onSettings() {
     if (settings.checkUpdates && !_checkUpdates) check();
     _checkUpdates = settings.checkUpdates;
+  }
+
+  /// Установщик Windows не может удалить себя сам, а на macOS скрипт мог не
+  /// успеть: убираем папки прошлых обновлений, если им больше часа.
+  static Future<void> _removeLeftovers() async {
+    try {
+      await for (final entry in Directory.systemTemp.list()) {
+        if (entry is! Directory ||
+            !p.basename(entry.path).startsWith('claude-launcher-update')) {
+          continue;
+        }
+        final age = DateTime.now().difference((await entry.stat()).modified);
+        if (age > const Duration(hours: 1)) await entry.delete(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('Не удалось убрать файлы прошлого обновления: $e');
+    }
   }
 
   @override
@@ -335,13 +353,16 @@ rm -rf "$4"
   }
 
   /// Установщик ждёт выхода лаунчера (`/update=1`, см. claude_launcher.iss),
-  /// ставит тихо и запускает новую версию.
+  /// ставит тихо и запускает новую версию; если не вышло — прежнюю
+  /// (`/relaunch`). Журнал — `%TEMP%\ClaudeLauncher-update.log`.
   Future<void> _installWindows(File setup) async {
     await Process.start(setup.path, [
       '/VERYSILENT',
       '/SUPPRESSMSGBOXES',
       '/NORESTART',
       '/update=1',
+      '/relaunch=${Platform.resolvedExecutable}',
+      '/LOG=${p.join(Directory.systemTemp.path, 'ClaudeLauncher-update.log')}',
     ], mode: ProcessStartMode.detached);
   }
 

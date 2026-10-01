@@ -79,10 +79,34 @@ Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsUpdate
 Filename: "{app}\{#AppExe}"; Parameters: "--cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "ClaudeLauncherCleanup"
 
 [Code]
+var
+  Installed: Boolean;
+
 // Обновление из лаунчера: он запускает установщик и сразу выходит.
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then Installed := True;
+end;
+
+// Тихое обновление сорвалось (лаунчер не вышел, файл занят, нет места) —
+// запускаем прежнюю версию (/relaunch=<путь к exe>), чтобы пользователь не
+// остался без лаунчера. Подробности — в журнале (/LOG=…).
+procedure DeinitializeSetup;
+var
+  Exe: String;
+  Code: Integer;
+begin
+  if IsUpdate and not Installed then
+  begin
+    Exe := ExpandConstant('{param:relaunch|}');
+    if (Exe <> '') and FileExists(Exe) then
+      ShellExec('', Exe, '', '', SW_SHOWNORMAL, ewNoWait, Code);
+  end;
 end;
 
 // Ждём, пока лаунчер выйдет и отпустит мьютекс «один экземпляр», — до 15 секунд.
