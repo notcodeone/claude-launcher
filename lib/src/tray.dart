@@ -8,12 +8,14 @@ import 'package:win32_registry/win32_registry.dart';
 
 import 'launcher_controller.dart';
 import 'location/location_guard.dart';
+import 'updates/app_updater.dart';
 
 /// Иконка в строке меню macOS / трее Windows и её меню.
 class TrayController with TrayListener {
   TrayController({
     required this.launcher,
     required this.location,
+    required this.updater,
     required this.onShowWindow,
     required this.onQuit,
   }) {
@@ -25,6 +27,7 @@ class TrayController with TrayListener {
 
   final LauncherController launcher;
   final LocationGuard location;
+  final AppUpdater updater;
 
   /// Окно лаунчера: пункт меню и двойной клик по иконке.
   final void Function() onShowWindow;
@@ -45,6 +48,7 @@ class TrayController with TrayListener {
     trayManager.addListener(this);
     launcher.addListener(_update);
     location.addListener(_update);
+    updater.addListener(_update);
     await _update();
   }
 
@@ -53,6 +57,7 @@ class TrayController with TrayListener {
     _clicks.cancel();
     launcher.removeListener(_update);
     location.removeListener(_update);
+    updater.removeListener(_update);
     trayManager.removeListener(this);
     await trayManager.destroy();
   }
@@ -158,10 +163,29 @@ class TrayController with TrayListener {
                 (location.blocksLaunch && !launcher.isRunning(profile)),
           ),
         MenuItem.separator(),
+        if (_updateLabel() case final label?)
+          MenuItem(
+            key: 'update',
+            label: label,
+            disabled:
+                updater.phase != UpdatePhase.available &&
+                updater.phase != UpdatePhase.failed,
+          ),
         MenuItem(key: 'settings', label: 'Профили и настройки…'),
         MenuItem(key: 'quit', label: 'Выйти из ClaudeLauncher'),
       ],
     );
+  }
+
+  String? _updateLabel() {
+    final version = updater.release?.version;
+    return switch (updater.phase) {
+      UpdatePhase.idle => null,
+      UpdatePhase.available => 'Обновить до $version',
+      UpdatePhase.downloading => 'Скачиваю $version…',
+      UpdatePhase.installing => 'Устанавливаю $version…',
+      UpdatePhase.failed => 'Не удалось обновить — попробовать снова',
+    };
   }
 
   /// Клик — меню, двойной клик — окно лаунчера.
@@ -179,6 +203,10 @@ class TrayController with TrayListener {
     final key = menuItem.key ?? '';
     if (key == 'settings') return onShowWindow();
     if (key == 'quit') return onQuit();
+    if (key == 'update') {
+      updater.install();
+      return;
+    }
     if (key.startsWith('profile:')) {
       final id = key.substring('profile:'.length);
       for (final profile in launcher.profiles) {

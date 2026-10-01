@@ -22,6 +22,7 @@ import 'src/tray.dart';
 import 'src/ui/home_page.dart';
 import 'src/ui/settings_dialog.dart';
 import 'src/ui/theme.dart';
+import 'src/updates/app_updater.dart';
 
 /// Нужен, чтобы показать окно приветствия из main(), вне дерева виджетов.
 final _navigatorKey = GlobalKey<NavigatorState>();
@@ -103,33 +104,42 @@ Future<void> main(List<String> args) async {
   );
 
   late final TrayController tray;
-  tray = TrayController(
-    launcher: launcher,
-    location: location,
-    onShowWindow: window.show,
-    onQuit: () async {
-      try {
-        if (await claudeCode.releaseOnQuit()) {
-          await _startWatcher([
-            for (final instance in launcher.instances) instance.pid,
-          ]);
-        }
-      } catch (error) {
-        debugPrint('Не удалось вернуть уведомления Claude: $error');
+  // Выход — из меню значка и перед установкой обновления.
+  Future<void> quit() async {
+    try {
+      if (await claudeCode.releaseOnQuit()) {
+        await _startWatcher([
+          for (final instance in launcher.instances) instance.pid,
+        ]);
       }
-      await tray.dispose();
-      exit(0);
-    },
-  );
+    } catch (error) {
+      debugPrint('Не удалось вернуть уведомления Claude: $error');
+    }
+    await tray.dispose();
+    exit(0);
+  }
 
   // Версия из самого приложения — её Flutter берёт из pubspec.yaml.
   final version = (await PackageInfo.fromPlatform()).version;
+  final updater = AppUpdater(
+    currentVersion: version,
+    settings: settings,
+    quit: quit,
+  );
+  tray = TrayController(
+    launcher: launcher,
+    location: location,
+    updater: updater,
+    onShowWindow: window.show,
+    onQuit: quit,
+  );
   runApp(
     ClaudeLauncherApp(
       launcher: launcher,
       settings: settings,
       claudeCode: claudeCode,
       location: location,
+      updater: updater,
       version: version,
     ),
   );
@@ -137,6 +147,7 @@ Future<void> main(List<String> args) async {
   // открывается профиль по умолчанию.
   await window.show();
   await tray.init();
+  updater.start();
   try {
     await launcher.init();
   } catch (error) {
@@ -327,6 +338,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.settings,
     required this.claudeCode,
     required this.location,
+    required this.updater,
     required this.version,
   });
 
@@ -334,6 +346,7 @@ class ClaudeLauncherApp extends StatelessWidget {
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
+  final AppUpdater updater;
   final String version;
 
   @override
@@ -352,6 +365,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           settings: settings,
           claudeCode: claudeCode,
           location: location,
+          updater: updater,
           version: version,
         ),
       ),

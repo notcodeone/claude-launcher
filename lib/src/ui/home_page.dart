@@ -12,6 +12,7 @@ import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
 import '../location/location_guard.dart';
 import '../profile.dart';
+import '../updates/app_updater.dart';
 import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
 import 'profile_dialog.dart';
@@ -27,6 +28,7 @@ class HomePage extends StatelessWidget {
     required this.settings,
     required this.claudeCode,
     required this.location,
+    this.updater,
     this.version = '',
   });
 
@@ -34,6 +36,9 @@ class HomePage extends StatelessWidget {
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
+
+  /// Обновления лаунчера — в подвале; null — без них (тесты).
+  final AppUpdater? updater;
 
   /// Версия приложения — в подвале.
   final String version;
@@ -170,7 +175,7 @@ class HomePage extends StatelessWidget {
             left: gutter,
             right: gutter,
             child: ListenableBuilder(
-              listenable: location,
+              listenable: Listenable.merge([launcher, location]),
               builder: (context, _) => _HeaderBar(
                 launcher: launcher,
                 settings: settings,
@@ -185,7 +190,7 @@ class HomePage extends StatelessWidget {
             right: 0,
             bottom: 0,
             height: _footerHeight,
-            child: _Footer(version: version),
+            child: _Footer(version: version, updater: updater),
           ),
           // Кнопка по полю окна, над подвалом.
           Positioned(
@@ -205,11 +210,6 @@ class HomePage extends StatelessWidget {
   List<Widget> _banners(BuildContext context) {
     final status = launcher.switchStatus;
     return [
-      if (!launcher.located)
-        const Padding(
-          padding: EdgeInsets.only(bottom: 16),
-          child: LinearProgressIndicator(),
-        ),
       // Пока не закроют крестиком: иначе после перезапуска лаунчера подсказка
       // пропала бы непрочитанной.
       if (!settings.trayHintDismissed && status == null)
@@ -222,18 +222,10 @@ class HomePage extends StatelessWidget {
               : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой ▲). '
                     'Это окно можно закрыть.',
         ),
-      if (status != null && status.phase != SwitchPhase.checking)
-        _SwitchBanner(launcher: launcher, status: status)
-      // Страна проверяется быстро (или ответ ещё свежий) — плашка не мигает.
-      else if (location.showsProgress)
-        InfoBanner(
-          icon: AppIcons.location,
-          progress: true,
-          text: switch (status?.target) {
-            final target? => 'Проверяю страну перед запуском «${target.name}»…',
-            null => 'Проверяю страну по IP-адресу…',
-          },
-        ),
+      // Ход проверки и переключения — в шапке (headerStatus); плашка — только
+      // когда Claude не закрылся сам и нужен выбор пользователя.
+      if (status != null && status.phase == SwitchPhase.waitingForUser)
+        _SwitchBanner(launcher: launcher, status: status),
       if (location.blocksLaunch && !location.showsProgress)
         InfoBanner(
           icon: AppIcons.locationOff,
@@ -278,9 +270,10 @@ class HomePage extends StatelessWidget {
 
 /// Нижняя строка, как подвал сайта sensomni: копирайт слева, автор справа.
 class _Footer extends StatelessWidget {
-  const _Footer({required this.version});
+  const _Footer({required this.version, this.updater});
 
   final String version;
+  final AppUpdater? updater;
 
   static final _notCodeUrl = Uri.parse('https://github.com/notcodeone');
 
@@ -304,13 +297,25 @@ class _Footer extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              [
-                '© ${DateTime.now().year} ClaudeLauncher',
-                if (version.isNotEmpty) version,
-              ].join(' '),
-              style: style,
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    [
+                      '© ${DateTime.now().year} ClaudeLauncher',
+                      if (version.isNotEmpty) version,
+                    ].join(' '),
+                    style: style,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (updater case final updater?)
+                  ListenableBuilder(
+                    listenable: updater,
+                    builder: (context, _) =>
+                        _UpdateStatus(updater: updater, style: style),
+                  ),
+              ],
             ),
           ),
           Text('Designed by', style: style),
@@ -321,6 +326,154 @@ class _Footer extends StatelessWidget {
             onTap: () => launchUrl(_notCodeUrl),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Новая версия в подвале: «· Обновить до 1.3.0», затем ход скачивания.
+class _UpdateStatus extends StatelessWidget {
+  const _UpdateStatus({required this.updater, required this.style});
+
+  final AppUpdater updater;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final version = updater.release?.version;
+    final progress = updater.progress;
+    final Widget child = switch (updater.phase) {
+      UpdatePhase.idle => const SizedBox.shrink(),
+      UpdatePhase.available => QuietTextButton(
+        label: 'Обновить до $version',
+        style: style.copyWith(
+          color: context.palette.text,
+          fontWeight: FontWeight.w600,
+        ),
+        horizontalPadding: QuietTextButton.spaceWidth(context, style),
+        onTap: updater.install,
+      ),
+      UpdatePhase.downloading => Text(
+        ' Скачиваю $version…'
+        '${progress == null ? '' : ' ${(progress * 100).round()}%'}',
+        style: style,
+      ),
+      UpdatePhase.installing => Text(' Устанавливаю $version…', style: style),
+      UpdatePhase.failed => Tooltip(
+        message: updater.error ?? '',
+        child: QuietTextButton(
+          label: 'Не удалось обновить — ещё раз',
+          style: style.copyWith(color: context.palette.danger),
+          horizontalPadding: QuietTextButton.spaceWidth(context, style),
+          onTap: updater.install,
+        ),
+      ),
+    };
+    if (updater.phase == UpdatePhase.idle) return child;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(' ·', style: style),
+        child,
+      ],
+    );
+  }
+}
+
+/// Что лаунчер сейчас делает — для шапки вместо названия; null — ничего.
+String? headerStatus(LauncherController launcher, LocationGuard location) {
+  final status = launcher.switchStatus;
+  final target = status?.target == null ? null : '«${status!.target!.name}»';
+  final closing = status?.closing.map((name) => '«$name»').join(', ');
+  return switch (status?.phase) {
+    SwitchPhase.closing => 'Закрываю $closing…',
+    SwitchPhase.waitingForUser => 'Жду, пока Claude закроется…',
+    SwitchPhase.launching => 'Открываю $target…',
+    SwitchPhase.checking ||
+    null when location.showsProgress => 'Проверяю страну…',
+    SwitchPhase.checking => 'Проверяю, можно ли открыть $target…',
+    null when !launcher.located => 'Загружаю профили…',
+    null => null,
+  };
+}
+
+/// Название в шапке — знак и «ClaudeLauncher». Пока лаунчер что-то делает,
+/// на его месте спиннер и [status]. Смена — как в Telegram при «Соединение…»:
+/// прежняя надпись уходит вверх и гаснет, новая поднимается снизу.
+class HeaderTitle extends StatelessWidget {
+  const HeaderTitle({super.key, this.status});
+
+  final String? status;
+
+  static const _duration = Duration(milliseconds: 280);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.titleMedium?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.3,
+    );
+    final status = this.status;
+    final key = ValueKey(status ?? '');
+    final Widget child = Row(
+      key: key,
+      children: [
+        SizedBox.square(
+          dimension: 20,
+          child: status == null
+              // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
+              ? Image.asset(
+                  'assets/icon/mark.png',
+                  width: 20,
+                  height: 20,
+                  color: p.text,
+                  colorBlendMode: BlendMode.srcIn,
+                  filterQuality: FilterQuality.medium,
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: p.text,
+                  ),
+                ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            status ?? 'ClaudeLauncher',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: status == null
+                ? style
+                : style?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+    return ClipRect(
+      child: AnimatedSwitcher(
+        duration: _duration,
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (current, previous) => Stack(
+          alignment: Alignment.centerLeft,
+          children: [...previous, ?current],
+        ),
+        transitionBuilder: (child, animation) {
+          // Новая надпись — снизу вверх; уходящая (анимация идёт назад) — вверх.
+          final incoming = child.key == key;
+          return SlideTransition(
+            position: Tween(
+              begin: Offset(0, incoming ? 0.8 : -0.8),
+              end: Offset.zero,
+            ).animate(animation),
+            child: FadeTransition(opacity: animation, child: child),
+          );
+        },
+        child: child,
       ),
     );
   }
@@ -351,28 +504,7 @@ class _HeaderBar extends StatelessWidget {
       ThemeMode.light => AppIcons.themeLight,
       ThemeMode.dark => AppIcons.themeDark,
     };
-    final title = Row(
-      children: [
-        // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
-        Image.asset(
-          'assets/icon/mark.png',
-          width: 20,
-          height: 20,
-          color: context.palette.text,
-          colorBlendMode: BlendMode.srcIn,
-          filterQuality: FilterQuality.medium,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'ClaudeLauncher',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
-          ),
-        ),
-      ],
-    );
+    final title = HeaderTitle(status: headerStatus(launcher, location));
     return Builder(
       builder: (cardContext) => SoftCard(
         radius: 16,

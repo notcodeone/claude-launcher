@@ -32,6 +32,9 @@ class AppSettings extends ChangeNotifier {
   /// не во всех странах.
   bool locationCheck = true;
 
+  /// Спрашивать у GitHub, вышла ли новая версия лаунчера.
+  bool checkUpdates = true;
+
   /// Показывать функции, которые ещё проверяются (сейчас — лимиты профиля).
   bool experimentalFeatures = false;
 
@@ -58,6 +61,7 @@ class AppSettings extends ChangeNotifier {
         startupProfileId = json['startupProfileId'] as String?;
         locationCheck = json['locationCheck'] as bool? ?? true;
         experimentalFeatures = json['experimentalFeatures'] as bool? ?? false;
+        checkUpdates = json['checkUpdates'] as bool? ?? true;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
         eventsToken = json['eventsToken'] as String? ?? '';
       } on FormatException {
@@ -83,6 +87,9 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setLocationCheck(bool enabled) =>
       _update(() => locationCheck = enabled);
+
+  Future<void> setCheckUpdates(bool enabled) =>
+      _update(() => checkUpdates = enabled);
 
   Future<void> setExperimentalFeatures(bool enabled) =>
       _update(() => experimentalFeatures = enabled);
@@ -122,6 +129,7 @@ class AppSettings extends ChangeNotifier {
         'startupProfileId': startupProfileId,
         'locationCheck': locationCheck,
         'experimentalFeatures': experimentalFeatures,
+        'checkUpdates': checkUpdates,
         'eventsPort': eventsPort,
         'eventsToken': eventsToken,
       }),

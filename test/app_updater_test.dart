@@ -1,0 +1,66 @@
+import 'dart:io';
+
+import 'package:claude_launcher/src/updates/app_updater.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('сравнение версий', () {
+    expect(isNewerVersion('1.2.3', '1.2.2'), isTrue);
+    expect(isNewerVersion('1.10.0', '1.9.9'), isTrue);
+    expect(isNewerVersion('2.0.0', '1.99.99'), isTrue);
+    expect(isNewerVersion('1.2.2', '1.2.2'), isFalse);
+    expect(isNewerVersion('1.2.1', '1.2.2'), isFalse);
+    expect(isNewerVersion('1.3.0', '1.2.2+7'), isTrue);
+    expect(isNewerVersion('бета', '1.2.2'), isFalse);
+    expect(parseVersion('1.2'), isNull);
+  });
+
+  test('выпуск GitHub: версия из тега, файлы по имени', () {
+    final release = AppRelease.fromJson({
+      'tag_name': 'v1.3.0',
+      'html_url':
+          'https://github.com/notcodeone/claude-launcher/releases/v1.3.0',
+      'assets': [
+        {
+          'name': 'ClaudeLauncher-1.3.0.dmg',
+          'browser_download_url':
+              'https://github.com/x/ClaudeLauncher-1.3.0.dmg',
+        },
+        {
+          'name': 'ClaudeLauncher-Setup-1.3.0.exe',
+          'browser_download_url':
+              'https://github.com/x/ClaudeLauncher-Setup-1.3.0.exe',
+        },
+        // Не по HTTPS — не скачиваем.
+        {
+          'name': 'evil.dmg',
+          'browser_download_url': 'http://example.com/evil.dmg',
+        },
+      ],
+    })!;
+    expect(release.version, '1.3.0');
+    expect(release.assets.keys, [
+      'ClaudeLauncher-1.3.0.dmg',
+      'ClaudeLauncher-Setup-1.3.0.exe',
+    ]);
+    if (Platform.isMacOS) {
+      expect(release.installer?.path, endsWith('ClaudeLauncher-1.3.0.dmg'));
+    }
+  });
+
+  test('черновики, предварительные и непонятные теги пропускаются', () {
+    expect(
+      AppRelease.fromJson({
+        'tag_name': 'v1.3.0',
+        'html_url': 'https://github.com/x',
+        'prerelease': true,
+      }),
+      isNull,
+    );
+    expect(
+      AppRelease.fromJson({'tag_name': 'latest', 'html_url': 'https://x'}),
+      isNull,
+    );
+    expect(AppRelease.fromJson('нет'), isNull);
+  });
+}

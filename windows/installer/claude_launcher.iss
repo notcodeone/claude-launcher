@@ -70,8 +70,34 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: startup
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Обновление из самого лаунчера (/update=1): он уже вышел — запускаем новую версию.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsUpdate
 
 [UninstallRun]
 ; Убирает хуки лаунчера из ~/.claude/settings.json и возвращает значок Claude
 ; в трей. Профили Claude и их данные не трогает.
 Filename: "{app}\{#AppExe}"; Parameters: "--cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "ClaudeLauncherCleanup"
+
+[Code]
+// Обновление из лаунчера: он запускает установщик и сразу выходит.
+function IsUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+// Ждём, пока лаунчер выйдет и отпустит мьютекс «один экземпляр», — до 15 секунд.
+function InitializeSetup: Boolean;
+var
+  I: Integer;
+begin
+  if IsUpdate then
+  begin
+    I := 0;
+    while CheckForMutexes('ClaudeLauncher.SingleInstance') and (I < 75) do
+    begin
+      Sleep(200);
+      I := I + 1;
+    end;
+  end;
+  Result := True;
+end;
