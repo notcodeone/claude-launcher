@@ -21,9 +21,7 @@ void main() {
     ),
   );
 
-  testWidgets('токены сменяются затуханием, подпись не мигает', (
-    tester,
-  ) async {
+  testWidgets('токены сменяются затуханием, подпись не мигает', (tester) async {
     final session = CodeSession(id: 's', profileId: 'p', startedAt: start)
       ..tokens = 3142;
     await tester.pumpWidget(app(session));

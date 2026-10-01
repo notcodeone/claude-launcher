@@ -77,7 +77,12 @@ class HomePage extends StatelessWidget {
       body: Stack(
         children: [
           ListenableBuilder(
-            listenable: Listenable.merge([launcher, claudeCode, location]),
+            listenable: Listenable.merge([
+              launcher,
+              claudeCode,
+              location,
+              settings,
+            ]),
             builder: (context, _) => ListView(
               padding: EdgeInsets.fromLTRB(
                 gutter,
@@ -797,7 +802,8 @@ class _ProfileCard extends StatelessWidget {
                               ),
                       ),
                       const SizedBox(width: 12),
-                      if (running)
+                      // Лимиты — экспериментальная функция (настройки).
+                      if (running && settings.experimentalFeatures)
                         ProfileUsageButton(
                           menuAnchorContext: cardContext,
                           menuHighlight: _menuHighlight,

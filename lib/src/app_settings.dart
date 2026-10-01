@@ -32,6 +32,9 @@ class AppSettings extends ChangeNotifier {
   /// не во всех странах.
   bool locationCheck = true;
 
+  /// Показывать функции, которые ещё проверяются (сейчас — лимиты профиля).
+  bool experimentalFeatures = false;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
@@ -54,6 +57,7 @@ class AppSettings extends ChangeNotifier {
         launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
         locationCheck = json['locationCheck'] as bool? ?? true;
+        experimentalFeatures = json['experimentalFeatures'] as bool? ?? false;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
         eventsToken = json['eventsToken'] as String? ?? '';
       } on FormatException {
@@ -79,6 +83,9 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setLocationCheck(bool enabled) =>
       _update(() => locationCheck = enabled);
+
+  Future<void> setExperimentalFeatures(bool enabled) =>
+      _update(() => experimentalFeatures = enabled);
 
   Future<void> setHideClaudeIcon(bool hide) =>
       _update(() => hideClaudeIcon = hide);
@@ -114,6 +121,7 @@ class AppSettings extends ChangeNotifier {
         'launcherNotifications': launcherNotifications,
         'startupProfileId': startupProfileId,
         'locationCheck': locationCheck,
+        'experimentalFeatures': experimentalFeatures,
         'eventsPort': eventsPort,
         'eventsToken': eventsToken,
       }),

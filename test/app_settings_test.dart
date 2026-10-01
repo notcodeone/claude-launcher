@@ -53,6 +53,18 @@ void main() {
     },
   );
 
+  test('экспериментальные функции выключены и сохраняются', () async {
+    final file = File('${dir.path}/settings.json');
+    final settings = AppSettings(file);
+    await settings.load();
+    expect(settings.experimentalFeatures, isFalse);
+    await settings.setExperimentalFeatures(true);
+
+    final reloaded = AppSettings(file);
+    await reloaded.load();
+    expect(reloaded.experimentalFeatures, isTrue);
+  });
+
   test('повреждённый файл не ломает запуск', () async {
     final file = File('${dir.path}/settings.json')
       ..writeAsStringSync('{не json');

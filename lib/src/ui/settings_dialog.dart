@@ -10,7 +10,7 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Настройки лаунчера: проверка страны, значок Claude, события и уведомления
-/// Claude Code. Меняются сразу.
+/// Claude Code, экспериментальные функции. Меняются сразу.
 /// Профиль, который открывается при запуске, выбирается в меню его карточки.
 Future<void> showSettingsDialog(
   BuildContext context, {
@@ -70,6 +70,16 @@ Future<void> showSettingsDialog(
                 onChanged: claudeCode.setNotificationsEnabled,
               ),
             ],
+            const SizedBox(height: 24),
+            SettingSwitchRow(
+              title: 'Экспериментальные функции',
+              description:
+                  'Функции, которые ещё проверяются и могут работать неточно. '
+                  'Сейчас это лимиты профиля: кнопка с графиками на открытом '
+                  'профиле.',
+              value: settings.experimentalFeatures,
+              onChanged: settings.setExperimentalFeatures,
+            ),
             const SizedBox(height: 24),
             AppButton(
               label: 'Готово',
