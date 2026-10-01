@@ -170,11 +170,27 @@ class TrayController with TrayListener {
             disabled:
                 updater.phase != UpdatePhase.available &&
                 updater.phase != UpdatePhase.failed,
+          )
+        else
+          MenuItem(
+            key: 'check-updates',
+            label: updater.checking
+                ? 'Проверяю обновления…'
+                : _justChecked
+                ? 'Обновлений нет — у вас последняя версия'
+                : 'Проверить обновления',
+            disabled: updater.checking,
           ),
         MenuItem(key: 'settings', label: 'Профили и настройки…'),
         MenuItem(key: 'quit', label: 'Выйти из ClaudeLauncher'),
       ],
     );
+  }
+
+  bool get _justChecked {
+    final at = updater.upToDateAt;
+    return at != null &&
+        DateTime.now().difference(at) < const Duration(minutes: 1);
   }
 
   String? _updateLabel() {
@@ -205,6 +221,10 @@ class TrayController with TrayListener {
     if (key == 'quit') return onQuit();
     if (key == 'update') {
       updater.install();
+      return;
+    }
+    if (key == 'check-updates') {
+      updater.check(manual: true);
       return;
     }
     if (key.startsWith('profile:')) {

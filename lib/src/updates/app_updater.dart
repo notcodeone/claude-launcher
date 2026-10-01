@@ -104,8 +104,18 @@ class AppUpdater extends ChangeNotifier {
   double? progress;
   String? error;
 
+  /// Идёт проверка — для пункта меню «Проверяю обновления…».
+  bool checking = false;
+
+  /// Последняя проверка ответила, что новее версии нет.
+  DateTime? upToDateAt;
+
   Timer? _timer;
-  bool _checking = false;
+  Timer? _retry;
+  DateTime? _checkedAt;
+
+  static const _retryAfter = Duration(minutes: 5);
+  static const _staleAfter = Duration(minutes: 10);
 
   /// Проверяет сейчас и затем раз в 6 часов, пока проверка включена.
   void start() {
@@ -145,32 +155,54 @@ class AppUpdater extends ChangeNotifier {
   @override
   void dispose() {
     _timer?.cancel();
+    _retry?.cancel();
     settings.removeListener(_onSettings);
     super.dispose();
   }
 
-  Future<void> check() async {
-    if (_checking || !settings.checkUpdates) return;
-    if (phase == UpdatePhase.downloading || phase == UpdatePhase.installing) {
-      return;
-    }
-    _checking = true;
-    try {
-      final latest = await _latest();
-      if (latest != null && isNewerVersion(latest.version, currentVersion)) {
-        release = latest;
-        if (phase != UpdatePhase.failed) phase = UpdatePhase.available;
-        notifyListeners();
-      }
-    } catch (e) {
-      // Нет сети или репозиторий недоступен — тихо, проверим позже.
-      debugPrint('Не удалось проверить обновления: $e');
-    } finally {
-      _checking = false;
+  /// Окно открыли: если с прошлой проверки прошло больше 10 минут — проверяем.
+  void checkIfStale() {
+    final checkedAt = _checkedAt;
+    if (checkedAt == null ||
+        DateTime.now().difference(checkedAt) > _staleAfter) {
+      check();
     }
   }
 
-  Future<AppRelease?> _latest() async {
+  /// [manual] — по пункту меню: проверяет, даже если автоматическая проверка
+  /// выключена в настройках.
+  Future<void> check({bool manual = false}) async {
+    if (checking || (!manual && !settings.checkUpdates)) return;
+    if (phase == UpdatePhase.downloading || phase == UpdatePhase.installing) {
+      return;
+    }
+    _retry?.cancel();
+    checking = true;
+    notifyListeners();
+    try {
+      final latest = await _latest();
+      _checkedAt = DateTime.now();
+      if (isNewerVersion(latest.version, currentVersion)) {
+        release = latest;
+        upToDateAt = null;
+        if (phase != UpdatePhase.failed) phase = UpdatePhase.available;
+      } else {
+        upToDateAt = _checkedAt;
+        // Подпись «Обновлений нет» в меню — на минуту.
+        Timer(const Duration(minutes: 1, seconds: 1), notifyListeners);
+      }
+    } catch (e) {
+      // Нет сети, GitHub ограничил запросы (60 в час без входа) — повторим
+      // через 5 минут, а не через 6 часов.
+      debugPrint('Не удалось проверить обновления: $e');
+      _retry = Timer(_retryAfter, check);
+    } finally {
+      checking = false;
+      notifyListeners();
+    }
+  }
+
+  Future<AppRelease> _latest() async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
@@ -184,8 +216,11 @@ class AppUpdater extends ChangeNotifier {
         const Duration(seconds: 15),
       );
       final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) return null;
-      return AppRelease.fromJson(jsonDecode(body));
+      if (response.statusCode != 200) {
+        throw HttpException('GitHub ответил ${response.statusCode}');
+      }
+      return AppRelease.fromJson(jsonDecode(body)) ??
+          (throw const FormatException('Непонятный ответ GitHub'));
     } finally {
       client.close();
     }
