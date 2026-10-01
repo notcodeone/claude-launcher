@@ -32,6 +32,9 @@ class AppSettings extends ChangeNotifier {
   /// не во всех странах.
   bool locationCheck = true;
 
+  /// macOS: значок лаунчера в Dock (иначе он только в строке меню).
+  bool dockIcon = false;
+
   /// Спрашивать у GitHub, вышла ли новая версия лаунчера.
   bool checkUpdates = true;
 
@@ -62,6 +65,7 @@ class AppSettings extends ChangeNotifier {
         locationCheck = json['locationCheck'] as bool? ?? true;
         experimentalFeatures = json['experimentalFeatures'] as bool? ?? false;
         checkUpdates = json['checkUpdates'] as bool? ?? true;
+        dockIcon = json['dockIcon'] as bool? ?? false;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
         eventsToken = json['eventsToken'] as String? ?? '';
       } on FormatException {
@@ -87,6 +91,8 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setLocationCheck(bool enabled) =>
       _update(() => locationCheck = enabled);
+
+  Future<void> setDockIcon(bool shown) => _update(() => dockIcon = shown);
 
   Future<void> setCheckUpdates(bool enabled) =>
       _update(() => checkUpdates = enabled);
@@ -130,6 +136,7 @@ class AppSettings extends ChangeNotifier {
         'locationCheck': locationCheck,
         'experimentalFeatures': experimentalFeatures,
         'checkUpdates': checkUpdates,
+        'dockIcon': dockIcon,
         'eventsPort': eventsPort,
         'eventsToken': eventsToken,
       }),

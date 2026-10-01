@@ -16,6 +16,20 @@ class AppDelegate: FlutterAppDelegate {
     return false
   }
 
+  // Выход из Dock, ⌘Q или «quit app» — тем же путём, что из меню значка:
+  // лаунчер возвращает Claude уведомления и завершается сам (exit). Если Dart
+  // не ответил за 5 секунд — завершаемся как обычно.
+  override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let channel = (mainFlutterWindow as? MainFlutterWindow)?.nativeChannel else {
+      return .terminateNow
+    }
+    channel.invokeMethod("quit", arguments: nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+      sender.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
+  }
+
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }

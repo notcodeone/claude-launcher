@@ -10,7 +10,7 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Настройки лаунчера: проверка страны, значок Claude, события и уведомления
-/// Claude Code, обновления, экспериментальные функции. Меняются сразу.
+/// Claude Code, значок в Dock, обновления, экспериментальные функции. Меняются сразу.
 /// Профиль, который открывается при запуске, выбирается в меню его карточки.
 Future<void> showSettingsDialog(
   BuildContext context, {
@@ -68,6 +68,18 @@ Future<void> showSettingsDialog(
                 value: settings.launcherNotifications,
                 claudeCode: claudeCode,
                 onChanged: claudeCode.setNotificationsEnabled,
+              ),
+            ],
+            if (Platform.isMacOS) ...[
+              const SizedBox(height: 24),
+              SettingSwitchRow(
+                title: 'Значок в Dock',
+                description:
+                    'Лаунчер виден в Dock, как обычное приложение: нажатие '
+                    'открывает его окно. Без значка он живёт только в строке '
+                    'меню.',
+                value: settings.dockIcon,
+                onChanged: settings.setDockIcon,
               ),
             ],
             const SizedBox(height: 24),

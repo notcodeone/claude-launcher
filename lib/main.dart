@@ -81,11 +81,6 @@ Future<void> main(List<String> args) async {
     if (window.visible.value && settings.locationCheck) location.check();
   });
   location.recheckWhile(window.visible);
-  // Лаунчер запустили ещё раз (Finder, «Объекты входа»): второй экземпляр
-  // macOS не запускает, а сообщает этому — показываем окно.
-  _nativeChannel.setMethodCallHandler((call) async {
-    if (call.method == 'reopen') await window.show();
-  });
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
@@ -136,6 +131,27 @@ Future<void> main(List<String> args) async {
     onShowWindow: window.show,
     onQuit: quit,
   );
+  // Лаунчер запустили ещё раз (Finder, «Объекты входа», значок в Dock): второй
+  // экземпляр система не запускает, а сообщает этому — показываем окно.
+  // Выход из Dock или ⌘Q — тем же путём, что из меню значка.
+  _nativeChannel.setMethodCallHandler((call) async {
+    if (call.method == 'reopen') await window.show();
+    if (call.method == 'quit') await quit();
+  });
+  // Окно открыли — заодно проверим обновления, если давно не проверяли.
+  window.visible.addListener(() {
+    if (window.visible.value) updater.checkIfStale();
+  });
+  // Значок в Dock — по настройке (macOS).
+  if (Platform.isMacOS) {
+    var dockIcon = settings.dockIcon;
+    if (dockIcon) await windowManager.setSkipTaskbar(false);
+    settings.addListener(() {
+      if (settings.dockIcon == dockIcon) return;
+      dockIcon = settings.dockIcon;
+      windowManager.setSkipTaskbar(!dockIcon);
+    });
+  }
   runApp(
     ClaudeLauncherApp(
       launcher: launcher,
