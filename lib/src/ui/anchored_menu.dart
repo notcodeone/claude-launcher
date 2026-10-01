@@ -38,7 +38,9 @@ Future<T?> showAnchoredMenu<T>({
   Widget? content,
   double maxWidth = 300,
 }) {
-  final navigator = Navigator.of(anchorContext);
+  // Корневой навигатор: затемнение — на всё окно, вместе с шапкой и подвалом,
+  // даже если элемент — на странице внутри окна.
+  final navigator = Navigator.of(anchorContext, rootNavigator: true);
   final overlayBox =
       navigator.overlay!.context.findRenderObject()! as RenderBox;
   final anchorBox = anchorContext.findRenderObject()! as RenderBox;

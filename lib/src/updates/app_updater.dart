@@ -114,6 +114,9 @@ class AppUpdater extends ChangeNotifier {
   Timer? _retry;
   DateTime? _checkedAt;
 
+  /// Когда GitHub последний раз ответил на проверку.
+  DateTime? get checkedAt => _checkedAt;
+
   static const _retryAfter = Duration(minutes: 5);
   static const _staleAfter = Duration(minutes: 10);
 

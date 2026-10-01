@@ -808,6 +808,12 @@ abstract final class AppIcons {
   static const themeLight = LucideIcons.sun;
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
+  static const back = LucideIcons.arrowLeft;
+  static const chevron = LucideIcons.chevronRight;
+  static const general = LucideIcons.slidersHorizontal;
+  static const claudeCode = LucideIcons.squareTerminal;
+  static const updates = LucideIcons.refreshCw;
+  static const experiments = LucideIcons.flaskConical;
   static const quit = LucideIcons.power;
   static const location = LucideIcons.mapPin;
   static const locationOff = LucideIcons.mapPinOff;

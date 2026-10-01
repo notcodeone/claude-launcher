@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
@@ -17,9 +18,90 @@ import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
 import 'profile_dialog.dart';
 import 'profile_usage_menu.dart';
-import 'settings_dialog.dart';
+import 'settings_pages.dart';
 import 'theme.dart';
 import 'widgets.dart';
+
+/// Страницы внутри окна: профили, настройки и их разделы. Шапка и подвал —
+/// общие, меняется только тело под ними. Переход — «общая ось»: новая
+/// страница въезжает справа и проявляется, прежняя уезжает влево и гаснет.
+abstract final class AppPages {
+  static const home = '/';
+  static const settings = '/settings';
+
+  static final navigator = GlobalKey<NavigatorState>();
+
+  /// Адрес открытой страницы — для шапки и кнопки «Добавить».
+  static final current = ValueNotifier<String>(home);
+  static final observer = _PageObserver();
+
+  static void open(String route) {
+    if (current.value == route) return;
+    navigator.currentState?.pushNamed(route);
+  }
+
+  /// Назад; на главной странице — ничего.
+  static void back() => navigator.currentState?.maybePop();
+
+  static Route<void> route(RouteSettings settings, WidgetBuilder builder) =>
+      PageRouteBuilder<void>(
+        settings: settings,
+        transitionDuration: const Duration(milliseconds: 380),
+        reverseTransitionDuration: const Duration(milliseconds: 320),
+        pageBuilder: (context, _, _) => builder(context),
+        transitionsBuilder: (context, animation, secondary, child) {
+          final incoming = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          final outgoing = CurvedAnimation(
+            parent: secondary,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween(
+              begin: const Offset(0.12, 0),
+              end: Offset.zero,
+            ).animate(incoming),
+            child: FadeTransition(
+              opacity: incoming,
+              child: SlideTransition(
+                position: Tween(
+                  begin: Offset.zero,
+                  end: const Offset(-0.12, 0),
+                ).animate(outgoing),
+                child: FadeTransition(
+                  opacity: ReverseAnimation(outgoing),
+                  child: child,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+}
+
+class _PageObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previous) => _set(route);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previous) => _set(previous);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _set(newRoute);
+
+  // Уведомляем после кадра: push/pop идут во время сборки навигатора.
+  void _set(Route<dynamic>? route) {
+    final name = route?.settings.name ?? AppPages.home;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => AppPages.current.value = name,
+    );
+  }
+}
 
 class HomePage extends StatelessWidget {
   const HomePage({
@@ -48,13 +130,99 @@ class HomePage extends StatelessWidget {
   static const _headerHeight = 52.0;
   static const _footerHeight = 40.0;
 
+  /// Страница внутри окна по её адресу (см. [AppPages]).
+  Widget _page(BuildContext context, String route, EdgeInsets padding) {
+    final deps = SettingsContext(
+      launcher: launcher,
+      settings: settings,
+      claudeCode: claudeCode,
+      location: location,
+      updater: updater,
+      version: version,
+    );
+    if (route == AppPages.settings) {
+      return SettingsListPage(
+        deps: deps,
+        padding: padding,
+        onOpen: (section) => AppPages.open(section.route),
+      );
+    }
+    for (final section in SettingsSection.values) {
+      if (route == section.route) {
+        return SettingsSectionPage(
+          section: section,
+          deps: deps,
+          padding: padding,
+        );
+      }
+    }
+    return _profiles(context, padding);
+  }
+
+  Widget _profiles(BuildContext context, EdgeInsets padding) {
+    final theme = Theme.of(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([launcher, claudeCode, location, settings]),
+      builder: (context, _) => ListView(
+        padding: padding,
+        children: [
+          Text('Профили', style: theme.textTheme.headlineMedium),
+          const SizedBox(height: 8),
+          Text(
+            // По предложению на строку — без одинокого слова на второй.
+            'Каждый профиль — отдельный вход в Claude.\n'
+            'Одновременно запущен только один.',
+            style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+          ),
+          const SizedBox(height: 24),
+          ..._banners(context),
+          if (launcher.located && launcher.claudePath == null)
+            const _EmptyState(
+              mood: FaceMood.worried,
+              title: 'Claude не найден',
+              text:
+                  'Установите приложение Claude с claude.com/download '
+                  'и перезапустите лаунчер.',
+            )
+          // Пока профили грузятся, список пуст — это не «ничего нет».
+          else if (launcher.located && launcher.profiles.isEmpty)
+            _EmptyState(
+              mood: FaceMood.sleepy,
+              title: 'Ничего нет..',
+              text: 'Создайте профиль для каждого аккаунта Claude.',
+              action: AppButton(
+                label: 'Создать',
+                onPressed: () => _addProfile(context),
+              ),
+            ),
+          for (final (index, profile) in launcher.profiles.indexed) ...[
+            if (index > 0) const SizedBox(height: 12),
+            _ProfileCard(
+              launcher: launcher,
+              settings: settings,
+              claudeCode: claudeCode,
+              location: location,
+              profile: profile,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final p = context.palette;
     // На macOS заголовок окна скрыт: сверху место под кнопки окна.
     final headerTop = Platform.isMacOS ? 46.0 : 16.0;
     final scrimHeight = headerTop + _headerHeight + 16;
+    final bodyPadding = EdgeInsets.fromLTRB(
+      gutter,
+      headerTop + _headerHeight + 28,
+      gutter,
+      // Запас под подвал и кнопку «Добавить профиль», чтобы докрутить до конца.
+      _footerHeight + 8 + 52 + 24,
+    );
 
     // Шапка и подвал парят над списком, как в sensomni: при прокрутке карточки
     // плавно уходят под них, а не обрезаются по линии.
@@ -78,65 +246,49 @@ class HomePage extends StatelessWidget {
       );
     }
 
+    // Esc — назад, ⌘, (Ctrl+, на Windows) — настройки.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): AppPages.back,
+        SingleActivator(
+          LogicalKeyboardKey.comma,
+          meta: Platform.isMacOS,
+          control: !Platform.isMacOS,
+        ): () =>
+            AppPages.open(AppPages.settings),
+      },
+      child: Focus(
+        autofocus: true,
+        child: _scaffold(context, bodyPadding, headerTop, scrimHeight, scrim),
+      ),
+    );
+  }
+
+  Widget _scaffold(
+    BuildContext context,
+    EdgeInsets bodyPadding,
+    double headerTop,
+    double scrimHeight,
+    Widget Function({
+      required bool top,
+      required double height,
+      required double solid,
+    })
+    scrim,
+  ) {
     return Scaffold(
       body: Stack(
         children: [
-          ListenableBuilder(
-            listenable: Listenable.merge([
-              launcher,
-              claudeCode,
-              location,
-              settings,
-            ]),
-            builder: (context, _) => ListView(
-              padding: EdgeInsets.fromLTRB(
-                gutter,
-                headerTop + _headerHeight + 28,
-                gutter,
-                // Запас под подвал и кнопку «Добавить профиль», чтобы докрутить до конца.
-                _footerHeight + 8 + 52 + 24,
+          // Тело окна — страницы: профили, настройки и их разделы. Шапка,
+          // подвал и затемнения над ними — общие и не двигаются.
+          Positioned.fill(
+            child: Navigator(
+              key: AppPages.navigator,
+              observers: [HeroController(), AppPages.observer],
+              onGenerateRoute: (route) => AppPages.route(
+                route,
+                (context) => _page(context, route.name ?? '/', bodyPadding),
               ),
-              children: [
-                Text('Профили', style: theme.textTheme.headlineMedium),
-                const SizedBox(height: 8),
-                Text(
-                  // По предложению на строку — без одинокого слова на второй.
-                  'Каждый профиль — отдельный вход в Claude.\n'
-                  'Одновременно запущен только один.',
-                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
-                ),
-                const SizedBox(height: 24),
-                ..._banners(context),
-                if (launcher.located && launcher.claudePath == null)
-                  const _EmptyState(
-                    mood: FaceMood.worried,
-                    title: 'Claude не найден',
-                    text:
-                        'Установите приложение Claude с claude.com/download '
-                        'и перезапустите лаунчер.',
-                  )
-                // Пока профили грузятся, список пуст — это не «ничего нет».
-                else if (launcher.located && launcher.profiles.isEmpty)
-                  _EmptyState(
-                    mood: FaceMood.sleepy,
-                    title: 'Ничего нет..',
-                    text: 'Создайте профиль для каждого аккаунта Claude.',
-                    action: AppButton(
-                      label: 'Создать',
-                      onPressed: () => _addProfile(context),
-                    ),
-                  ),
-                for (final (index, profile) in launcher.profiles.indexed) ...[
-                  if (index > 0) const SizedBox(height: 12),
-                  _ProfileCard(
-                    launcher: launcher,
-                    settings: settings,
-                    claudeCode: claudeCode,
-                    location: location,
-                    profile: profile,
-                  ),
-                ],
-              ],
             ),
           ),
           Positioned(
@@ -175,13 +327,19 @@ class HomePage extends StatelessWidget {
             left: gutter,
             right: gutter,
             child: ListenableBuilder(
-              listenable: Listenable.merge([launcher, location, updater]),
+              listenable: Listenable.merge([
+                launcher,
+                location,
+                updater,
+                AppPages.current,
+              ]),
               builder: (context, _) => _HeaderBar(
                 launcher: launcher,
                 settings: settings,
                 claudeCode: claudeCode,
                 location: location,
                 updater: updater,
+                page: AppPages.current.value,
               ),
             ),
           ),
@@ -194,13 +352,29 @@ class HomePage extends StatelessWidget {
             child: _Footer(version: version, updater: updater),
           ),
           // Кнопка по полю окна, над подвалом.
+          // Только на странице профилей; в настройках уезжает вниз и гаснет.
           Positioned(
             right: gutter,
             bottom: _footerHeight + 8,
-            child: AppFab(
-              icon: AppIcons.add,
-              label: 'Добавить',
-              onPressed: () => _addProfile(context),
+            child: ValueListenableBuilder(
+              valueListenable: AppPages.current,
+              builder: (context, page, _) => IgnorePointer(
+                ignoring: page != AppPages.home,
+                child: AnimatedSlide(
+                  offset: Offset(0, page == AppPages.home ? 0 : 0.5),
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: page == AppPages.home ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: AppFab(
+                      icon: AppIcons.add,
+                      label: 'Добавить',
+                      onPressed: () => _addProfile(context),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -382,7 +556,15 @@ class _UpdateStatus extends StatelessWidget {
 
 /// Что лаунчер сейчас делает — для шапки вместо названия.
 class HeaderStatus {
-  const HeaderStatus(this.id, this.text, {this.downloading = false});
+  const HeaderStatus(
+    this.id,
+    this.text, {
+    this.downloading = false,
+    this.plain = false,
+  });
+
+  /// Без значка слева — заголовок страницы («Настройки»), а не занятие.
+  final bool plain;
 
   /// Вид занятия: пока он тот же, надпись меняется на месте (проценты), без
   /// анимации смены.
@@ -462,32 +644,34 @@ class HeaderTitle extends StatelessWidget {
     final Widget child = Row(
       key: key,
       children: [
-        SizedBox.square(
-          dimension: 20,
-          child: switch (status) {
-            // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
-            null => Image.asset(
-              'assets/icon/mark.png',
-              width: 20,
-              height: 20,
-              color: p.text,
-              colorBlendMode: BlendMode.srcIn,
-              filterQuality: FilterQuality.medium,
-            ),
-            HeaderStatus(downloading: true) => DownloadingIcon(color: p.text),
-            _ => Padding(
-              padding: const EdgeInsets.all(2),
-              child: CircularProgressIndicator(strokeWidth: 2, color: p.text),
-            ),
-          },
-        ),
-        const SizedBox(width: 8),
+        if (status?.plain != true) ...[
+          SizedBox.square(
+            dimension: 20,
+            child: switch (status) {
+              // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
+              null => Image.asset(
+                'assets/icon/mark.png',
+                width: 20,
+                height: 20,
+                color: p.text,
+                colorBlendMode: BlendMode.srcIn,
+                filterQuality: FilterQuality.medium,
+              ),
+              HeaderStatus(downloading: true) => DownloadingIcon(color: p.text),
+              _ => Padding(
+                padding: const EdgeInsets.all(2),
+                child: CircularProgressIndicator(strokeWidth: 2, color: p.text),
+              ),
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
         Flexible(
           child: Text(
             status?.text ?? 'ClaudeLauncher',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: status == null
+            style: status == null || status.plain
                 ? style
                 : style?.copyWith(fontWeight: FontWeight.w600),
           ),
@@ -631,6 +815,7 @@ class _HeaderBar extends StatelessWidget {
     required this.claudeCode,
     required this.location,
     this.updater,
+    this.page = AppPages.home,
     this.interactive = true,
   });
 
@@ -640,60 +825,89 @@ class _HeaderBar extends StatelessWidget {
   final LocationGuard location;
   final AppUpdater? updater;
 
+  /// Открытая страница: на профилях — название и кнопки, в настройках —
+  /// «← Настройки».
+  final String page;
+
   /// Копия шапки поверх затемнения под меню не реагирует на клики.
   final bool interactive;
 
   @override
   Widget build(BuildContext context) {
-    final icon = switch (settings.themeMode) {
-      ThemeMode.system => AppIcons.themeSystem,
-      ThemeMode.light => AppIcons.themeLight,
-      ThemeMode.dark => AppIcons.themeDark,
-    };
-    final title = HeaderTitle(
-      status: headerStatus(launcher, location, updater),
-    );
+    final home = page == AppPages.home;
+    final busy = headerStatus(launcher, location, updater);
+    // В настройках — «Настройки»; из статусов там виден только ход обновления.
+    final status = home || (busy?.id.startsWith('update') ?? false)
+        ? busy
+        : const HeaderStatus('settings', 'Настройки', plain: true);
+    const duration = Duration(milliseconds: 280);
     return Builder(
       builder: (cardContext) => SoftCard(
         radius: 16,
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        child: Row(
-          children: [
-            // Кнопку темы в область перетаскивания не кладём: та ждёт двойного
-            // клика (развернуть окно), и одиночные клики срабатывали бы с задержкой.
-            Expanded(child: _dragArea(title)),
-            CircleIconButton(
-              icon: location.enabled ? AppIcons.location : AppIcons.locationOff,
-              badge: _locationBadge(context.palette),
-              loading: location.showsProgress,
-              tooltip: interactive ? 'Страна' : null,
-              onPressed: () {
-                if (interactive) _openLocationMenu(cardContext);
-              },
-            ),
-            CircleIconButton(
-              icon: icon,
-              tooltip: interactive ? 'Тема окна' : null,
-              onPressed: () {
-                if (interactive) _openThemeMenu(cardContext);
-              },
-            ),
-            CircleIconButton(
-              icon: AppIcons.settings,
-              tooltip: interactive ? 'Настройки' : null,
-              onPressed: () {
-                if (interactive) {
-                  showSettingsDialog(
-                    context,
-                    launcher: launcher,
-                    settings: settings,
-                    claudeCode: claudeCode,
-                    location: location,
-                  );
-                }
-              },
-            ),
-          ],
+        padding: EdgeInsets.zero,
+        child: AnimatedPadding(
+          duration: duration,
+          curve: Curves.easeOutCubic,
+          // Со стрелкой «назад» левый край — как правый, у кнопок.
+          padding: EdgeInsets.fromLTRB(home ? 16 : 8, 8, 8, 8),
+          child: Row(
+            children: [
+              AnimatedSize(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                child: AnimatedSwitcher(
+                  duration: duration,
+                  child: home
+                      ? const SizedBox(key: ValueKey('none'), height: 36)
+                      : Padding(
+                          key: const ValueKey('back'),
+                          padding: const EdgeInsets.only(right: 4),
+                          child: CircleIconButton(
+                            icon: AppIcons.back,
+                            tooltip: interactive ? 'Назад' : null,
+                            onPressed: interactive ? AppPages.back : null,
+                          ),
+                        ),
+                ),
+              ),
+              // Кнопки — не в области перетаскивания: та ждёт двойного клика
+              // (развернуть окно), и одиночные клики срабатывали бы с задержкой.
+              Expanded(child: _dragArea(HeaderTitle(status: status))),
+              AnimatedSwitcher(
+                duration: duration,
+                transitionBuilder: (child, animation) =>
+                    FadeTransition(opacity: animation, child: child),
+                child: !home
+                    ? const SizedBox(key: ValueKey('none'), height: 36)
+                    : Row(
+                        key: const ValueKey('buttons'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircleIconButton(
+                            icon: location.enabled
+                                ? AppIcons.location
+                                : AppIcons.locationOff,
+                            badge: _locationBadge(context.palette),
+                            loading: location.showsProgress,
+                            tooltip: interactive ? 'Страна' : null,
+                            onPressed: () {
+                              if (interactive) _openLocationMenu(cardContext);
+                            },
+                          ),
+                          CircleIconButton(
+                            icon: AppIcons.settings,
+                            tooltip: interactive ? 'Настройки' : null,
+                            onPressed: () {
+                              if (interactive) {
+                                AppPages.open(AppPages.settings);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -717,6 +931,7 @@ class _HeaderBar extends StatelessWidget {
     claudeCode: claudeCode,
     location: location,
     updater: updater,
+    page: page,
     interactive: false,
   );
 
@@ -747,26 +962,6 @@ class _HeaderBar extends StatelessWidget {
   Widget _dragArea(Widget child) => Platform.isMacOS && interactive
       ? DragToMoveArea(child: SizedBox(height: 36, child: child))
       : SizedBox(height: 36, child: child);
-
-  Future<void> _openThemeMenu(BuildContext cardContext) async {
-    MenuEntry<ThemeMode> entry(ThemeMode mode, IconData icon, String label) =>
-        MenuEntry(
-          value: mode,
-          icon: icon,
-          label: label,
-          selected: settings.themeMode == mode,
-        );
-    final mode = await showAnchoredMenu(
-      anchorContext: cardContext,
-      highlight: _highlight,
-      entries: [
-        entry(ThemeMode.system, AppIcons.themeSystem, 'Как в системе'),
-        entry(ThemeMode.light, AppIcons.themeLight, 'Светлая'),
-        entry(ThemeMode.dark, AppIcons.themeDark, 'Тёмная'),
-      ],
-    );
-    if (mode != null) await settings.setThemeMode(mode);
-  }
 }
 
 class _SwitchBanner extends StatelessWidget {
@@ -1083,8 +1278,8 @@ class _ProfileCard extends StatelessWidget {
                               ),
                       ),
                       const SizedBox(width: 12),
-                      // Лимиты — экспериментальная функция (настройки).
-                      if (running && settings.experimentalFeatures)
+                      // Лимиты — эксперимент, включается в настройках.
+                      if (running && settings.usageLimits)
                         ProfileUsageButton(
                           menuAnchorContext: cardContext,
                           menuHighlight: _menuHighlight,

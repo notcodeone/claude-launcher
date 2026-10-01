@@ -5,117 +5,8 @@ import 'package:flutter/material.dart';
 import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
-import '../location/location_guard.dart';
 import 'theme.dart';
 import 'widgets.dart';
-
-/// Настройки лаунчера: проверка страны, значок Claude, события и уведомления
-/// Claude Code, значок в Dock, обновления, экспериментальные функции. Меняются сразу.
-/// Профиль, который открывается при запуске, выбирается в меню его карточки.
-Future<void> showSettingsDialog(
-  BuildContext context, {
-  required LauncherController launcher,
-  required AppSettings settings,
-  required ClaudeCodeIntegration claudeCode,
-  required LocationGuard location,
-}) {
-  return showDialog<void>(
-    context: context,
-    builder: (context) => ListenableBuilder(
-      listenable: Listenable.merge([settings, claudeCode]),
-      builder: (context, _) {
-        final theme = Theme.of(context);
-        return AppDialogFrame(
-          children: [
-            Text('Настройки', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 4),
-            Text(
-              'Как ClaudeLauncher работает вместе с Claude.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 24),
-            SettingSwitchRow(
-              title: 'Проверять страну перед запуском',
-              description:
-                  'Claude доступен не во всех странах. Перед запуском профиля '
-                  'лаунчер узнаёт страну по IP-адресу у публичных сервисов '
-                  '(country.is, Cloudflare, ipwho.is, ipapi.co) и не запускает '
-                  'профиль, если Claude там недоступен.',
-              value: settings.locationCheck,
-              onChanged: (enabled) async {
-                await settings.setLocationCheck(enabled);
-                if (enabled) await location.check(force: true);
-              },
-            ),
-            const SizedBox(height: 24),
-            _ClaudeIconSwitch(
-              launcher: launcher,
-              value: settings.hideClaudeIcon,
-              onChanged: (hide) async {
-                await settings.setHideClaudeIcon(hide);
-                await launcher.setClaudeIconHidden(hide);
-              },
-            ),
-            const SizedBox(height: 24),
-            _ClaudeCodeEventsSwitch(
-              value: settings.claudeCodeEvents,
-              claudeCode: claudeCode,
-              onChanged: claudeCode.setEnabled,
-            ),
-            if (settings.claudeCodeEvents) ...[
-              const SizedBox(height: 24),
-              _LauncherNotificationsSwitch(
-                value: settings.launcherNotifications,
-                claudeCode: claudeCode,
-                onChanged: claudeCode.setNotificationsEnabled,
-              ),
-            ],
-            if (Platform.isMacOS) ...[
-              const SizedBox(height: 24),
-              SettingSwitchRow(
-                title: 'Значок в Dock',
-                description:
-                    'Лаунчер виден в Dock, как обычное приложение: нажатие '
-                    'открывает его окно. Без значка он живёт только в строке '
-                    'меню.',
-                value: settings.dockIcon,
-                onChanged: settings.setDockIcon,
-              ),
-            ],
-            const SizedBox(height: 24),
-            SettingSwitchRow(
-              title: 'Проверять обновления',
-              description:
-                  'Раз в 6 часов лаунчер спрашивает GitHub, вышла ли новая '
-                  'версия. Обновить — в подвале окна или в меню значка: '
-                  'лаунчер скачает и установит её сам, без предупреждений '
-                  'системы.',
-              value: settings.checkUpdates,
-              onChanged: settings.setCheckUpdates,
-            ),
-            const SizedBox(height: 24),
-            SettingSwitchRow(
-              title: 'Экспериментальные функции',
-              description:
-                  'Функции, которые ещё проверяются и могут работать неточно. '
-                  'Сейчас это лимиты профиля: кнопка с графиками на открытом '
-                  'профиле.',
-              value: settings.experimentalFeatures,
-              onChanged: settings.setExperimentalFeatures,
-            ),
-            const SizedBox(height: 24),
-            AppButton(
-              label: 'Готово',
-              expand: true,
-              large: true,
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
-    ),
-  );
-}
 
 /// Окно приветствия при первом запуске: те же настройки, применяются по «Начать».
 Future<void> showWelcomeDialog(
@@ -196,19 +87,19 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 24),
-        _ClaudeIconSwitch(
+        ClaudeIconSwitch(
           launcher: widget.launcher,
           value: _hideIcon,
           onChanged: (hide) => setState(() => _hideIcon = hide),
         ),
         const SizedBox(height: 24),
-        _ClaudeCodeEventsSwitch(
+        ClaudeCodeEventsSwitch(
           value: _claudeCodeEvents,
           onChanged: (enabled) => setState(() => _claudeCodeEvents = enabled),
         ),
         if (_claudeCodeEvents) ...[
           const SizedBox(height: 24),
-          _LauncherNotificationsSwitch(
+          LauncherNotificationsSwitch(
             value: _launcherNotifications,
             onChanged: (enabled) =>
                 setState(() => _launcherNotifications = enabled),
@@ -226,8 +117,9 @@ class _WelcomeDialogState extends State<_WelcomeDialog> {
   }
 }
 
-class _ClaudeIconSwitch extends StatelessWidget {
-  const _ClaudeIconSwitch({
+class ClaudeIconSwitch extends StatelessWidget {
+  const ClaudeIconSwitch({
+    super.key,
     required this.launcher,
     required this.value,
     required this.onChanged,
@@ -262,8 +154,9 @@ class _ClaudeIconSwitch extends StatelessWidget {
   }
 }
 
-class _ClaudeCodeEventsSwitch extends StatelessWidget {
-  const _ClaudeCodeEventsSwitch({
+class ClaudeCodeEventsSwitch extends StatelessWidget {
+  const ClaudeCodeEventsSwitch({
+    super.key,
     required this.value,
     required this.onChanged,
     this.claudeCode,
@@ -300,8 +193,9 @@ class _ClaudeCodeEventsSwitch extends StatelessWidget {
   }
 }
 
-class _LauncherNotificationsSwitch extends StatelessWidget {
-  const _LauncherNotificationsSwitch({
+class LauncherNotificationsSwitch extends StatelessWidget {
+  const LauncherNotificationsSwitch({
+    super.key,
     required this.value,
     required this.onChanged,
     this.claudeCode,
