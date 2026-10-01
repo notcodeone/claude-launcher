@@ -50,10 +50,12 @@ class WindowsClaudeHost extends ClaudeHost {
   Duration get manualQuitHintAfter => const Duration(seconds: 6);
 
   /// При закрытии окна Claude уходит в трей, а попросить его выйти извне
-  /// нельзя. Поэтому, если за пару секунд он не вышел сам (вдруг в настройках
-  /// Claude выключена работа в фоне), завершаем его принудительно.
+  /// нельзя. Поэтому, если за 5 секунд он не вышел сам (вдруг в настройках
+  /// Claude выключена работа в фоне), завершаем его принудительно. Запас — на
+  /// случай, когда Claude выходит сам, но не мгновенно: принудительное
+  /// завершение обрывает сессии Code и Cowork.
   @override
-  Duration get autoForceQuitAfter => const Duration(seconds: 2);
+  Duration get autoForceQuitAfter => const Duration(seconds: 5);
 
   @override
   String get manualQuitHint =>

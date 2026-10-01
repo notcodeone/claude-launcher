@@ -20,6 +20,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!headless) {
     ::CreateMutexW(nullptr, TRUE, L"Local\\ClaudeLauncher.SingleInstance");
     if (::GetLastError() == ERROR_ALREADY_EXISTS) {
+      // Будим уже запущенный лаунчер: он покажет окно. Право вывести окно
+      // вперёд отдаём ему — у этого процесса оно есть, его запустил пользователь.
+      ::AllowSetForegroundWindow(ASFW_ANY);
+      ::PostMessageW(HWND_BROADCAST, ReopenMessage(), 0, 0);
       return EXIT_SUCCESS;
     }
   }

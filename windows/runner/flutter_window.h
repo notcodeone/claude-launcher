@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -28,6 +30,16 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Канал к Dart: `reopen` — лаунчер запустили ещё раз, показать окно.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      native_channel_;
 };
+
+// Сообщение, которым второй запуск лаунчера будит первый (см. main.cpp).
+inline UINT ReopenMessage() {
+  static const UINT message = ::RegisterWindowMessageW(L"ClaudeLauncher.Reopen");
+  return message;
+}
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
