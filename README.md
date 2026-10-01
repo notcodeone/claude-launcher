@@ -153,6 +153,8 @@ Claude, загружаясь, сам выходит на передний пла
 ## Лимиты профиля
 
 Экспериментальная функция: включается в «Настройки» → «Эксперименты» → «Лимиты профиля».
+При первом входе в «Эксперименты» лаунчер предупреждает, что такие функции ещё
+проверяются и пользоваться ими — на свой страх и риск.
 Там же, каждая со своим переключателем, будут появляться другие функции, которые ещё
 проверяются.
 
@@ -332,8 +334,8 @@ python3 tool/generate_icons.py   # перегенерировать все зн�
 Собрать локально (после `flutter build …`):
 
 ```bash
-tool/make_dmg.sh 1.4.0                                         # macOS
-iscc /DAppVersion=1.4.0 windows\installer\claude_launcher.iss  # Windows, Inno Setup 6
+tool/make_dmg.sh 1.4.1                                         # macOS
+iscc /DAppVersion=1.4.1 windows\installer\claude_launcher.iss  # Windows, Inno Setup 6
 ```
 
 Окно DMG (фон, размер, положение значков) берётся из шаблона `tool/dmg/template.dmg`.
