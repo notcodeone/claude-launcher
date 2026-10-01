@@ -54,6 +54,9 @@ enum AppButtonKind {
 
   /// Без фона и тени, как «Вернуться в корзину»; фон появляется только при наведении.
   secondary,
+
+  /// Рискованное действие: красный текст на розовой подложке, как плашки ошибок.
+  danger,
 }
 
 class AppButton extends StatelessWidget {
@@ -85,6 +88,7 @@ class AppButton extends StatelessWidget {
         Colors.transparent,
         enabled ? p.text : p.muted,
       ),
+      AppButtonKind.danger => (p.dangerSurface, enabled ? p.danger : p.muted),
     };
     return _Pressable(
       background: background,
@@ -662,6 +666,68 @@ class SettingSwitchRow extends StatelessWidget {
         const SizedBox(width: 16),
         Switch(value: value, onChanged: onChanged),
       ],
+    );
+  }
+}
+
+/// Подсветка под курсором и при нажатии — как у карточек профилей: едва
+/// заметная заливка цветом текста, без волны. Своя, на MouseRegion: подсветка
+/// InkWell в меню оставалась, когда курсор уже ушёл или пункт стал неактивным.
+class HoverSurface extends StatefulWidget {
+  const HoverSurface({super.key, required this.onTap, required this.child});
+
+  final VoidCallback? onTap;
+  final Widget child;
+
+  /// Те же доли цвета текста, что у карточек профилей (HomePage).
+  static const hoverAlpha = 0.018;
+  static const pressedAlpha = 0.03;
+
+  @override
+  State<HoverSurface> createState() => _HoverSurfaceState();
+}
+
+class _HoverSurfaceState extends State<HoverSurface> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  void didUpdateWidget(HoverSurface old) {
+    super.didUpdateWidget(old);
+    // Пункт стал неактивным (идёт действие) — нажатия больше нет.
+    if (widget.onTap == null) _pressed = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final enabled = widget.onTap != null;
+    final alpha = !enabled
+        ? 0.0
+        : _pressed
+        ? HoverSurface.pressedAlpha
+        : _hovered
+        ? HoverSurface.hoverAlpha
+        : 0.0;
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _pressed = false;
+      }),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+        onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
+        onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          color: p.text.withValues(alpha: alpha),
+          child: widget.child,
+        ),
+      ),
     );
   }
 }

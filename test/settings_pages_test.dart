@@ -9,6 +9,7 @@ import 'package:claude_launcher/src/profile_store.dart';
 import 'package:claude_launcher/src/ui/home_page.dart';
 import 'package:claude_launcher/src/ui/settings_pages.dart';
 import 'package:claude_launcher/src/ui/theme.dart';
+import 'package:claude_launcher/src/ui/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -76,8 +77,30 @@ void main() {
     expect(find.byTooltip('Назад'), findsOneWidget);
     expect(find.byTooltip('Страна'), findsNothing);
 
+    // Перед «Экспериментами» — предупреждение: мимо не закрыть, «Назад»
+    // оставляет в списке, согласие запоминается.
     await tester.tap(find.text('Эксперименты'));
     await tester.pumpAndSettle();
+    expect(find.text('Понимаю, продолжить'), findsOneWidget);
+    expect(
+      find.text(
+        'ClaudeLauncher не собирает и не отправляет ваши личные данные.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Понимаю, продолжить'), findsOneWidget);
+    await tester.tap(find.widgetWithText(AppButton, 'Назад'));
+    await tester.pumpAndSettle();
+    expect(AppPages.current.value, AppPages.settings);
+    expect(settings.experimentsAccepted, isFalse);
+
+    await tester.tap(find.text('Эксперименты'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Понимаю, продолжить'));
+    await tester.pumpAndSettle();
+    expect(settings.experimentsAccepted, isTrue);
     expect(find.text('Лимиты профиля'), findsOneWidget);
     expect(settings.usageLimits, isFalse);
     await tester.tap(find.byType(Switch));

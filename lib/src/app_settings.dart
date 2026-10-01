@@ -38,6 +38,9 @@ class AppSettings extends ChangeNotifier {
   /// Спрашивать у GitHub, вышла ли новая версия лаунчера.
   bool checkUpdates = true;
 
+  /// Пользователь согласился с предупреждением раздела «Эксперименты».
+  bool experimentsAccepted = false;
+
   /// Эксперимент «Лимиты профиля»: кнопка с графиками на открытом профиле.
   /// У каждого эксперимента — свой переключатель (раздел «Эксперименты»).
   bool usageLimits = false;
@@ -64,6 +67,7 @@ class AppSettings extends ChangeNotifier {
         launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
         locationCheck = json['locationCheck'] as bool? ?? true;
+        experimentsAccepted = json['experimentsAccepted'] as bool? ?? false;
         // До 1.4.0 эксперименты включались одним переключателем.
         usageLimits =
             json['usageLimits'] as bool? ??
@@ -101,6 +105,8 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setCheckUpdates(bool enabled) =>
       _update(() => checkUpdates = enabled);
+
+  Future<void> acceptExperiments() => _update(() => experimentsAccepted = true);
 
   Future<void> setUsageLimits(bool enabled) =>
       _update(() => usageLimits = enabled);
@@ -140,6 +146,7 @@ class AppSettings extends ChangeNotifier {
         'startupProfileId': startupProfileId,
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
+        'experimentsAccepted': experimentsAccepted,
         'checkUpdates': checkUpdates,
         'dockIcon': dockIcon,
         'eventsPort': eventsPort,

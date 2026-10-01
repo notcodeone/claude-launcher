@@ -51,6 +51,79 @@ class SettingsContext {
       Listenable.merge([settings, claudeCode, location, updater]);
 }
 
+/// Предупреждение перед разделом «Эксперименты». Пропустить нельзя: ни кликом
+/// мимо, ни Esc — только ответить. true — пользователь согласился.
+Future<bool> confirmExperiments(BuildContext context) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          const PopScope(canPop: false, child: _ExperimentsWarning()),
+    ) ??
+    false;
+
+class _ExperimentsWarning extends StatelessWidget {
+  const _ExperimentsWarning();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = context.palette;
+    return AppDialogFrame(
+      children: [
+        Row(
+          children: [
+            Icon(AppIcons.experiments, size: 24, color: p.text),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'Экспериментальные функции',
+                style: theme.textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Здесь — функции, которые ещё проверяются. Они могут работать '
+          'неточно или перестать работать после обновления Claude: часть из '
+          'них опирается на его внутренние данные, которые Anthropic может '
+          'изменить в любой момент. Некоторые могут быть небезопасны.',
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Включая их, вы пользуетесь ими на свой страх и риск. Продолжить?',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'ClaudeLauncher не собирает и не отправляет ваши личные данные.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 24),
+        AppButton(
+          label: 'Понимаю, продолжить',
+          kind: AppButtonKind.danger,
+          expand: true,
+          large: true,
+          onPressed: () => Navigator.of(context).pop(true),
+        ),
+        const SizedBox(height: 8),
+        AppButton(
+          label: 'Назад',
+          kind: AppButtonKind.secondary,
+          expand: true,
+          large: true,
+          onPressed: () => Navigator.of(context).pop(false),
+        ),
+      ],
+    );
+  }
+}
+
 /// Список разделов.
 class SettingsListPage extends StatelessWidget {
   const SettingsListPage({
@@ -74,18 +147,22 @@ class SettingsListPage extends StatelessWidget {
           index: 0,
           child: SoftCard(
             padding: EdgeInsets.zero,
-            child: Column(
-              children: [
-                for (final (index, section)
-                    in SettingsSection.values.indexed) ...[
-                  if (index > 0) const Divider(height: 1),
-                  _SectionRow(
-                    section: section,
-                    summary: _summary(section),
-                    onTap: () => onOpen(section),
-                  ),
+            // Подсветка строк — по скруглённым углам карточки.
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Column(
+                children: [
+                  for (final (index, section)
+                      in SettingsSection.values.indexed) ...[
+                    if (index > 0) const Divider(height: 1),
+                    _SectionRow(
+                      section: section,
+                      summary: _summary(section),
+                      onTap: () => onOpen(section),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -133,9 +210,8 @@ class _SectionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return InkWell(
+    return HoverSurface(
       onTap: onTap,
-      hoverColor: p.field,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
         child: Row(

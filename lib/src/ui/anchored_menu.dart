@@ -282,9 +282,8 @@ class AnchoredMenuAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = destructive ? p.danger : p.text;
-    final item = InkWell(
+    final item = HoverSurface(
       onTap: onPressed,
-      hoverColor: p.field,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(

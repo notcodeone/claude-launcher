@@ -144,7 +144,16 @@ class HomePage extends StatelessWidget {
       return SettingsListPage(
         deps: deps,
         padding: padding,
-        onOpen: (section) => AppPages.open(section.route),
+        onOpen: (section) async {
+          // Перед «Экспериментами» — предупреждение, пока с ним не согласились.
+          final warn =
+              section == SettingsSection.experiments &&
+              !settings.experimentsAccepted;
+          if (warn && !await confirmExperiments(context)) return;
+          // Сначала переход, потом запись настроек — без задержки.
+          AppPages.open(section.route);
+          if (warn) await settings.acceptExperiments();
+        },
       );
     }
     for (final section in SettingsSection.values) {
@@ -1256,8 +1265,10 @@ class _ProfileCard extends StatelessWidget {
                 : () {
                     if (interactive) _toggleSessions();
                   },
-            hoverColor: palette.text.withValues(alpha: 0.018),
-            highlightColor: palette.text.withValues(alpha: 0.03),
+            hoverColor: palette.text.withValues(alpha: HoverSurface.hoverAlpha),
+            highlightColor: palette.text.withValues(
+              alpha: HoverSurface.pressedAlpha,
+            ),
             splashColor: palette.text.withValues(alpha: 0.04),
             child: Padding(
               // Справа 8: у кнопок-иконок свои 8 px вокруг значка — визуально те же 16.
