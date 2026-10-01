@@ -40,7 +40,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ; Лаунчер держит мьютекс «один экземпляр» — по нему установщик и деинсталлятор
-; видят, что лаунчер запущен, и просят его закрыть.
+; видят, что лаунчер запущен, и просят его закрыть. Охранника Kill Switch (у него
+; свой мьютекс, окна нет) закрывает сам установщик, а новый лаунчер забирает его
+; работу — см. GuardTakeover.
 AppMutex=ClaudeLauncher.SingleInstance
 CloseApplications=yes
 RestartApplications=no
@@ -72,6 +74,9 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: startup
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 ; Обновление из самого лаунчера (/update=1): он уже вышел — запускаем новую версию.
 Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsUpdate
+; Работал охранник Kill Switch — установщик его закрыл. Новый лаунчер сразу
+; поднимает затвор: открытый Claude без него остался бы без сети.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: GuardTakeover
 
 [UninstallRun]
 ; Убирает хуки лаунчера из ~/.claude/settings.json и возвращает значок Claude
@@ -81,11 +86,26 @@ Filename: "{app}\{#AppExe}"; Parameters: "--cleanup"; Flags: runhidden waituntil
 [Code]
 var
   Installed: Boolean;
+  GuardWasRunning: Boolean;
 
 // Обновление из лаунчера: он запускает установщик и сразу выходит.
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+function GuardTakeover: Boolean;
+begin
+  Result := GuardWasRunning and not IsUpdate;
+end;
+
+// Удаление при открытом через Kill Switch Claude: без лаунчера он останется
+// без сети, пока его не перезапустят.
+function InitializeUninstall: Boolean;
+begin
+  if CheckForMutexes('ClaudeLauncher.KillSwitchGuard') and not UninstallSilent then
+    MsgBox('Claude открыт через Kill Switch. После удаления ClaudeLauncher перезапустите Claude — иначе он останется без сети.', mbInformation, MB_OK);
+  Result := True;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -114,6 +134,7 @@ function InitializeSetup: Boolean;
 var
   I: Integer;
 begin
+  GuardWasRunning := CheckForMutexes('ClaudeLauncher.KillSwitchGuard');
   if IsUpdate then
   begin
     I := 0;

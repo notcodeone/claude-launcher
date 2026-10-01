@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import Network
 import window_manager
 
 class MainFlutterWindow: NSWindow {
@@ -18,6 +19,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     nativeChannel = registerNativeChannel(messenger: flutterViewController.engine.binaryMessenger)
+    watchNetwork()
 
     super.awakeFromNib()
   }
@@ -26,6 +28,19 @@ class MainFlutterWindow: NSWindow {
   override public func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
     super.order(place, relativeTo: otherWin)
     hiddenWindowAtLaunch()
+  }
+
+  /// Сеть сменилась (VPN, Wi-Fi, кабель) — сразу сообщаем Dart: Kill Switch
+  /// не ждёт своего опроса. Событие приходит за миллисекунды.
+  private let networkMonitor = NWPathMonitor()
+
+  private func watchNetwork() {
+    networkMonitor.pathUpdateHandler = { [weak self] _ in
+      DispatchQueue.main.async {
+        self?.nativeChannel?.invokeMethod("networkChanged", arguments: nil)
+      }
+    }
+    networkMonitor.start(queue: DispatchQueue(label: "claude_launcher.network"))
   }
 
   /// Управление конкретным экземпляром Claude по pid: у нескольких экземпляров

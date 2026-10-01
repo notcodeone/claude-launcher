@@ -6,10 +6,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_settings.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
+import '../location/kill_switch.dart';
 import '../location/location_guard.dart';
 import '../updates/app_updater.dart';
 import 'settings_dialog.dart';
 import 'theme.dart';
+import 'kill_switch_status.dart';
 import 'widgets.dart';
 
 /// Разделы настроек — страницы внутри окна (см. HomePage): список разделов,
@@ -38,6 +40,7 @@ class SettingsContext {
     required this.location,
     required this.version,
     this.updater,
+    this.killSwitch,
   });
 
   final LauncherController launcher;
@@ -45,10 +48,11 @@ class SettingsContext {
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
   final AppUpdater? updater;
+  final KillSwitch? killSwitch;
   final String version;
 
   Listenable get changes =>
-      Listenable.merge([settings, claudeCode, location, updater]);
+      Listenable.merge([settings, claudeCode, location, updater, killSwitch]);
 }
 
 /// Предупреждение перед разделом «Эксперименты». Пропустить нельзя: ни кликом
@@ -170,28 +174,21 @@ class SettingsListPage extends StatelessWidget {
     ),
   );
 
+  /// Подпись раздела в списке. У «Обновлений» — состояние версии.
   String _summary(SettingsSection section) {
     final c = deps;
     return switch (section) {
-      SettingsSection.general => [
-        'Страна',
-        Platform.isMacOS ? 'значки Claude и Dock' : 'значок Claude',
-        'тема',
-      ].join(', '),
-      SettingsSection.claudeCode =>
-        !c.settings.claudeCodeEvents
-            ? 'События выключены'
-            : c.claudeCode.connected
-            ? 'Подключено'
-            : 'События, уведомления',
+      SettingsSection.general => 'Главные настройки приложения',
+      SettingsSection.claudeCode => 'Настройки интеграции с Claude',
       SettingsSection.updates => switch (c.updater) {
         AppUpdater(phase: UpdatePhase.available, :final release?) =>
-          'Доступна ${release.version}',
-        AppUpdater(upToDateAt: _?) => '${c.version} — последняя версия',
-        _ => 'Версия ${c.version}',
+          'Вышла версия ${release.version} — обновление в один клик',
+        AppUpdater(upToDateAt: _?) => 'У вас последняя версия — ${c.version}',
+        _ when !c.settings.checkUpdates =>
+          'Версия ${c.version}, автоматическая проверка выключена',
+        _ => 'Версия ${c.version} и проверка новых',
       },
-      SettingsSection.experiments =>
-        'Лимиты профиля — ${c.settings.usageLimits ? 'включены' : 'выключены'}',
+      SettingsSection.experiments => 'Опасная зона!',
     };
   }
 }
@@ -226,7 +223,12 @@ class _SectionRow extends StatelessWidget {
                     padding: const EdgeInsets.only(left: 30, top: 2),
                     child: Text(
                       summary,
-                      style: Theme.of(context).textTheme.bodySmall,
+                      // «Опасная зона!» — красным.
+                      style: section == SettingsSection.experiments
+                          ? Theme.of(
+                              context,
+                            ).textTheme.bodySmall?.copyWith(color: p.danger)
+                          : Theme.of(context).textTheme.bodySmall,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -382,14 +384,6 @@ class SettingsSectionPage extends StatelessWidget {
             },
             link: _countryStatus(context),
           ),
-          ClaudeIconSwitch(
-            launcher: c.launcher,
-            value: settings.hideClaudeIcon,
-            onChanged: (hide) async {
-              await settings.setHideClaudeIcon(hide);
-              await c.launcher.setClaudeIconHidden(hide);
-            },
-          ),
           if (Platform.isMacOS)
             SettingSwitchRow(
               title: 'Значок в Dock',
@@ -478,6 +472,18 @@ class SettingsSectionPage extends StatelessWidget {
             ),
         ],
       ),
+      _Card(
+        rows: [
+          ClaudeIconSwitch(
+            launcher: c.launcher,
+            value: c.settings.hideClaudeIcon,
+            onChanged: (hide) async {
+              await c.settings.setHideClaudeIcon(hide);
+              await c.launcher.setClaudeIconHidden(hide);
+            },
+          ),
+        ],
+      ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Text(
@@ -540,7 +546,52 @@ class SettingsSectionPage extends StatelessWidget {
           ),
         ],
       ),
+      _Card(
+        rows: [
+          SettingSwitchRow(
+            title: 'Kill Switch',
+            description:
+                'Защищает аккаунт, когда Claude открыт через VPN. Весь трафик '
+                'Claude — приложения, Claude Code и машины Cowork — идёт через '
+                'лаунчер. Сменилась сеть — соединения рвутся мгновенно, а новые '
+                'ждут, пока лаунчер проверит страну. Та же страна — работа '
+                'продолжается, другая — Claude закрывается.',
+            value: settings.killSwitch,
+            onChanged: settings.setKillSwitch,
+            link: _killSwitchStatus(context),
+          ),
+          if (settings.killSwitch)
+            SettingSwitchRow(
+              title: 'Закрывать Claude при любой смене сети',
+              description:
+                  'Вдобавок к затвору — закрывать Claude сразу, как сменилась '
+                  'сеть, не дожидаясь проверки страны. Закроется и при '
+                  'безобидной смене Wi-Fi.',
+              value: settings.killSwitchStrict,
+              onChanged: settings.setKillSwitchStrict,
+            ),
+        ],
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Text(
+          'Защищён Claude, открытый после включения Kill Switch — лаунчером или '
+          'из Dock. Пока функция включена, Claude обновляет лаунчер — только '
+          'через проверенную сеть. Не защищены claude.ai в браузере и '
+          'Claude Code, установленный отдельно, — их прикрывает Kill Switch '
+          'самого VPN-клиента. Лучше включить оба.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
     ];
+  }
+}
+
+extension on SettingsSectionPage {
+  /// Под переключателем Kill Switch — что он делает прямо сейчас.
+  Widget? _killSwitchStatus(BuildContext context) {
+    final killSwitch = deps.killSwitch;
+    return killSwitch == null ? null : killSwitchStatusDot(context, killSwitch);
   }
 }
 

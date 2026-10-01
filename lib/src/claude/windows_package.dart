@@ -8,6 +8,7 @@ class WindowsPackageName {
     required this.name,
     required this.version,
     required this.publisherId,
+    this.architecture = '',
   });
 
   static WindowsPackageName? parse(String fullName) {
@@ -21,12 +22,16 @@ class WindowsPackageName {
       name: parts[0],
       version: version.cast<int>(),
       publisherId: parts[4],
+      architecture: parts[2],
     );
   }
 
   final String name;
   final List<int> version;
   final String publisherId;
+
+  /// `x64`, `arm64`… — у пакета Claude своя сборка под каждую.
+  final String architecture;
 
   /// Семейство пакета — не меняется между версиями: `Claude_pzs8sxrjxfjjc`.
   String get familyName => '${name}_$publisherId';
@@ -49,6 +54,11 @@ int compareVersions(List<int> a, List<int> b) {
 /// установки. Одноимённый `claude.exe` от Claude Code CLI сюда не попадает.
 bool isClaudeDesktopExe(String path) {
   final lower = path.toLowerCase();
-  return lower.contains(r'\windowsapps\claude_') ||
+  return RegExp(
+        r'\\windowsapps\\(claude|anthropicpbc\.claude)_',
+      ).hasMatch(lower) ||
       lower.contains(r'\anthropicclaude\');
 }
+
+/// Имена пакетов Claude: с сайта claude.ai и из Microsoft Store.
+const claudePackageNames = {'Claude', 'AnthropicPBC.Claude'};

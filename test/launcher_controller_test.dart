@@ -40,6 +40,9 @@ class FakeHost extends ClaudeHost {
   Future<String?> locate() async => '/Applications/Claude.app';
 
   @override
+  Future<String?> commandLineOf(int pid) async => null;
+
+  @override
   Future<List<ClaudeInstance>> running() async => List.of(instances);
 
   ClaudeInstance start(String? dataDir) {

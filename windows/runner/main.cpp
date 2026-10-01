@@ -16,7 +16,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Имя мьютекса знает и установщик (AppMutex), чтобы попросить закрыть лаунчер.
   const bool headless =
       wcsstr(command_line, L"--cleanup") != nullptr ||
-      wcsstr(command_line, L"--return-claude-notifications") != nullptr;
+      wcsstr(command_line, L"--return-claude-notifications") != nullptr ||
+      wcsstr(command_line, L"--kill-switch-guard") != nullptr;
+  // Охранник Kill Switch держит свой мьютекс: по нему установщик видит, что
+  // он работает, и просит закрыть, а не завершает его молча.
+  if (wcsstr(command_line, L"--kill-switch-guard") != nullptr) {
+    ::CreateMutexW(nullptr, TRUE, L"Local\\ClaudeLauncher.KillSwitchGuard");
+  }
   if (!headless) {
     ::CreateMutexW(nullptr, TRUE, L"Local\\ClaudeLauncher.SingleInstance");
     if (::GetLastError() == ERROR_ALREADY_EXISTS) {

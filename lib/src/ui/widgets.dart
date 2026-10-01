@@ -868,6 +868,7 @@ abstract final class AppIcons {
   static const error = LucideIcons.circleAlert;
   static const unknown = LucideIcons.circleHelp;
   static const sync = LucideIcons.refreshCw;
+  static const download = LucideIcons.download;
   static const hand = LucideIcons.hand;
   static const check = LucideIcons.check;
   static const themeSystem = LucideIcons.sunMoon;
@@ -882,6 +883,8 @@ abstract final class AppIcons {
   static const experiments = LucideIcons.flaskConical;
   static const quit = LucideIcons.power;
   static const location = LucideIcons.mapPin;
+  static const shield = LucideIcons.shieldCheck;
+  static const shieldAlert = LucideIcons.shieldAlert;
   static const locationOff = LucideIcons.mapPinOff;
 
   /// Открывать при запуске лаунчера — та же иконка, что у кнопки запуска профиля.

@@ -103,7 +103,8 @@ void main() {
     expect(settings.experimentsAccepted, isTrue);
     expect(find.text('Лимиты профиля'), findsOneWidget);
     expect(settings.usageLimits, isFalse);
-    await tester.tap(find.byType(Switch));
+    expect(find.text('Kill Switch'), findsOneWidget);
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(settings.usageLimits, isTrue);
 
@@ -111,7 +112,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(AppPages.current.value, AppPages.settings);
-    expect(find.text('Лимиты профиля — включены'), findsOneWidget);
+    expect(find.text('Опасная зона!'), findsOneWidget);
     await tester.tap(find.byTooltip('Назад'));
     await settle(tester);
     expect(AppPages.current.value, AppPages.home);

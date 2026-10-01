@@ -15,7 +15,11 @@ import 'src/integrations/claude_code_hooks.dart';
 import 'src/integrations/claude_code_integration.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/launcher_controller.dart';
+import 'src/claude/claude_updates.dart';
+import 'src/location/egress_config.dart';
+import 'src/location/kill_switch.dart';
 import 'src/location/location_guard.dart';
+import 'src/location/windows_network_watch.dart';
 import 'src/notifications.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
@@ -33,6 +37,14 @@ const _nativeChannel = MethodChannel('claude_launcher/native');
 /// Запуск наблюдателя, который вернёт Claude уведомления после выхода из лаунчера.
 const _watcherFlag = '--return-claude-notifications';
 
+/// Охранник Kill Switch: держит затвор после выхода из лаунчера, пока открыт
+/// закреплённый за ним Claude (см. [_guardKillSwitch]).
+const _guardFlag = '--kill-switch-guard';
+
+/// Охраннику: Kill Switch выключен, затвор лишь пропускает всё до закрытия
+/// Claude.
+const _passthroughFlag = '--passthrough';
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   final supportDir = await getApplicationSupportDirectory();
@@ -42,6 +54,14 @@ Future<void> main(List<String> args) async {
   // Убираем за собой и выходим, окно не показываем.
   if (args.contains('--cleanup')) {
     await _cleanup(supportDir);
+    exit(0);
+  }
+
+  if (args.contains(_guardFlag) &&
+      !await _guardKillSwitch(
+        supportDir,
+        passthrough: args.contains(_passthroughFlag),
+      )) {
     exit(0);
   }
 
@@ -63,16 +83,16 @@ Future<void> main(List<String> args) async {
   final location = LocationGuard(settings: settings);
   if (settings.locationCheck) unawaited(location.check());
   final window = AppWindow();
+  final notifier = SystemNotifier();
   final claudeCode = ClaudeCodeIntegration(
     settings: settings,
     launcher: launcher,
     windowVisible: window.visible,
     handoff: _handoff(supportDir, host),
-    notifier: SystemNotifier(),
+    notifier: notifier,
     onOpenWindow: window.show,
   );
   launcher.onNeedsAttention = window.show;
-  launcher.beforeLaunch = claudeCode.beforeLaunch;
   launcher.launchGuard = location.ensureCanLaunch;
   // Окно открыли — страна могла смениться вместе с сетью: свежий ответ
   // переиспользуется, старый перепроверяется. Пока запускать нельзя, страна
@@ -81,6 +101,27 @@ Future<void> main(List<String> args) async {
     if (window.visible.value && settings.locationCheck) location.check();
   });
   location.recheckWhile(window.visible);
+  // Эксперимент: закрыть Claude, если сменилась страна выхода (отключился VPN).
+  final killSwitch = KillSwitch(
+    settings: settings,
+    location: location,
+    launcher: launcher,
+    notifier: notifier,
+    onFired: window.show,
+  );
+  // Перед запуском профиля: уведомления Claude — лаунчеру, а при Kill
+  // switch — закрепить профиль за затвором (Claude читает это при запуске).
+  launcher.beforeLaunch = (dataDir) async {
+    await claudeCode.beforeLaunch(dataDir);
+    await killSwitch.beforeLaunch(dataDir);
+  };
+  // Пока включён Kill Switch, Claude обновляет лаунчер — через проверенную сеть.
+  final claudeUpdates = ClaudeUpdates(
+    host: launcher.host,
+    launcher: launcher,
+    killSwitch: killSwitch,
+    settings: settings,
+  );
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
@@ -113,6 +154,26 @@ Future<void> main(List<String> args) async {
     } catch (error) {
       debugPrint('Не удалось вернуть уведомления Claude: $error');
     }
+    // Kill Switch: открытый Claude закреплён за затвором — без него он
+    // останется без сети. Затвор держит охранник, пока Claude не закроют;
+    // при обновлении — новая версия.
+    try {
+      final guard =
+          !updating && killSwitch.serving && launcher.instances.isNotEmpty;
+      final passthrough = killSwitch.passthrough;
+      await killSwitch.shutdown(keepPinned: guard || updating);
+      if (guard) {
+        final process = await Process.start(Platform.resolvedExecutable, [
+          _guardFlag,
+          if (passthrough) _passthroughFlag,
+        ], mode: ProcessStartMode.detached);
+        // Сразу, а не когда охранник загрузится: лаунчер, запущенный снова в
+        // эту секунду, должен его найти.
+        await _guardPidFile(supportDir).writeAsString('${process.pid}');
+      }
+    } catch (error) {
+      debugPrint('Kill Switch: не удалось передать затвор охраннику: $error');
+    }
     await tray.dispose();
     exit(0);
   }
@@ -137,6 +198,7 @@ Future<void> main(List<String> args) async {
   _nativeChannel.setMethodCallHandler((call) async {
     if (call.method == 'reopen') await window.show();
     if (call.method == 'quit') await quit();
+    if (call.method == 'networkChanged') await killSwitch.networkChanged();
   });
   // Окно открыли — заодно проверим обновления, если давно не проверяли.
   window.visible.addListener(() {
@@ -159,6 +221,8 @@ Future<void> main(List<String> args) async {
       claudeCode: claudeCode,
       location: location,
       updater: updater,
+      killSwitch: killSwitch,
+      claudeUpdates: claudeUpdates,
       version: version,
     ),
   );
@@ -180,6 +244,14 @@ Future<void> main(List<String> args) async {
   if (settings.hideClaudeIcon) await launcher.setClaudeIconHidden(true);
 
   await _stopWaitingWatchers();
+  await _stopKillSwitchGuard(supportDir, launcher.host);
+  killSwitch.start();
+  claudeUpdates.start();
+  // На macOS о смене сети сообщает MainFlutterWindow (networkChanged), на
+  // Windows — сама система через iphlpapi.
+  if (Platform.isWindows) {
+    WindowsNetworkWatch().start(killSwitch.networkChanged);
+  }
 
   // Приём событий Claude Code, если пользователь его включил.
   await claudeCode.start();
@@ -253,6 +325,131 @@ Future<void> _startWatcher(List<int> claudePids) async {
   await Process.start(Platform.resolvedExecutable, [
     _watcherFlag,
   ], mode: ProcessStartMode.detached);
+}
+
+File _guardPidFile(Directory supportDir) =>
+    File(p.join(supportDir.path, 'kill-switch-guard.pid'));
+
+/// Лаунчер снова запущен — охранник Kill Switch больше не нужен: затвор
+/// поднимет сам лаунчер. Конфигурацию Claude охранник не убирает — она нужна.
+///
+/// pid-файл мог остаться от охранника, которого завершила система (выход из
+/// сеанса, установщик), а pid — достаться другому процессу. Поэтому
+/// завершаем, только если это и правда наш охранник.
+Future<void> _stopKillSwitchGuard(Directory supportDir, ClaudeHost host) async {
+  final file = _guardPidFile(supportDir);
+  try {
+    final guardPid = int.tryParse((await file.readAsString()).trim());
+    await file.delete();
+    if (guardPid == null || guardPid == pid) return;
+    final commandLine = await host.commandLineOf(guardPid);
+    final executable = p.basename(Platform.resolvedExecutable).toLowerCase();
+    if (commandLine == null ||
+        !commandLine.contains(_guardFlag) ||
+        !commandLine.toLowerCase().contains(executable)) {
+      return;
+    }
+    Process.killPid(guardPid);
+    // Порт затвора освобождается не мгновенно.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+  } on FileSystemException {
+    // Охранника нет.
+  }
+}
+
+/// Охранник Kill Switch: из лаунчера вышли, а открытый Claude закреплён за его
+/// затвором. Держит затвор и следит за сетью, пока Claude открыт; потом
+/// убирает конфигурацию Claude и уходит. Без окна и значка.
+///
+/// На macOS повторный запуск лаунчера система передаёт этому процессу — тогда
+/// охранник сам становится лаунчером: возвращает `true`, и main() продолжает
+/// обычный запуск (если лаунчер тем временем обновили — запускает новую
+/// версию и уходит). На Windows новый лаунчер находит охранника по pid-файлу и
+/// завершает.
+Future<bool> _guardKillSwitch(
+  Directory supportDir, {
+  required bool passthrough,
+}) async {
+  final executable = File(Platform.resolvedExecutable);
+  final startedAs = executable.statSync();
+  final pidFile = _guardPidFile(supportDir);
+  await pidFile.writeAsString('$pid');
+  final reopened = Completer<void>();
+
+  final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
+  await settings.load();
+  final launcher = LauncherController(
+    host: ClaudeHost.forCurrentPlatform(),
+    store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
+  );
+  await launcher.init();
+  final location = LocationGuard(settings: settings);
+  final killSwitch = KillSwitch(
+    settings: settings,
+    location: location,
+    launcher: launcher,
+    notifier: SystemNotifier(),
+    exactPort: true,
+    passthrough: passthrough,
+  );
+  _nativeChannel.setMethodCallHandler((call) async {
+    if (call.method == 'networkChanged') await killSwitch.networkChanged();
+    if (Platform.isMacOS && call.method == 'reopen' && !reopened.isCompleted) {
+      reopened.complete();
+    }
+  });
+  final windowsWatch = Platform.isWindows ? WindowsNetworkWatch() : null;
+  windowsWatch?.start(killSwitch.networkChanged);
+  killSwitch.start();
+
+  bool ours() {
+    try {
+      return pidFile.readAsStringSync().trim() == '$pid';
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  // Затвор поднимается не мгновенно — serving уже true (armed или passthrough).
+  while (!reopened.isCompleted &&
+      killSwitch.serving &&
+      launcher.instances.isNotEmpty &&
+      ours()) {
+    await Future.any([
+      Future<void>.delayed(const Duration(seconds: 2)),
+      reopened.future,
+    ]);
+    await launcher.refresh();
+  }
+  windowsWatch?.stop();
+  final reopen = reopened.isCompleted;
+  final stillOurs = ours();
+  // Claude закрыт — конфигурация больше не нужна; лаунчер снова открыли или
+  // он забрал работу — она нужна ему.
+  await killSwitch.shutdown(keepPinned: reopen || !stillOurs);
+  killSwitch.dispose();
+  location.dispose();
+  launcher.dispose();
+  if (stillOurs) {
+    try {
+      await pidFile.delete();
+    } on FileSystemException {
+      // Уже удалён.
+    }
+  }
+  if (!reopen) return false;
+  final FileStat now;
+  try {
+    now = executable.statSync();
+  } on FileSystemException {
+    return false;
+  }
+  if (now.modified == startedAs.modified && now.size == startedAs.size) {
+    return true;
+  }
+  final bundle = p.dirname(p.dirname(p.dirname(executable.path)));
+  await Process.start('open', ['-n', bundle], mode: ProcessStartMode.detached);
+  return false;
 }
 
 /// Лаунчер снова запущен и забирает уведомления себе — оболочки, которые ждут
@@ -341,11 +538,26 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
 }
 
 /// Удаление лаунчера: убирает его хуки из `~/.claude/settings.json`, возвращает
-/// значок и уведомления Claude. Профили Claude и их данные не трогает.
+/// значок и уведомления Claude, снимает прокси Kill Switch с профилей — иначе
+/// Claude без лаунчера остался бы без сети. Профили Claude и их данные не
+/// трогает.
 Future<void> _cleanup(Directory supportDir) async {
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
   final host = ClaudeHost.forCurrentPlatform();
+  try {
+    await _stopKillSwitchGuard(supportDir, host);
+    final launcher = LauncherController(
+      host: host,
+      store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
+    );
+    await launcher.init();
+    for (final profile in launcher.profiles) {
+      await const EgressConfig().unpin(launcher.dataDirOf(profile));
+    }
+  } catch (error) {
+    debugPrint('Не удалось снять прокси Kill Switch: $error');
+  }
   try {
     await ClaudeCodeHooks.forCurrentUser().uninstall();
   } catch (error) {
@@ -382,6 +594,8 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.claudeCode,
     required this.location,
     required this.updater,
+    required this.killSwitch,
+    required this.claudeUpdates,
     required this.version,
   });
 
@@ -390,6 +604,8 @@ class ClaudeLauncherApp extends StatelessWidget {
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
   final AppUpdater updater;
+  final KillSwitch killSwitch;
+  final ClaudeUpdates claudeUpdates;
   final String version;
 
   @override
@@ -409,6 +625,8 @@ class ClaudeLauncherApp extends StatelessWidget {
           claudeCode: claudeCode,
           location: location,
           updater: updater,
+          killSwitch: killSwitch,
+          claudeUpdates: claudeUpdates,
           version: version,
         ),
       ),

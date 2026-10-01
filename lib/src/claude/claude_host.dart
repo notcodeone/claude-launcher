@@ -76,6 +76,31 @@ abstract class ClaudeHost {
     );
   }
 
+  /// Командная строка процесса [pid]; `null` — процесса нет или он чужой.
+  /// Перед завершением процесса по pid-файлу: pid мог достаться другому.
+  Future<String?> commandLineOf(int pid);
+
+  /// Обновление Claude силами лаунчера — пока включён Kill Switch, сам Claude
+  /// не обновляется (его обновление идёт мимо прокси). Путь ленты обновлений
+  /// Claude: `darwin/universal/squirrel`; `null` — лаунчер обновлять не умеет.
+  String? get updateFeed => null;
+
+  /// Версия установленного Claude; `null` — неизвестна.
+  Future<String?> installedVersion() async => null;
+
+  /// Ставит скачанное обновление [package] версии [version]. Claude закрыт.
+  Future<void> installUpdate(File package, String version) =>
+      throw UnsupportedError('Обновлять Claude здесь лаунчер не умеет');
+
+  /// Kill Switch: немедленно завершает Claude со всеми его процессами — и
+  /// Claude Code, который он запустил: дочерние процессы при резком
+  /// завершении родителя иначе остались бы работать.
+  Future<void> killEverything() async {
+    for (final instance in await running()) {
+      await forceQuit(instance);
+    }
+  }
+
   /// Прячет (или возвращает) значок самого Claude в строке меню / трее.
   Future<void> setClaudeIconHidden(bool hidden);
 

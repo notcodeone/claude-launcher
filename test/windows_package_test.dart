@@ -62,5 +62,21 @@ void main() {
       isTrue,
     );
     expect(isClaudeDesktopExe(r'C:\Users\me\.local\bin\claude.exe'), isFalse);
+    // Claude из Microsoft Store.
+    expect(
+      isClaudeDesktopExe(
+        r'C:\Program Files\WindowsApps\AnthropicPBC.Claude_1.2.3.0_x64__fnn82j28hfe8t\app\Claude.exe',
+      ),
+      isTrue,
+    );
+  });
+
+  test('архитектура пакета — для ленты обновлений Claude', () {
+    expect(
+      WindowsPackageName.parse(
+        'Claude_2.16120.0.0_arm64__pzs8sxrjxfjjc',
+      )?.architecture,
+      'arm64',
+    );
   });
 }

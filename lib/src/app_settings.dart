@@ -41,6 +41,17 @@ class AppSettings extends ChangeNotifier {
   /// Пользователь согласился с предупреждением раздела «Эксперименты».
   bool experimentsAccepted = false;
 
+  /// Эксперимент Kill Switch: закрыть Claude, если сменилась страна выхода.
+  bool killSwitch = false;
+
+  /// Kill Switch вдобавок закрывает Claude при любой смене сети, не
+  /// дожидаясь проверки страны.
+  bool killSwitchStrict = false;
+
+  /// Порт прокси-затвора Kill Switch: он записан в конфигурацию Claude,
+  /// поэтому постоянный.
+  int egressPort = 47821;
+
   /// Эксперимент «Лимиты профиля»: кнопка с графиками на открытом профиле.
   /// У каждого эксперимента — свой переключатель (раздел «Эксперименты»).
   bool usageLimits = false;
@@ -68,6 +79,9 @@ class AppSettings extends ChangeNotifier {
         startupProfileId = json['startupProfileId'] as String?;
         locationCheck = json['locationCheck'] as bool? ?? true;
         experimentsAccepted = json['experimentsAccepted'] as bool? ?? false;
+        killSwitch = json['killSwitch'] as bool? ?? false;
+        killSwitchStrict = json['killSwitchStrict'] as bool? ?? false;
+        egressPort = json['egressPort'] as int? ?? egressPort;
         // До 1.4.0 эксперименты включались одним переключателем.
         usageLimits =
             json['usageLimits'] as bool? ??
@@ -108,6 +122,14 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> acceptExperiments() => _update(() => experimentsAccepted = true);
 
+  Future<void> setKillSwitch(bool enabled) =>
+      _update(() => killSwitch = enabled);
+
+  Future<void> setEgressPort(int port) => _update(() => egressPort = port);
+
+  Future<void> setKillSwitchStrict(bool strict) =>
+      _update(() => killSwitchStrict = strict);
+
   Future<void> setUsageLimits(bool enabled) =>
       _update(() => usageLimits = enabled);
 
@@ -147,6 +169,9 @@ class AppSettings extends ChangeNotifier {
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
         'experimentsAccepted': experimentsAccepted,
+        'killSwitch': killSwitch,
+        'killSwitchStrict': killSwitchStrict,
+        'egressPort': egressPort,
         'checkUpdates': checkUpdates,
         'dockIcon': dockIcon,
         'eventsPort': eventsPort,

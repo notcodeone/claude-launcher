@@ -241,6 +241,12 @@ class LauncherController extends ChangeNotifier {
     return false;
   }
 
+  /// Kill Switch: немедленно завершает Claude со всем, что он запустил.
+  Future<void> killAll() async {
+    await host.killEverything();
+    await refresh();
+  }
+
   /// Прячет или возвращает значок самого Claude; ошибка не мешает работе лаунчера.
   Future<void> setClaudeIconHidden(bool hidden) async {
     try {

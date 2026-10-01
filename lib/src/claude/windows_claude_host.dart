@@ -100,6 +100,78 @@ class WindowsClaudeHost extends ClaudeHost {
     return _installation?.exe;
   }
 
+  /// Лаунчер обновляет только Claude из пакета MSIX — им Claude ставится
+  /// сейчас; старую установку обновлять не берётся.
+  @override
+  String? get updateFeed => switch (_installation) {
+    _Installation(familyName: _?, :final architecture?)
+        when architecture.isNotEmpty =>
+      'win32/${architecture.toLowerCase()}/msix',
+    _ => null,
+  };
+
+  @override
+  Future<String?> installedVersion() async {
+    if (_installation == null) await locate();
+    return _installation?.version;
+  }
+
+  /// Пакет MSIX ставит сама Windows: она же проверяет подпись Anthropic.
+  ///
+  /// PowerShell — отдельным процессом без консоли (detached): иначе у
+  /// лаунчера, у которого консоли нет, мелькнуло бы окно, а PowerShell мог бы
+  /// ждать ввода. Кода выхода у такого процесса нет — итог он печатает сам.
+  /// Claude к этому моменту закрыт, поэтому зависнуть установка не должна:
+  /// не больше 10 минут.
+  @override
+  Future<void> installUpdate(File package, String version) async {
+    final path = package.path.replaceAll("'", "''");
+    final process = await Process.start('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-InputFormat',
+      'None',
+      '-Command',
+      "try { Add-AppxPackage -Path '$path' -ForceApplicationShutdown "
+          "-ErrorAction Stop; 'OK' } catch { 'ERROR: ' + "
+          r"$_.Exception.Message }",
+    ], mode: ProcessStartMode.detachedWithStdio);
+    final output = await process.stdout
+        .transform(const SystemEncoding().decoder)
+        .join()
+        .timeout(
+          const Duration(minutes: 10),
+          onTimeout: () {
+            Process.killPid(process.pid);
+            return 'ERROR: установка не закончилась за 10 минут';
+          },
+        );
+    await locate();
+    final installed = _installation?.version;
+    if (installed == null || !_atLeast(installed, version)) {
+      final error = output
+          .trim()
+          .split('\n')
+          .lastWhere(
+            (line) => line.trim().isNotEmpty,
+            orElse: () => 'нет ответа',
+          );
+      throw StateError('Windows не поставила пакет Claude: ${error.trim()}');
+    }
+  }
+
+  static bool _atLeast(String installed, String version) {
+    List<int> parts(String v) => [
+      for (final part in v.split('.')) int.tryParse(part) ?? 0,
+    ];
+    final a = parts(installed), b = parts(version);
+    for (var i = 0; i < b.length; i++) {
+      final x = i < a.length ? a[i] : 0;
+      if (x != b[i]) return x > b[i];
+    }
+    return true;
+  }
+
   static const _packagesKey =
       r'Software\Classes\Local Settings\Software\Microsoft\Windows'
       r'\CurrentVersion\AppModel\Repository\Packages';
@@ -117,7 +189,9 @@ class WindowsClaudeHost extends ClaudeHost {
     try {
       for (final fullName in packages.keys) {
         final package = WindowsPackageName.parse(fullName);
-        if (package == null || package.name != 'Claude') continue;
+        if (package == null || !claudePackageNames.contains(package.name)) {
+          continue;
+        }
         final root = packages.getString('PackageRootFolder', path: fullName);
         if (root == null) continue;
         final installation = _fromPackageRoot(root, package);
@@ -160,6 +234,8 @@ class WindowsClaudeHost extends ClaudeHost {
       exe: exe,
       familyName: package.familyName,
       appId: appId ?? 'Claude',
+      version: package.version.join('.'),
+      architecture: package.architecture,
     );
   }
 
@@ -191,6 +267,21 @@ class WindowsClaudeHost extends ClaudeHost {
           dataDir: windowsUserDataDir(process.commandLine),
         ),
   ];
+
+  @override
+  Future<String?> commandLineOf(int pid) async {
+    final handle = OpenProcess(
+      PROCESS_QUERY_LIMITED_INFORMATION,
+      false,
+      pid,
+    ).value;
+    if (handle.address == 0) return null;
+    try {
+      return _commandLine(handle);
+    } finally {
+      CloseHandle(handle);
+    }
+  }
 
   /// Все процессы `Claude.exe` текущего пользователя с путём и командной строкой.
   List<({int pid, String exe, String commandLine})> _claudeProcesses() {
@@ -374,6 +465,23 @@ class WindowsClaudeHost extends ClaudeHost {
     await _start(samePath(dir, defaultDataDir) ? null : dir, link: link);
   }
 
+  /// Все процессы Claude (и вспомогательные Electron) и Claude Code, который
+  /// он ставит в свою папку данных (`…\Claude*\claude-code\…`). Свой Claude
+  /// Code пользователя, установленный отдельно, не трогаем.
+  @override
+  Future<void> killEverything() async {
+    final bundledCode = RegExp(
+      r'\\claude[^\\]*\\claude-code\\',
+      caseSensitive: false,
+    );
+    for (final process in _claudeProcesses()) {
+      if (isClaudeDesktopExe(process.exe) ||
+          bundledCode.hasMatch(process.exe)) {
+        Process.killPid(process.pid);
+      }
+    }
+  }
+
   /// Окна Electron принадлежат главному процессу — сравниваем с ним.
   @override
   Future<bool> isFrontmost(ClaudeInstance instance) async {
@@ -470,11 +578,24 @@ final _ntQueryInformationProcess = DynamicLibrary.open('ntdll.dll')
     >('NtQueryInformationProcess');
 
 class _Installation {
-  const _Installation({required this.exe, this.familyName, this.appId});
+  const _Installation({
+    required this.exe,
+    this.familyName,
+    this.appId,
+    this.version,
+    this.architecture,
+  });
 
   final String exe;
   final String? familyName;
   final String? appId;
+
+  /// Версия пакета MSIX: `2.16120.0.0`.
+  final String? version;
+
+  /// Архитектура пакета: лаунчер собран под x64 и на ARM работает в
+  /// эмуляции, поэтому берём её у самого Claude, а не у себя.
+  final String? architecture;
 
   String? get aumid =>
       familyName != null && appId != null ? '$familyName!$appId' : null;

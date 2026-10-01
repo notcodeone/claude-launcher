@@ -7,15 +7,19 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
+import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
 import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
+import '../location/countries.dart';
+import '../location/kill_switch.dart';
 import '../location/location_guard.dart';
 import '../profile.dart';
 import '../updates/app_updater.dart';
 import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
+import 'kill_switch_status.dart';
 import 'profile_dialog.dart';
 import 'profile_usage_menu.dart';
 import 'settings_pages.dart';
@@ -111,6 +115,8 @@ class HomePage extends StatelessWidget {
     required this.claudeCode,
     required this.location,
     this.updater,
+    this.killSwitch,
+    this.claudeUpdates,
     this.version = '',
   });
 
@@ -121,6 +127,12 @@ class HomePage extends StatelessWidget {
 
   /// Обновления лаунчера — в подвале; null — без них (тесты).
   final AppUpdater? updater;
+
+  /// Эксперимент Kill Switch — плашка о срабатывании; null — без него (тесты).
+  final KillSwitch? killSwitch;
+
+  /// Обновление Claude лаунчером, пока включён Kill Switch; null — без него.
+  final ClaudeUpdates? claudeUpdates;
 
   /// Версия приложения — в подвале.
   final String version;
@@ -138,6 +150,7 @@ class HomePage extends StatelessWidget {
       claudeCode: claudeCode,
       location: location,
       updater: updater,
+      killSwitch: killSwitch,
       version: version,
     );
     if (route == AppPages.settings) {
@@ -171,7 +184,14 @@ class HomePage extends StatelessWidget {
   Widget _profiles(BuildContext context, EdgeInsets padding) {
     final theme = Theme.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([launcher, claudeCode, location, settings]),
+      listenable: Listenable.merge([
+        launcher,
+        claudeCode,
+        location,
+        settings,
+        killSwitch,
+        claudeUpdates,
+      ]),
       builder: (context, _) => ListView(
         padding: padding,
         children: [
@@ -340,6 +360,8 @@ class HomePage extends StatelessWidget {
                 launcher,
                 location,
                 updater,
+                settings,
+                killSwitch,
                 AppPages.current,
               ]),
               builder: (context, _) => _HeaderBar(
@@ -348,6 +370,7 @@ class HomePage extends StatelessWidget {
                 claudeCode: claudeCode,
                 location: location,
                 updater: updater,
+                killSwitch: killSwitch,
                 page: AppPages.current.value,
               ),
             ),
@@ -418,6 +441,15 @@ class HomePage extends StatelessWidget {
               'Claude недоступен в стране «${location.countryName}» — так её '
               'определяет IP-адрес. Пока это так, профили не запускаются.',
         ),
+      if (killSwitch?.lastFired case final event?)
+        InfoBanner(
+          icon: AppIcons.shieldAlert,
+          error: true,
+          onClose: killSwitch!.dismiss,
+          text: 'Kill Switch закрыл Claude. ${KillSwitch.describe(event)}',
+        ),
+      if (claudeUpdates case final updates? when updates.active)
+        ?_claudeUpdateBanner(updates),
       if (launcher.lastError case final error?)
         InfoBanner(icon: AppIcons.error, error: true, text: error),
       for (final instance in launcher.unknownInstances)
@@ -428,6 +460,49 @@ class HomePage extends StatelessWidget {
               '${launcher.host.dataDirOf(instance)}',
         ),
     ];
+  }
+
+  /// Пока включён Kill Switch, Claude обновляет лаунчер — плашка о новой
+  /// версии и ходе обновления.
+  Widget? _claudeUpdateBanner(ClaudeUpdates updates) {
+    final release = updates.available;
+    return switch (updates.phase) {
+      ClaudeUpdatePhase.downloading => InfoBanner(
+        icon: AppIcons.download,
+        progress: true,
+        text: switch (updates.progress) {
+          final share? when share > 0 =>
+            'Скачиваю Claude ${release?.version} — ${(share * 100).round()}%',
+          _ => 'Скачиваю Claude ${release?.version}…',
+        },
+      ),
+      ClaudeUpdatePhase.installing => InfoBanner(
+        icon: AppIcons.download,
+        progress: true,
+        text: 'Обновляю Claude до ${release?.version}…',
+      ),
+      ClaudeUpdatePhase.failed => InfoBanner(
+        icon: AppIcons.error,
+        error: true,
+        text: 'Не удалось обновить Claude: ${updates.error}',
+        action: release == null
+            ? null
+            : AppButton(
+                label: 'Повторить',
+                kind: AppButtonKind.secondary,
+                onPressed: updates.install,
+              ),
+      ),
+      ClaudeUpdatePhase.idle when release != null => InfoBanner(
+        icon: AppIcons.download,
+        text:
+            'Вышел Claude ${release.version}. Пока включён Kill Switch, его '
+            'обновляет лаунчер — только через проверенную сеть. Claude '
+            'закроется и откроется снова.',
+        action: AppButton(label: 'Обновить', onPressed: updates.install),
+      ),
+      ClaudeUpdatePhase.idle => null,
+    };
   }
 
   Future<void> _addProfile(BuildContext context) async {
@@ -590,6 +665,7 @@ HeaderStatus? headerStatus(
   LauncherController launcher,
   LocationGuard location, [
   AppUpdater? updater,
+  KillSwitch? killSwitch,
 ]) {
   final version = updater?.release?.version;
   final progress = updater?.progress;
@@ -615,6 +691,10 @@ HeaderStatus? headerStatus(
       'Жду, пока Claude закроется…',
     ),
     SwitchPhase.launching => HeaderStatus('launching', 'Открываю $target…'),
+    null when killSwitch?.checking ?? false => const HeaderStatus(
+      'kill-switch',
+      'Проверяю сеть…',
+    ),
     SwitchPhase.checking || null when location.showsProgress =>
       const HeaderStatus('country', 'Проверяю страну…'),
     SwitchPhase.checking => HeaderStatus(
@@ -824,6 +904,7 @@ class _HeaderBar extends StatelessWidget {
     required this.claudeCode,
     required this.location,
     this.updater,
+    this.killSwitch,
     this.page = AppPages.home,
     this.interactive = true,
   });
@@ -833,6 +914,10 @@ class _HeaderBar extends StatelessWidget {
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
   final AppUpdater? updater;
+
+  /// Кнопка Kill Switch — только когда он включён (или ещё держит затвор для
+  /// открытого Claude).
+  final KillSwitch? killSwitch;
 
   /// Открытая страница: на профилях — название и кнопки, в настройках —
   /// «← Настройки».
@@ -844,7 +929,7 @@ class _HeaderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final home = page == AppPages.home;
-    final busy = headerStatus(launcher, location, updater);
+    final busy = headerStatus(launcher, location, updater, killSwitch);
     // В настройках — «Настройки»; из статусов там виден только ход обновления.
     final status = home || (busy?.id.startsWith('update') ?? false)
         ? busy
@@ -892,6 +977,34 @@ class _HeaderBar extends StatelessWidget {
                         key: const ValueKey('buttons'),
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          AnimatedSize(
+                            duration: duration,
+                            curve: Curves.easeOutCubic,
+                            child: switch (killSwitch) {
+                              final killSwitch?
+                                  when killSwitch.enabled ||
+                                      killSwitch.passthrough =>
+                                CircleIconButton(
+                                  icon: killSwitch.lastFired != null
+                                      ? AppIcons.shieldAlert
+                                      : AppIcons.shield,
+                                  badge: killSwitchState(
+                                    context,
+                                    killSwitch,
+                                  )?.color,
+                                  tooltip: interactive ? 'Kill Switch' : null,
+                                  onPressed: () {
+                                    if (interactive) {
+                                      _openKillSwitchMenu(
+                                        cardContext,
+                                        killSwitch,
+                                      );
+                                    }
+                                  },
+                                ),
+                              _ => const SizedBox.shrink(),
+                            },
+                          ),
                           CircleIconButton(
                             icon: location.enabled
                                 ? AppIcons.location
@@ -940,9 +1053,44 @@ class _HeaderBar extends StatelessWidget {
     claudeCode: claudeCode,
     location: location,
     updater: updater,
+    killSwitch: killSwitch,
     page: page,
     interactive: false,
   );
+
+  Future<void> _openKillSwitchMenu(
+    BuildContext cardContext,
+    KillSwitch killSwitch,
+  ) async {
+    final action = await showAnchoredMenu(
+      anchorContext: cardContext,
+      highlight: _highlight,
+      caption: ListenableBuilder(
+        listenable: Listenable.merge([killSwitch, location]),
+        builder: (context, _) =>
+            _KillSwitchCaption(killSwitch: killSwitch, location: location),
+      ),
+      entries: [
+        if (killSwitch.armed)
+          const MenuEntry(
+            value: 'check',
+            icon: AppIcons.sync,
+            label: 'Проверить сеть',
+          ),
+        const MenuEntry(
+          value: 'settings',
+          icon: AppIcons.settings,
+          label: 'Настройки Kill Switch',
+        ),
+      ],
+    );
+    switch (action) {
+      case 'check':
+        await killSwitch.checkNow();
+      case 'settings':
+        AppPages.open(SettingsSection.experiments.route);
+    }
+  }
 
   Future<void> _openLocationMenu(BuildContext cardContext) async {
     final recheck = await showAnchoredMenu(
@@ -1024,6 +1172,65 @@ class _SwitchBanner extends StatelessWidget {
       progress: true,
       // Отменить можно только ожидание закрытия.
       action: status.phase == SwitchPhase.closing ? cancel : null,
+    );
+  }
+}
+
+/// Что Kill Switch делает сейчас — над пунктами меню его кнопки.
+class _KillSwitchCaption extends StatelessWidget {
+  const _KillSwitchCaption({required this.killSwitch, required this.location});
+
+  final KillSwitch killSwitch;
+  final LocationGuard location;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = context.palette;
+    final state = killSwitchState(context, killSwitch);
+    final event = killSwitch.lastFired;
+    final country = switch (killSwitch.baseline) {
+      final code? when killSwitch.open => countryNames[code] ?? code,
+      _ => null,
+    };
+    final details = [
+      if (country != null) 'Трафик Claude выпускается в стране «$country»',
+      if (location.checkedAt case final at? when killSwitch.armed)
+        'Проверено в ${_LocationCaption._clock(at)}',
+    ].join(' / ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              event != null ? AppIcons.shieldAlert : AppIcons.shield,
+              size: 22,
+              color: state?.color ?? p.muted,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Kill Switch',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ],
+        ),
+        if (state != null) ...[
+          const SizedBox(height: 8),
+          StatusDot(label: state.label, color: state.color),
+        ],
+        if (event != null) ...[
+          const SizedBox(height: 8),
+          Text(KillSwitch.describe(event), style: theme.textTheme.bodySmall),
+        ] else if (details.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(details, style: theme.textTheme.bodySmall),
+        ],
+      ],
     );
   }
 }

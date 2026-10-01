@@ -52,6 +52,98 @@ class MacClaudeHost extends ClaudeHost {
   }
 
   @override
+  Future<String?> commandLineOf(int pid) async {
+    final result = await Process.run('ps', [
+      '-ww',
+      '-o',
+      'command=',
+      '-p',
+      '$pid',
+    ]);
+    final line = '${result.stdout}'.trim();
+    return result.exitCode == 0 && line.isNotEmpty ? line : null;
+  }
+
+  @override
+  String get updateFeed => 'darwin/universal/squirrel';
+
+  @override
+  Future<String?> installedVersion() async {
+    final appPath = _appPath ?? await locate();
+    return appPath == null ? null : _bundleVersion(appPath);
+  }
+
+  /// Распаковывает архив обновления, проверяет подпись — та же команда
+  /// разработчика (Team ID), что у установленного Claude, — и меняет
+  /// приложение целиком. Старое удаляется, только когда новое на месте.
+  @override
+  Future<void> installUpdate(File package, String version) async {
+    final appPath = _appPath ?? await locate();
+    if (appPath == null) throw StateError('Claude не найден');
+    final work = await Directory.systemTemp.createTemp('claude-update');
+    try {
+      await _run('ditto', ['-x', '-k', package.path, work.path]);
+      final fresh = p.join(work.path, 'Claude.app');
+      if (!await Directory(fresh).exists()) {
+        throw StateError('В архиве обновления нет Claude.app');
+      }
+      if (await _bundleVersion(fresh) != version) {
+        throw StateError('В архиве обновления другая версия Claude');
+      }
+      await _run('codesign', ['--verify', '--deep', '--strict', fresh]);
+      final team = await _teamId(fresh);
+      if (team == null || team != await _teamId(appPath)) {
+        throw StateError('Обновление подписано не тем же разработчиком');
+      }
+      final old = '$appPath.old';
+      if (await Directory(old).exists()) {
+        await Directory(old).delete(recursive: true);
+      }
+      await _run('mv', [appPath, old]);
+      try {
+        await _run('mv', [fresh, appPath]);
+      } catch (_) {
+        await _run('mv', [old, appPath]);
+        rethrow;
+      }
+      await Directory(old).delete(recursive: true);
+    } finally {
+      await work.delete(recursive: true);
+    }
+  }
+
+  static Future<String?> _bundleVersion(String appPath) async {
+    final result = await Process.run('plutil', [
+      '-extract',
+      'CFBundleShortVersionString',
+      'raw',
+      p.join(appPath, 'Contents', 'Info.plist'),
+    ]);
+    final version = (result.stdout as String).trim();
+    return result.exitCode == 0 && version.isNotEmpty ? version : null;
+  }
+
+  static Future<String?> _teamId(String appPath) async {
+    final result = await Process.run('codesign', ['-dv', appPath]);
+    return RegExp(
+      r'^TeamIdentifier=(\w+)$',
+      multiLine: true,
+    ).firstMatch('${result.stderr}')?.group(1);
+  }
+
+  static Future<void> _run(String command, List<String> args) async {
+    final result = await Process.run(command, args);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        command,
+        args,
+        '${result.stderr}'.trim(),
+        result.exitCode,
+      );
+    }
+  }
+
+  @override
   Future<List<ClaudeInstance>> running() async {
     final result = await Process.run('ps', ['-axww', '-o', 'pid=,command=']);
     if (result.exitCode != 0) {
@@ -91,6 +183,19 @@ class MacClaudeHost extends ClaudeHost {
         result.exitCode,
       );
     }
+  }
+
+  /// Все процессы Claude.app (и вспомогательные) и Claude Code, который он
+  /// ставит в свою папку данных (`…/Claude*/claude-code/…`). Свой Claude Code
+  /// пользователя, установленный отдельно, не трогаем.
+  @override
+  Future<void> killEverything() async {
+    await Process.run('pkill', ['-9', '-f', r'/Claude\.app/Contents/']);
+    await Process.run('pkill', [
+      '-9',
+      '-f',
+      r'/Application Support/Claude[^/]*/claude-code/',
+    ]);
   }
 
   @override
