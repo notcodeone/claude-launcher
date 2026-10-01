@@ -38,8 +38,9 @@ class AppSettings extends ChangeNotifier {
   /// Спрашивать у GitHub, вышла ли новая версия лаунчера.
   bool checkUpdates = true;
 
-  /// Показывать функции, которые ещё проверяются (сейчас — лимиты профиля).
-  bool experimentalFeatures = false;
+  /// Эксперимент «Лимиты профиля»: кнопка с графиками на открытом профиле.
+  /// У каждого эксперимента — свой переключатель (раздел «Эксперименты»).
+  bool usageLimits = false;
 
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
@@ -63,7 +64,11 @@ class AppSettings extends ChangeNotifier {
         launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
         locationCheck = json['locationCheck'] as bool? ?? true;
-        experimentalFeatures = json['experimentalFeatures'] as bool? ?? false;
+        // До 1.4.0 эксперименты включались одним переключателем.
+        usageLimits =
+            json['usageLimits'] as bool? ??
+            json['experimentalFeatures'] as bool? ??
+            false;
         checkUpdates = json['checkUpdates'] as bool? ?? true;
         dockIcon = json['dockIcon'] as bool? ?? false;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
@@ -97,8 +102,8 @@ class AppSettings extends ChangeNotifier {
   Future<void> setCheckUpdates(bool enabled) =>
       _update(() => checkUpdates = enabled);
 
-  Future<void> setExperimentalFeatures(bool enabled) =>
-      _update(() => experimentalFeatures = enabled);
+  Future<void> setUsageLimits(bool enabled) =>
+      _update(() => usageLimits = enabled);
 
   Future<void> setHideClaudeIcon(bool hide) =>
       _update(() => hideClaudeIcon = hide);
@@ -134,7 +139,7 @@ class AppSettings extends ChangeNotifier {
         'launcherNotifications': launcherNotifications,
         'startupProfileId': startupProfileId,
         'locationCheck': locationCheck,
-        'experimentalFeatures': experimentalFeatures,
+        'usageLimits': usageLimits,
         'checkUpdates': checkUpdates,
         'dockIcon': dockIcon,
         'eventsPort': eventsPort,

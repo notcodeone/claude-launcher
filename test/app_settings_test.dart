@@ -53,17 +53,26 @@ void main() {
     },
   );
 
-  test('экспериментальные функции выключены и сохраняются', () async {
-    final file = File('${dir.path}/settings.json');
-    final settings = AppSettings(file);
-    await settings.load();
-    expect(settings.experimentalFeatures, isFalse);
-    await settings.setExperimentalFeatures(true);
+  test(
+    'лимиты профиля выключены, сохраняются, прежний переключатель переносится',
+    () async {
+      final file = File('${dir.path}/settings.json');
+      final settings = AppSettings(file);
+      await settings.load();
+      expect(settings.usageLimits, isFalse);
+      await settings.setUsageLimits(true);
 
-    final reloaded = AppSettings(file);
-    await reloaded.load();
-    expect(reloaded.experimentalFeatures, isTrue);
-  });
+      final reloaded = AppSettings(file);
+      await reloaded.load();
+      expect(reloaded.usageLimits, isTrue);
+
+      final old = File('${dir.path}/old.json')
+        ..writeAsStringSync('{"experimentalFeatures": true}');
+      final migrated = AppSettings(old);
+      await migrated.load();
+      expect(migrated.usageLimits, isTrue);
+    },
+  );
 
   test('повреждённый файл не ломает запуск', () async {
     final file = File('${dir.path}/settings.json')
