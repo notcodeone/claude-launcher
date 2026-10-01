@@ -175,12 +175,13 @@ class HomePage extends StatelessWidget {
             left: gutter,
             right: gutter,
             child: ListenableBuilder(
-              listenable: Listenable.merge([launcher, location]),
+              listenable: Listenable.merge([launcher, location, updater]),
               builder: (context, _) => _HeaderBar(
                 launcher: launcher,
                 settings: settings,
                 claudeCode: claudeCode,
                 location: location,
+                updater: updater,
               ),
             ),
           ),
@@ -331,7 +332,7 @@ class _Footer extends StatelessWidget {
   }
 }
 
-/// Новая версия в подвале: «· Обновить до 1.3.0», затем ход скачивания.
+/// Новая версия в подвале: «· Обновить до 1.3.0» или ошибка обновления.
 class _UpdateStatus extends StatelessWidget {
   const _UpdateStatus({required this.updater, required this.style});
 
@@ -341,7 +342,6 @@ class _UpdateStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final version = updater.release?.version;
-    final progress = updater.progress;
     final Widget child = switch (updater.phase) {
       UpdatePhase.idle => const SizedBox.shrink(),
       UpdatePhase.available => QuietTextButton(
@@ -353,12 +353,9 @@ class _UpdateStatus extends StatelessWidget {
         horizontalPadding: QuietTextButton.spaceWidth(context, style),
         onTap: updater.install,
       ),
-      UpdatePhase.downloading => Text(
-        ' Скачиваю $version…'
-        '${progress == null ? '' : ' ${(progress * 100).round()}%'}',
-        style: style,
-      ),
-      UpdatePhase.installing => Text(' Устанавливаю $version…', style: style),
+      // Ход скачивания и установки — в шапке.
+      UpdatePhase.downloading ||
+      UpdatePhase.installing => const SizedBox.shrink(),
       UpdatePhase.failed => Tooltip(
         message: updater.error ?? '',
         child: QuietTextButton(
@@ -369,7 +366,10 @@ class _UpdateStatus extends StatelessWidget {
         ),
       ),
     };
-    if (updater.phase == UpdatePhase.idle) return child;
+    if (updater.phase != UpdatePhase.available &&
+        updater.phase != UpdatePhase.failed) {
+      return child;
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -380,30 +380,72 @@ class _UpdateStatus extends StatelessWidget {
   }
 }
 
-/// Что лаунчер сейчас делает — для шапки вместо названия; null — ничего.
-String? headerStatus(LauncherController launcher, LocationGuard location) {
+/// Что лаунчер сейчас делает — для шапки вместо названия.
+class HeaderStatus {
+  const HeaderStatus(this.id, this.text, {this.downloading = false});
+
+  /// Вид занятия: пока он тот же, надпись меняется на месте (проценты), без
+  /// анимации смены.
+  final String id;
+  final String text;
+
+  /// Скачивание обновления — значок скачивания вместо спиннера.
+  final bool downloading;
+}
+
+/// Статус для шапки; null — ничего не происходит, в шапке название.
+/// Обновление — важнее остального: после него лаунчер перезапустится.
+HeaderStatus? headerStatus(
+  LauncherController launcher,
+  LocationGuard location, [
+  AppUpdater? updater,
+]) {
+  final version = updater?.release?.version;
+  final progress = updater?.progress;
+  switch (updater?.phase) {
+    case UpdatePhase.downloading:
+      return HeaderStatus(
+        'update-download',
+        'Скачиваю $version…'
+            '${progress == null ? '' : ' ${(progress * 100).round()}%'}',
+        downloading: true,
+      );
+    case UpdatePhase.installing:
+      return HeaderStatus('update-install', 'Устанавливаю $version…');
+    default:
+  }
   final status = launcher.switchStatus;
   final target = status?.target == null ? null : '«${status!.target!.name}»';
   final closing = status?.closing.map((name) => '«$name»').join(', ');
   return switch (status?.phase) {
-    SwitchPhase.closing => 'Закрываю $closing…',
-    SwitchPhase.waitingForUser => 'Жду, пока Claude закроется…',
-    SwitchPhase.launching => 'Открываю $target…',
-    SwitchPhase.checking ||
-    null when location.showsProgress => 'Проверяю страну…',
-    SwitchPhase.checking => 'Проверяю, можно ли открыть $target…',
-    null when !launcher.located => 'Загружаю профили…',
+    SwitchPhase.closing => HeaderStatus('closing', 'Закрываю $closing…'),
+    SwitchPhase.waitingForUser => const HeaderStatus(
+      'waiting',
+      'Жду, пока Claude закроется…',
+    ),
+    SwitchPhase.launching => HeaderStatus('launching', 'Открываю $target…'),
+    SwitchPhase.checking || null when location.showsProgress =>
+      const HeaderStatus('country', 'Проверяю страну…'),
+    SwitchPhase.checking => HeaderStatus(
+      'checking',
+      'Проверяю, можно ли открыть $target…',
+    ),
+    null when !launcher.located => const HeaderStatus(
+      'loading',
+      'Загружаю профили…',
+    ),
     null => null,
   };
 }
 
 /// Название в шапке — знак и «ClaudeLauncher». Пока лаунчер что-то делает,
-/// на его месте спиннер и [status]. Смена — как в Telegram при «Соединение…»:
-/// прежняя надпись уходит вверх и гаснет, новая поднимается снизу.
+/// на его месте спиннер (при скачивании обновления — значок скачивания) и
+/// [status]. Смена — как в Telegram при «Соединение…»: прежняя надпись уходит
+/// вверх и гаснет, новая поднимается снизу.
 class HeaderTitle extends StatelessWidget {
   const HeaderTitle({super.key, this.status});
 
-  final String? status;
+  final HeaderStatus? status;
 
   static const _duration = Duration(milliseconds: 280);
 
@@ -416,34 +458,33 @@ class HeaderTitle extends StatelessWidget {
       letterSpacing: -0.3,
     );
     final status = this.status;
-    final key = ValueKey(status ?? '');
+    final key = ValueKey(status?.id ?? '');
     final Widget child = Row(
       key: key,
       children: [
         SizedBox.square(
           dimension: 20,
-          child: status == null
-              // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
-              ? Image.asset(
-                  'assets/icon/mark.png',
-                  width: 20,
-                  height: 20,
-                  color: p.text,
-                  colorBlendMode: BlendMode.srcIn,
-                  filterQuality: FilterQuality.medium,
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: p.text,
-                  ),
-                ),
+          child: switch (status) {
+            // Знак — цветом названия: чёрный в светлой теме, белый в тёмной.
+            null => Image.asset(
+              'assets/icon/mark.png',
+              width: 20,
+              height: 20,
+              color: p.text,
+              colorBlendMode: BlendMode.srcIn,
+              filterQuality: FilterQuality.medium,
+            ),
+            HeaderStatus(downloading: true) => DownloadingIcon(color: p.text),
+            _ => Padding(
+              padding: const EdgeInsets.all(2),
+              child: CircularProgressIndicator(strokeWidth: 2, color: p.text),
+            ),
+          },
         ),
         const SizedBox(width: 8),
         Flexible(
           child: Text(
-            status ?? 'ClaudeLauncher',
+            status?.text ?? 'ClaudeLauncher',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: status == null
@@ -479,6 +520,109 @@ class HeaderTitle extends StatelessWidget {
   }
 }
 
+/// Значок скачивания: стрелка сверху опускается в лоток, замирает и падает
+/// в него, затем появляется снова. Рисунок — как у значка download в Lucide.
+class DownloadingIcon extends StatefulWidget {
+  const DownloadingIcon({super.key, required this.color, this.size = 20});
+
+  final Color color;
+  final double size;
+
+  @override
+  State<DownloadingIcon> createState() => _DownloadingIconState();
+}
+
+class _DownloadingIconState extends State<DownloadingIcon>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomPaint(
+      size: Size.square(widget.size),
+      painter: _DownloadPainter(_controller, widget.color),
+    ),
+  );
+}
+
+class _DownloadPainter extends CustomPainter {
+  _DownloadPainter(this.animation, this.color) : super(repaint: animation);
+
+  final Animation<double> animation;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Сетка Lucide — 24×24.
+    canvas.scale(size.width / 24);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    // Лоток: M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4.
+    canvas.drawPath(
+      Path()
+        ..moveTo(21, 15)
+        ..lineTo(21, 19)
+        ..arcToPoint(const Offset(19, 21), radius: const Radius.circular(2))
+        ..lineTo(5, 21)
+        ..arcToPoint(const Offset(3, 19), radius: const Radius.circular(2))
+        ..lineTo(3, 15),
+      paint,
+    );
+
+    // Стрелка: M12 15V3, m7 10 5 5 5-5. Опускается сверху (0–50 %), замирает
+    // (50–70 %) и падает в лоток, растворяясь (70–100 %).
+    final t = animation.value;
+    final double dy;
+    var opacity = 1.0;
+    if (t < 0.5) {
+      dy = -14 * (1 - Curves.easeOutCubic.transform(t / 0.5));
+    } else if (t < 0.7) {
+      dy = 0;
+    } else {
+      final fall = Curves.easeInCubic.transform((t - 0.7) / 0.3);
+      dy = 8 * fall;
+      opacity = 1 - fall;
+    }
+    canvas.save();
+    // Стрелка видна только над дном лотка.
+    canvas.clipRect(const Rect.fromLTRB(0, 0, 24, 20));
+    canvas.translate(0, dy);
+    final arrow = Paint()
+      ..color = color.withValues(alpha: color.a * opacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(
+      Path()
+        ..moveTo(12, 15)
+        ..lineTo(12, 3)
+        ..moveTo(7, 10)
+        ..lineTo(12, 15)
+        ..lineTo(17, 10),
+      arrow,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_DownloadPainter old) => old.color != color;
+}
+
 /// Плавающая шапка, как в sensomni: название слева, страна, тема и настройки справа.
 class _HeaderBar extends StatelessWidget {
   const _HeaderBar({
@@ -486,6 +630,7 @@ class _HeaderBar extends StatelessWidget {
     required this.settings,
     required this.claudeCode,
     required this.location,
+    this.updater,
     this.interactive = true,
   });
 
@@ -493,6 +638,7 @@ class _HeaderBar extends StatelessWidget {
   final AppSettings settings;
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
+  final AppUpdater? updater;
 
   /// Копия шапки поверх затемнения под меню не реагирует на клики.
   final bool interactive;
@@ -504,7 +650,9 @@ class _HeaderBar extends StatelessWidget {
       ThemeMode.light => AppIcons.themeLight,
       ThemeMode.dark => AppIcons.themeDark,
     };
-    final title = HeaderTitle(status: headerStatus(launcher, location));
+    final title = HeaderTitle(
+      status: headerStatus(launcher, location, updater),
+    );
     return Builder(
       builder: (cardContext) => SoftCard(
         radius: 16,
@@ -568,6 +716,7 @@ class _HeaderBar extends StatelessWidget {
     settings: settings,
     claudeCode: claudeCode,
     location: location,
+    updater: updater,
     interactive: false,
   );
 

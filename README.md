@@ -79,7 +79,7 @@ irm https://raw.githubusercontent.com/notcodeone/claude-launcher/main/tool/insta
 открытии окна, если с прошлой проверки прошло больше 10 минут. Проверить сразу — пункт
 «Проверить обновления» в меню значка. Когда выходит новая версия, в подвале окна и в меню
 значка появляется «Обновить до X». По нажатию лаунчер
-скачивает её, ставит вместо себя и перезапускается. Профили и настройки сохраняются,
+скачивает её, ставит вместо себя и перезапускается; ход виден в шапке окна. Профили и настройки сохраняются,
 предупреждений системы нет: файл скачивает сам лаунчер, а не браузер.
 
 - **macOS** — так обновляется приложение, лежащее в папке, куда можно писать (обычно
@@ -326,8 +326,8 @@ python3 tool/generate_icons.py   # перегенерировать все зн�
 Собрать локально (после `flutter build …`):
 
 ```bash
-tool/make_dmg.sh 1.3.2                                         # macOS
-iscc /DAppVersion=1.3.2 windows\installer\claude_launcher.iss  # Windows, Inno Setup 6
+tool/make_dmg.sh 1.3.3                                         # macOS
+iscc /DAppVersion=1.3.3 windows\installer\claude_launcher.iss  # Windows, Inno Setup 6
 ```
 
 Окно DMG (фон, размер, положение значков) берётся из шаблона `tool/dmg/template.dmg`.
