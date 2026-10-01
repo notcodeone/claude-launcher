@@ -22,10 +22,7 @@ import 'widgets.dart';
     return (label: 'Сработал — Claude закрыт', color: p.danger);
   }
   if (killSwitch.needsRestart) {
-    return (
-      label: 'Перезапустите Claude, чтобы защита заработала',
-      color: p.warning,
-    );
+    return (label: 'Перезапустите Claude для защиты', color: p.warning);
   }
   return killSwitch.open
       ? (label: 'Сеть проверена — трафик идёт', color: p.success)

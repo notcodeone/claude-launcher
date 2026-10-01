@@ -147,7 +147,7 @@ class SettingsListPage extends StatelessWidget {
     builder: (context, _) => ListView(
       padding: padding,
       children: [
-        _Appear(
+        AppearIn(
           index: 0,
           child: SoftCard(
             padding: EdgeInsets.zero,
@@ -355,7 +355,7 @@ class SettingsSectionPage extends StatelessWidget {
           for (final (index, card) in cards.indexed)
             Padding(
               padding: const EdgeInsets.only(top: 16),
-              child: _Appear(index: index + 1, child: card),
+              child: AppearIn(index: index + 1, child: card),
             ),
         ],
       );
@@ -851,17 +851,18 @@ class SegmentedChoice<T> extends StatelessWidget {
 }
 
 /// Появление снизу с задержкой по [index] — карточки поднимаются по очереди.
-class _Appear extends StatefulWidget {
-  const _Appear({required this.index, required this.child});
+class AppearIn extends StatefulWidget {
+  const AppearIn({super.key, required this.index, required this.child});
 
   final int index;
   final Widget child;
 
   @override
-  State<_Appear> createState() => _AppearState();
+  State<AppearIn> createState() => _AppearInState();
 }
 
-class _AppearState extends State<_Appear> with SingleTickerProviderStateMixin {
+class _AppearInState extends State<AppearIn>
+    with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 360),

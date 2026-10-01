@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -21,6 +20,7 @@ import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
 import 'kill_switch_status.dart';
 import 'profile_dialog.dart';
+import 'profile_page.dart';
 import 'profile_usage_menu.dart';
 import 'settings_pages.dart';
 import 'theme.dart';
@@ -32,6 +32,11 @@ import 'widgets.dart';
 abstract final class AppPages {
   static const home = '/';
   static const settings = '/settings';
+  static const newProfile = '/profiles/new';
+
+  /// Правка профиля [id].
+  static String editProfile(String id) => '/profiles/edit/$id';
+  static const _editPrefix = '/profiles/edit/';
 
   static final navigator = GlobalKey<NavigatorState>();
 
@@ -142,6 +147,44 @@ class HomePage extends StatelessWidget {
   static const _headerHeight = 52.0;
   static const _footerHeight = 40.0;
 
+  /// Затемнение над подвалом: при прокрутке страница плавно уходит под него.
+  /// Оно — часть страницы, а не окна: кнопка страницы («Добавить»,
+  /// «Создать») должна быть над ним, а Hero летает только внутри страниц.
+  static Widget _bottomScrim(BuildContext context) {
+    final p = context.palette;
+    const height = _footerHeight + 24;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: height,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                p.background,
+                p.background,
+                p.background.withValues(alpha: 0),
+              ],
+              stops: const [0, _footerHeight / height, 1],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Страница без своей кнопки — с затемнением над подвалом поверх.
+  static Widget _withScrim(BuildContext context, Widget page) => Stack(
+    children: [
+      Positioned.fill(child: page),
+      _bottomScrim(context),
+    ],
+  );
+
   /// Страница внутри окна по её адресу (см. [AppPages]).
   Widget _page(BuildContext context, String route, EdgeInsets padding) {
     final deps = SettingsContext(
@@ -153,28 +196,51 @@ class HomePage extends StatelessWidget {
       killSwitch: killSwitch,
       version: version,
     );
-    if (route == AppPages.settings) {
-      return SettingsListPage(
-        deps: deps,
+    if (route == AppPages.newProfile) {
+      return ProfilePage(
+        launcher: launcher,
         padding: padding,
-        onOpen: (section) async {
-          // Перед «Экспериментами» — предупреждение, пока с ним не согласились.
-          final warn =
-              section == SettingsSection.experiments &&
-              !settings.experimentsAccepted;
-          if (warn && !await confirmExperiments(context)) return;
-          // Сначала переход, потом запись настроек — без задержки.
-          AppPages.open(section.route);
-          if (warn) await settings.acceptExperiments();
-        },
+        bottomScrim: _bottomScrim(context),
+        onDone: AppPages.back,
+      );
+    }
+    if (route.startsWith(AppPages._editPrefix)) {
+      final id = route.substring(AppPages._editPrefix.length);
+      final profile = launcher.profiles.where((p) => p.id == id).firstOrNull;
+      if (profile != null) {
+        return ProfilePage(
+          launcher: launcher,
+          padding: padding,
+          profile: profile,
+          bottomScrim: _bottomScrim(context),
+          onDone: AppPages.back,
+        );
+      }
+    }
+    if (route == AppPages.settings) {
+      return _withScrim(
+        context,
+        SettingsListPage(
+          deps: deps,
+          padding: padding,
+          onOpen: (section) async {
+            // Перед «Экспериментами» — предупреждение, пока с ним не согласились.
+            final warn =
+                section == SettingsSection.experiments &&
+                !settings.experimentsAccepted;
+            if (warn && !await confirmExperiments(context)) return;
+            // Сначала переход, потом запись настроек — без задержки.
+            AppPages.open(section.route);
+            if (warn) await settings.acceptExperiments();
+          },
+        ),
       );
     }
     for (final section in SettingsSection.values) {
       if (route == section.route) {
-        return SettingsSectionPage(
-          section: section,
-          deps: deps,
-          padding: padding,
+        return _withScrim(
+          context,
+          SettingsSectionPage(section: section, deps: deps, padding: padding),
         );
       }
     }
@@ -192,50 +258,78 @@ class HomePage extends StatelessWidget {
         killSwitch,
         claudeUpdates,
       ]),
-      builder: (context, _) => ListView(
-        padding: padding,
+      builder: (context, _) => Stack(
         children: [
-          Text('Профили', style: theme.textTheme.headlineMedium),
-          const SizedBox(height: 8),
-          Text(
-            // По предложению на строку — без одинокого слова на второй.
-            'Каждый профиль — отдельный вход в Claude.\n'
-            'Одновременно запущен только один.',
-            style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
-          ),
-          const SizedBox(height: 24),
-          ..._banners(context),
-          if (launcher.located && launcher.claudePath == null)
-            const _EmptyState(
-              mood: FaceMood.worried,
-              title: 'Claude не найден',
-              text:
-                  'Установите приложение Claude с claude.com/download '
-                  'и перезапустите лаунчер.',
-            )
-          // Пока профили грузятся, список пуст — это не «ничего нет».
-          else if (launcher.located && launcher.profiles.isEmpty)
-            _EmptyState(
-              mood: FaceMood.sleepy,
-              title: 'Ничего нет..',
-              text: 'Создайте профиль для каждого аккаунта Claude.',
-              action: AppButton(
-                label: 'Создать',
+          Positioned.fill(child: _profileList(context, theme, padding)),
+          _bottomScrim(context),
+          // Кнопка по полю окна, над подвалом. Она — часть страницы профилей:
+          // при открытии нового профиля превращается в его аватар (Hero).
+          Positioned(
+            right: gutter,
+            bottom: newProfileFabBottom,
+            child: ProfileHero.fab(
+              fabIcon: AppIcons.add,
+              fabLabel: 'Добавить',
+              child: AppFab(
+                icon: AppIcons.add,
+                label: 'Добавить',
                 onPressed: () => _addProfile(context),
               ),
             ),
-          for (final (index, profile) in launcher.profiles.indexed) ...[
-            if (index > 0) const SizedBox(height: 12),
-            _ProfileCard(
-              launcher: launcher,
-              settings: settings,
-              claudeCode: claudeCode,
-              location: location,
-              profile: profile,
-            ),
-          ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _profileList(
+    BuildContext context,
+    ThemeData theme,
+    EdgeInsets padding,
+  ) {
+    return ListView(
+      padding: padding,
+      children: [
+        Text('Профили', style: theme.textTheme.headlineMedium),
+        const SizedBox(height: 8),
+        Text(
+          // По предложению на строку — без одинокого слова на второй.
+          'Каждый профиль — отдельный вход в Claude.\n'
+          'Одновременно запущен только один.',
+          style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+        ),
+        const SizedBox(height: 24),
+        ..._banners(context),
+        if (launcher.located && launcher.claudePath == null)
+          const _EmptyState(
+            mood: FaceMood.worried,
+            title: 'Claude не найден',
+            text:
+                'Установите приложение Claude с claude.com/download '
+                'и перезапустите лаунчер.',
+          )
+        // Пока профили грузятся, список пуст — это не «ничего нет».
+        else if (launcher.located && launcher.profiles.isEmpty)
+          _EmptyState(
+            mood: FaceMood.sleepy,
+            title: 'Ничего нет..',
+            text: 'Создайте профиль для каждого аккаунта Claude.',
+            action: AppButton(
+              label: 'Создать',
+              onPressed: () => _addProfile(context),
+            ),
+          ),
+        for (final (index, profile) in launcher.profiles.indexed) ...[
+          if (index > 0) const SizedBox(height: 12),
+          _ProfileCard(
+            launcher: launcher,
+            settings: settings,
+            claudeCode: claudeCode,
+            location: location,
+            profile: profile,
+          ),
+        ],
+      ],
     );
   }
 
@@ -331,17 +425,6 @@ class HomePage extends StatelessWidget {
               solid: headerTop + _headerHeight / 2,
             ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: _footerHeight + 24,
-            child: scrim(
-              top: false,
-              height: _footerHeight + 24,
-              solid: _footerHeight,
-            ),
-          ),
           // Окно перетаскивается за эту полосу и за название в шапке.
           if (Platform.isMacOS)
             Positioned(
@@ -382,32 +465,6 @@ class HomePage extends StatelessWidget {
             bottom: 0,
             height: _footerHeight,
             child: _Footer(version: version, updater: updater),
-          ),
-          // Кнопка по полю окна, над подвалом.
-          // Только на странице профилей; в настройках уезжает вниз и гаснет.
-          Positioned(
-            right: gutter,
-            bottom: _footerHeight + 8,
-            child: ValueListenableBuilder(
-              valueListenable: AppPages.current,
-              builder: (context, page, _) => IgnorePointer(
-                ignoring: page != AppPages.home,
-                child: AnimatedSlide(
-                  offset: Offset(0, page == AppPages.home ? 0 : 0.5),
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  child: AnimatedOpacity(
-                    opacity: page == AppPages.home ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: AppFab(
-                      icon: AppIcons.add,
-                      label: 'Добавить',
-                      onPressed: () => _addProfile(context),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ),
         ],
       ),
@@ -505,26 +562,8 @@ class HomePage extends StatelessWidget {
     };
   }
 
-  Future<void> _addProfile(BuildContext context) async {
-    final draft = await showProfileDialog(
-      context,
-      folderLabel: (name) {
-        final folder = folderNameFor(name.isEmpty ? 'profile' : name, [
-          for (final profile in launcher.profiles) ?profile.folderName,
-        ]);
-        return 'Данные профиля будут в ${p.join(launcher.host.profilesBaseDir, folder)}. '
-            'При первом запуске войдите в аккаунт — дальше вход сохранится.';
-      },
-    );
-    if (draft == null) return;
-    await launcher.addProfile(
-      name: draft.name,
-      email: draft.email,
-      note: draft.note,
-      marker: draft.marker,
-      icon: draft.icon,
-    );
-  }
+  /// Новый профиль — отдельной страницей (см. [NewProfilePage]).
+  void _addProfile(BuildContext context) => AppPages.open(AppPages.newProfile);
 }
 
 /// Нижняя строка, как подвал сайта sensomni: копирайт слева, автор справа.
@@ -933,7 +972,9 @@ class _HeaderBar extends StatelessWidget {
     // В настройках — «Настройки»; из статусов там виден только ход обновления.
     final status = home || (busy?.id.startsWith('update') ?? false)
         ? busy
-        : const HeaderStatus('settings', 'Настройки', plain: true);
+        : page.startsWith(AppPages.settings)
+        ? const HeaderStatus('settings', 'Настройки', plain: true)
+        : const HeaderStatus('profiles', 'Профили', plain: true);
     const duration = Duration(milliseconds: 280);
     return Builder(
       builder: (cardContext) => SoftCard(
@@ -1411,7 +1452,12 @@ class _ProfileCard extends StatelessWidget {
 
     final header = Row(
       children: [
-        ProfileAvatar(marker: profile.marker, icon: profile.icon),
+        ProfileHero.avatar(
+          tag: ProfileHero.avatarTag(profile.id),
+          marker: profile.marker,
+          icon: profile.icon,
+          child: ProfileAvatar(marker: profile.marker, icon: profile.icon),
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -1635,7 +1681,7 @@ class _ProfileCard extends StatelessWidget {
     if (!cardContext.mounted) return;
     switch (action) {
       case 'edit':
-        await _edit(cardContext);
+        _edit(cardContext);
       case 'folder':
         await launcher.host.revealFolder(launcher.dataDirOf(profile));
       case 'startup':
@@ -1664,23 +1710,9 @@ class _ProfileCard extends StatelessWidget {
     if (confirmed) await launcher.close(profile);
   }
 
-  Future<void> _edit(BuildContext context) async {
-    final draft = await showProfileDialog(
-      context,
-      profile: profile,
-      folderLabel: (_) => 'Данные профиля: ${launcher.dataDirOf(profile)}',
-    );
-    if (draft == null) return;
-    await launcher.updateProfile(
-      profile.copyWith(
-        name: draft.name,
-        email: draft.email,
-        note: draft.note,
-        marker: draft.marker,
-        icon: draft.icon,
-      ),
-    );
-  }
+  /// Правка — на странице профиля: аватар карточки перелетает в её шапку.
+  void _edit(BuildContext context) =>
+      AppPages.open(AppPages.editProfile(profile.id));
 
   Future<void> _remove(BuildContext context) async {
     final confirmed = await showConfirmDialog(

@@ -566,21 +566,28 @@ class StatusDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = this.color ?? context.palette.success;
+    // Длинная подпись переносится, а не обрезается краем окна; точка — у
+    // первой строки.
     return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           width: 7,
           height: 7,
+          margin: const EdgeInsets.only(top: 5.5),
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w500,
+        Flexible(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12.5,
+              height: 1.4,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ],
