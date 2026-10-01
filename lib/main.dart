@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -245,6 +246,11 @@ Future<void> main(List<String> args) async {
 
   await _stopWaitingWatchers();
   await _stopKillSwitchGuard(supportDir, launcher.host);
+  killSwitch.handover = await _takeHandover(
+    supportDir,
+    launcher.host,
+    settings,
+  );
   killSwitch.start();
   claudeUpdates.start();
   // На macOS о смене сети сообщает MainFlutterWindow (networkChanged), на
@@ -357,6 +363,53 @@ Future<void> _stopKillSwitchGuard(Directory supportDir, ClaudeHost host) async {
   }
 }
 
+File _handoverFile(Directory supportDir) =>
+    File(p.join(supportDir.path, 'kill-switch-handover.json'));
+
+Future<void> _writeHandover(
+  Directory supportDir, {
+  required int port,
+  required List<int> claudePids,
+}) async {
+  try {
+    await _handoverFile(
+      supportDir,
+    ).writeAsString(jsonEncode({'port': port, 'pids': claudePids}));
+  } on FileSystemException catch (error) {
+    debugPrint('Kill Switch: не удалось оставить записку: $error');
+  }
+}
+
+/// Записка закрытого охранника: Claude, открытый через затвор, ещё работает —
+/// затвор нужен ему на том же порту. Записка одноразовая.
+Future<bool> _takeHandover(
+  Directory supportDir,
+  ClaudeHost host,
+  AppSettings settings,
+) async {
+  final file = _handoverFile(supportDir);
+  try {
+    final json = jsonDecode(await file.readAsString());
+    await file.delete();
+    if (json is! Map) return false;
+    final port = json['port'];
+    final pids = json['pids'];
+    if (port is! int || pids is! List) return false;
+    for (final claudePid in pids.whereType<int>()) {
+      final commandLine = await host.commandLineOf(claudePid);
+      if (commandLine != null && commandLine.contains('Claude')) {
+        if (settings.egressPort != port) await settings.setEgressPort(port);
+        return true;
+      }
+    }
+  } on FileSystemException {
+    // Записки нет.
+  } on FormatException {
+    // Испорчена — не нужна.
+  }
+  return false;
+}
+
 /// Охранник Kill Switch: из лаунчера вышли, а открытый Claude закреплён за его
 /// затвором. Держит затвор и следит за сетью, пока Claude открыт; потом
 /// убирает конфигурацию Claude и уходит. Без окна и значка.
@@ -375,6 +428,10 @@ Future<bool> _guardKillSwitch(
   final pidFile = _guardPidFile(supportDir);
   await pidFile.writeAsString('$pid');
   final reopened = Completer<void>();
+  // Охранника закрывают по имени (⌘Q не дойдёт — окна нет, но так делает,
+  // например, команда установки): снимаем настройку, чтобы Claude не остался
+  // без сети, если лаунчер больше не запустят.
+  final quitRequested = Completer<void>();
 
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
@@ -397,6 +454,9 @@ Future<bool> _guardKillSwitch(
     if (Platform.isMacOS && call.method == 'reopen' && !reopened.isCompleted) {
       reopened.complete();
     }
+    if (call.method == 'quit' && !quitRequested.isCompleted) {
+      quitRequested.complete();
+    }
   });
   final windowsWatch = Platform.isWindows ? WindowsNetworkWatch() : null;
   windowsWatch?.start(killSwitch.networkChanged);
@@ -412,21 +472,34 @@ Future<bool> _guardKillSwitch(
 
   // Затвор поднимается не мгновенно — serving уже true (armed или passthrough).
   while (!reopened.isCompleted &&
+      !quitRequested.isCompleted &&
       killSwitch.serving &&
       launcher.instances.isNotEmpty &&
       ours()) {
     await Future.any([
       Future<void>.delayed(const Duration(seconds: 2)),
       reopened.future,
+      quitRequested.future,
     ]);
     await launcher.refresh();
   }
   windowsWatch?.stop();
   final reopen = reopened.isCompleted;
+  final quit = quitRequested.isCompleted && !reopen;
   final stillOurs = ours();
-  // Claude закрыт — конфигурация больше не нужна; лаунчер снова открыли или
-  // он забрал работу — она нужна ему.
-  await killSwitch.shutdown(keepPinned: reopen || !stillOurs);
+  // Закрыли, а Claude ещё открыт: настройку снимаем, но оставляем записку —
+  // если лаунчер запустят следом (команда установки), он поднимет затвор на
+  // том же порту, и этот Claude сети не потеряет.
+  if (quit && stillOurs && launcher.instances.isNotEmpty) {
+    await _writeHandover(
+      supportDir,
+      port: killSwitch.gate.port ?? settings.egressPort,
+      claudePids: [for (final instance in launcher.instances) instance.pid],
+    );
+  }
+  // Claude закрыт или охранника закрыли — конфигурация не нужна; лаунчер
+  // снова открыли или он забрал работу — она нужна ему.
+  await killSwitch.shutdown(keepPinned: !quit && (reopen || !stillOurs));
   killSwitch.dispose();
   location.dispose();
   launcher.dispose();

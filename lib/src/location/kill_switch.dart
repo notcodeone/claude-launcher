@@ -152,6 +152,11 @@ class KillSwitch extends ChangeNotifier {
   /// перезапуска.
   bool needsRestart = false;
 
+  /// Открытый Claude запущен через затвор, хотя конфигурации уже нет: её
+  /// снял закрытый охранник (см. записку в main.dart). Затвор нужен этому
+  /// Claude на прежнем порту, пока его не закроют.
+  bool handover = false;
+
   /// Конфигурацию Claude записать не удалось (чужая или нет доступа): Claude
   /// пошёл бы мимо затвора. Такой профиль лаунчер не запускает.
   bool unprotected = false;
@@ -198,8 +203,9 @@ class KillSwitch extends ChangeNotifier {
     settings.addListener(_sync);
     launcher.addListener(_sync);
     if (_passthrough) unawaited(_startPassthrough());
-    if (!enabled && !_passthrough && useGate) unawaited(_cleanStale());
+    // Сначала _sync: он сбросит записку, если Claude уже закрыт.
     _sync();
+    if (!enabled && !_passthrough && useGate) unawaited(_cleanStale());
   }
 
   @override
@@ -281,6 +287,7 @@ class KillSwitch extends ChangeNotifier {
   Future<void> networkChanged() => _checkNetwork();
 
   void _sync() {
+    if (!_claudeRunning) handover = false;
     if (enabled && !armed) {
       _passthrough = false;
       unawaited(_arm());
@@ -325,7 +332,7 @@ class KillSwitch extends ChangeNotifier {
       if (useGate) {
         // Claude, открытый через затвор (лаунчер перезапустили), защищён;
         // открытый без него — только после перезапуска.
-        var pinnedBefore = false;
+        var pinnedBefore = handover;
         for (final profile in launcher.runningProfiles) {
           if (await config.isPinned(launcher.dataDirOf(profile))) {
             pinnedBefore = true;
@@ -409,7 +416,7 @@ class KillSwitch extends ChangeNotifier {
     for (final profile in launcher.profiles) {
       if (await config.isPinned(launcher.dataDirOf(profile))) pinned = true;
     }
-    if (!pinned || enabled || armed) return;
+    if (!(pinned || handover) || enabled || armed) return;
     if (_claudeRunning) {
       _passthrough = true;
       await _startPassthrough();

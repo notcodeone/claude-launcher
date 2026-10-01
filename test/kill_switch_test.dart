@@ -275,4 +275,31 @@ void main() {
     expect(isVirtualMachineAdapter('WireGuard Tunnel'), isFalse);
     expect(isVirtualMachineAdapter('vEthernet (External)'), isFalse);
   });
+
+  test(
+    'записка охранника: открытый Claude получает затвор без конфигурации',
+    () async {
+      await settings.setKillSwitch(false);
+      final ks = killSwitch(useGate: true)..handover = true;
+      ks.start();
+      addTearDown(() => ks.shutdown(keepPinned: false));
+      await wait();
+      expect(ks.passthrough, isTrue);
+      expect(ks.gate.port, isNotNull);
+      expect(await ks.gate.allow(), isTrue);
+    },
+  );
+
+  test('записка, а Claude уже закрыт, — затвор не нужен', () async {
+    await settings.setKillSwitch(false);
+    host.instances.clear();
+    await launcher.refresh();
+    final ks = killSwitch(useGate: true)..handover = true;
+    ks.start();
+    addTearDown(() => ks.shutdown(keepPinned: false));
+    await wait();
+    expect(ks.handover, isFalse);
+    expect(ks.passthrough, isFalse);
+    expect(ks.gate.port, isNull);
+  });
 }
