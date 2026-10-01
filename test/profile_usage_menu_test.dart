@@ -7,157 +7,173 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  for (final brightness in Brightness.values) {
-    testWidgets(
-      'меню: использование, обновление, закрытый профиль · $brightness',
-      (tester) async {
-        final running = ValueNotifier(true);
-        addTearDown(running.dispose);
-        var calls = 0;
-        Future<ProfileUsage?> load() async {
-          calls++;
-          return ProfileUsage(
-            updatedAt: DateTime(2026, 9, 1),
-            limits: [
-              UsageLimit(
-                label: 'За 5 часов',
-                usedPercent: calls == 1 ? 20 : 30,
-              ),
-            ],
-          );
-        }
+  final now = DateTime(2026, 10, 1, 12);
 
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: buildTheme(brightness),
-            home: Scaffold(
-              body: Align(
-                alignment: Alignment.bottomRight,
-                child: ProfileUsageButton(
-                  load: load,
-                  activity: running,
-                  isRunning: () => running.value,
-                ),
-              ),
+  Widget app({
+    required Future<ProfileUsage?> Function() load,
+    required ValueNotifier<bool> running,
+    Brightness brightness = Brightness.light,
+  }) => MaterialApp(
+    theme: buildTheme(brightness),
+    home: Scaffold(
+      body: Align(
+        alignment: Alignment.topRight,
+        child: ProfileUsageButton(
+          load: load,
+          activity: running,
+          isRunning: () => running.value,
+        ),
+      ),
+    ),
+  );
+
+  group('текст сброса', () {
+    UsageLimit session({
+      DateTime? resetsAt,
+      double used = 10,
+      bool approximate = false,
+    }) => UsageLimit(
+      label: 'За 5 часов',
+      usedPercent: used,
+      window: UsageWindow.session,
+      resetsAt: resetsAt,
+      resetApproximate: approximate,
+    );
+
+    test('через часы и минуты, округление до минуты', () {
+      expect(
+        resetText(
+          session(
+            resetsAt: now.add(
+              const Duration(hours: 2, minutes: 9, seconds: 59),
             ),
           ),
+          now,
+        ),
+        'Сброс через 2 ч 10 мин',
+      );
+      expect(
+        resetText(session(resetsAt: now.add(const Duration(minutes: 45))), now),
+        'Сброс через 45 мин',
+      );
+      expect(
+        resetText(session(resetsAt: now.add(const Duration(hours: 3))), now),
+        'Сброс через 3 ч',
+      );
+      expect(
+        resetText(
+          session(
+            resetsAt: now.add(const Duration(hours: 1)),
+            approximate: true,
+          ),
+          now,
+        ),
+        'Сброс примерно через 1 ч',
+      );
+    });
+
+    test('дальше суток — день недели и время; окно не идёт; неизвестно', () {
+      // 4 октября 2026 — воскресенье.
+      expect(
+        resetText(session(resetsAt: DateTime(2026, 10, 4, 20, 59, 59)), now),
+        'Сброс в вс, 21:00',
+      );
+      expect(resetText(session(used: 0), now), 'Начнётся с первого запроса');
+      expect(
+        resetText(
+          UsageLimit(
+            label: 'За 5 часов',
+            usedPercent: 0,
+            window: UsageWindow.session,
+            wasResetAt: DateTime(2026, 10, 1, 15, 9, 59, 980),
+          ),
+          now,
+        ),
+        'Сброшен в 15:10',
+      );
+      expect(resetText(session(), now), isNull);
+    });
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('меню: лимиты, перечитывание без закрытия · $brightness', (
+      tester,
+    ) async {
+      final running = ValueNotifier(true);
+      addTearDown(running.dispose);
+      var calls = 0;
+      Future<ProfileUsage?> load() async {
+        calls++;
+        return ProfileUsage(
+          limits: [
+            UsageLimit(
+              label: 'За 5 часов',
+              usedPercent: calls == 1 ? 20 : 30,
+              window: UsageWindow.session,
+              resetsAt: DateTime.now().add(
+                const Duration(hours: 2, minutes: 1),
+              ),
+            ),
+            const UsageLimit(
+              label: 'За неделю · все модели',
+              usedPercent: 67,
+              window: UsageWindow.weekly,
+            ),
+          ],
         );
-        expect(calls, 0);
-        await tester.tap(find.byTooltip('Лимиты профиля'));
-        await tester.pumpAndSettle();
-        expect(find.text('Использовано 20%'), findsOneWidget);
-        expect(find.text('—'), findsOneWidget);
-        expect(find.textContaining('Данные устарели.'), findsNothing);
-        expect(calls, 1);
-        expect(find.textContaining('Данные получены ·'), findsNothing);
-        expect(find.text('Рабочий'), findsNothing);
-        expect(find.text('Данные Claude'), findsNothing);
-        expect(
-          tester.widget<Text>(find.text('Остаток лимитов')).style?.fontSize,
-          20,
-        );
-        await tester.tap(find.text('Проверить снова'));
-        await tester.pumpAndSettle();
-        expect(find.text('Остаток лимитов'), findsNothing);
-        expect(calls, 2);
-        await tester.tap(find.byTooltip('Лимиты профиля'));
-        await tester.pumpAndSettle();
-        expect(find.text('Использовано 30%'), findsOneWidget);
-        running.value = false;
-        await tester.pump();
-        expect(find.textContaining('Профиль закрыт.'), findsOneWidget);
-        expect(find.text('Использовано 30%'), findsNothing);
-        expect(tester.takeException(), isNull);
-        await tester.tapAt(const Offset(10, 10));
-        await tester.pumpAndSettle();
-        expect(find.text('Остаток лимитов'), findsNothing);
-      },
-    );
+      }
+
+      await tester.pumpWidget(
+        app(load: load, running: running, brightness: brightness),
+      );
+      expect(calls, 0);
+      await tester.tap(find.byTooltip('Лимиты профиля'));
+      await tester.pumpAndSettle();
+      expect(calls, 1);
+      expect(tester.widget<Text>(find.text('Лимиты')).style?.fontSize, 20);
+      expect(find.text('20%'), findsOneWidget);
+      expect(find.text('67%'), findsOneWidget);
+      expect(find.textContaining('Сброс через 2 ч'), findsOneWidget);
+      // Неизвестный сброс не заменяется прочерком.
+      expect(find.text('—'), findsNothing);
+
+      await tester.tap(find.text('Проверить снова'));
+      await tester.pumpAndSettle();
+      expect(calls, 2);
+      expect(find.text('Лимиты'), findsOneWidget);
+      expect(find.text('30%'), findsOneWidget);
+
+      running.value = false;
+      await tester.pump();
+      expect(find.textContaining('Профиль закрыт.'), findsOneWidget);
+      expect(find.text('30%'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.tapAt(const Offset(10, 300));
+      await tester.pumpAndSettle();
+      expect(find.text('Лимиты'), findsNothing);
+    });
   }
 
   testWidgets('ошибка и отсутствие данных не показывают вымышленные проценты', (
     tester,
   ) async {
-    final activity = ValueNotifier(true);
-    addTearDown(activity.dispose);
-    var calls = 0;
+    final running = ValueNotifier(true);
+    addTearDown(running.dispose);
+    var fail = true;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTheme(Brightness.light),
-        home: Scaffold(
-          body: ProfileUsageMenu(
-            activity: activity,
-            isRunning: () => true,
-            load: () async {
-              if (calls++ == 0) throw const FormatException();
-              return null;
-            },
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Не удалось прочитать лимиты.'), findsOneWidget);
-    await tester.tap(find.text('Проверить снова'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Claude ещё не сохранил лимиты'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('Использовано'), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('использование и сброс в одной строке, тонкая полоса', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(480, 480));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final activity = ValueNotifier(true);
-    addTearDown(activity.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTheme(Brightness.light),
-        home: Scaffold(
-          body: ProfileUsageButton(
-            activity: activity,
-            isRunning: () => true,
-            load: () async => ProfileUsage(
-              updatedAt: DateTime.now(),
-              limits: const [
-                UsageLimit(
-                  label: 'За 5 часов',
-                  usedPercent: 1,
-                  resetDescription: 'Resets in 2 hr 1 min',
-                ),
-                UsageLimit(
-                  label: 'За неделю · все модели',
-                  usedPercent: 67,
-                  resetDescription: 'Resets Sun 9:00 PM',
-                ),
-              ],
-            ),
-          ),
-        ),
+      app(
+        running: running,
+        load: () async => fail ? throw const FormatException() : null,
       ),
     );
     await tester.tap(find.byTooltip('Лимиты профиля'));
     await tester.pumpAndSettle();
-    final label = tester.getRect(find.text('За неделю · все модели'));
-    final reset = tester.getRect(find.text('Сброс вс, 21:00'));
-    final used = tester.getRect(find.text('Использовано 67%'));
-    expect(reset.right, lessThan(used.left));
-    expect(label.center.dy, closeTo(used.center.dy, 1));
-    expect(reset.center.dy, closeTo(used.center.dy, 1));
-    expect(find.text('Сброс через 2 ч 1 мин'), findsOneWidget);
-    final bars = tester
-        .widgetList<LinearProgressIndicator>(
-          find.byType(LinearProgressIndicator),
-        )
-        .toList();
-    expect(bars.map((bar) => bar.value), [0.01, 0.67]);
-    expect(bars.every((bar) => bar.minHeight == 4), isTrue);
-    expect(tester.takeException(), isNull);
+    expect(find.text('Не удалось прочитать лимиты Claude.'), findsOneWidget);
+    expect(find.textContaining('%'), findsNothing);
+    fail = false;
+    await tester.tap(find.text('Проверить снова'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Claude ещё не сохранил'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -206,63 +222,55 @@ void main() {
     await tester.tap(find.byTooltip('Лимиты профиля'));
     await tester.pumpAndSettle();
     expect(tester.getRect(find.byKey(highlightKey)), card);
-    // 8 px между карточкой и меню, 14 px верхнего отступа заголовка.
-    expect(
-      tester.getTopLeft(find.text('Остаток лимитов')).dy,
-      card.bottom + 22,
-    );
+    // Меню — под карточкой, по её правому краю, шириной как меню страны.
+    final menu = tester.getRect(find.byType(ProfileUsageMenu));
+    expect(menu.top, card.bottom + 8);
+    expect(menu.right, card.right);
+    expect(menu.width, ProfileUsageMenu.width);
     await tester.tapAt(card.center);
     await tester.pumpAndSettle();
-    expect(find.text('Остаток лимитов'), findsNothing);
+    expect(find.text('Лимиты'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'закрытие меню во время чтения и длинный список без переполнения',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(480, 480));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final activity = ValueNotifier(true);
-      addTearDown(activity.dispose);
-      final pending = Completer<ProfileUsage?>();
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildTheme(Brightness.light),
-          home: Scaffold(
-            body: ProfileUsageButton(
-              activity: activity,
-              isRunning: () => true,
-              load: () => pending.future,
+  testWidgets('закрытие во время чтения и длинный список без переполнения', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 480));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final running = ValueNotifier(true);
+    addTearDown(running.dispose);
+    final pending = Completer<ProfileUsage?>();
+    await tester.pumpWidget(app(running: running, load: () => pending.future));
+    await tester.tap(find.byTooltip('Лимиты профиля'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tapAt(const Offset(10, 460));
+    await tester.pump(const Duration(milliseconds: 300));
+    pending.complete(
+      ProfileUsage(
+        limits: [
+          for (var i = 0; i < 9; i++)
+            UsageLimit(
+              label: 'Лимит $i',
+              usedPercent: 50,
+              window: UsageWindow.weekly,
+              resetsAt: DateTime.now().add(const Duration(days: 3)),
             ),
-          ),
-        ),
-      );
-      await tester.tap(find.byTooltip('Лимиты профиля'));
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tapAt(const Offset(460, 460));
-      await tester.pump(const Duration(milliseconds: 300));
-      pending.complete(
-        ProfileUsage(
-          updatedAt: DateTime.now(),
-          limits: List.generate(
-            9,
-            (i) => UsageLimit(label: 'Лимит $i', usedPercent: 50),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      await tester.tap(find.byTooltip('Лимиты профиля'));
-      await tester.pumpAndSettle();
-      expect(find.text('Лимит 0'), findsOneWidget);
-      await tester.drag(
-        find.byType(SingleChildScrollView),
-        const Offset(0, -900),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Лимит 8'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Лимиты профиля'));
+    await tester.pumpAndSettle();
+    expect(find.text('Лимит 0'), findsOneWidget);
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -900),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Лимит 8'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

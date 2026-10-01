@@ -7,7 +7,7 @@ import 'anchored_menu.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Видна только на открытом профиле; данные читаются при открытии меню.
+/// Кнопка лимитов на открытом профиле. Данные читаются при открытии меню.
 class ProfileUsageButton extends StatelessWidget {
   const ProfileUsageButton({
     super.key,
@@ -36,9 +36,8 @@ class ProfileUsageButton extends StatelessWidget {
       onPressed: enabled
           ? () {
               if (!interactive) return;
-              final navigator = Navigator.of(anchor);
               showAnchoredMenu<void>(
-                maxWidth: 500,
+                maxWidth: ProfileUsageMenu.width,
                 anchorContext: menuAnchorContext ?? anchor,
                 highlight:
                     menuHighlight ??
@@ -47,7 +46,6 @@ class ProfileUsageButton extends StatelessWidget {
                   load: load,
                   isRunning: isRunning,
                   activity: activity,
-                  onRechecked: () => navigator.pop(),
                 ),
               );
             }
@@ -56,19 +54,24 @@ class ProfileUsageButton extends StatelessWidget {
   );
 }
 
+/// Меню лимитов — как меню страны: крупный заголовок, под ним лимиты,
+/// внизу «Проверить снова». Перечитывает данные при открытии, по кнопке и раз
+/// в 30 секунд, пока открыто, — заодно обновляется «через 2 ч 10 мин».
 class ProfileUsageMenu extends StatefulWidget {
   const ProfileUsageMenu({
     super.key,
     required this.load,
     required this.isRunning,
     required this.activity,
-    this.onRechecked,
+    this.now = DateTime.now,
   });
+
+  static const width = 320.0;
 
   final Future<ProfileUsage?> Function() load;
   final bool Function() isRunning;
   final Listenable activity;
-  final VoidCallback? onRechecked;
+  final DateTime Function() now;
 
   @override
   State<ProfileUsageMenu> createState() => _ProfileUsageMenuState();
@@ -76,6 +79,7 @@ class ProfileUsageMenu extends StatefulWidget {
 
 class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
   ProfileUsage? _usage;
+  bool _loaded = false;
   bool _loading = false;
   bool _failed = false;
   Timer? _timer;
@@ -98,17 +102,16 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
         _failed = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      // Ошибка не превращается в ложные 100% оставшегося лимита.
-      setState(() => _failed = true);
+      // Ошибка не превращается в вымышленные проценты.
+      if (mounted) setState(() => _failed = true);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loaded = true;
+        });
+      }
     }
-  }
-
-  Future<void> _recheck() async {
-    await _refresh();
-    if (mounted && !_failed) widget.onRechecked?.call();
   }
 
   @override
@@ -121,52 +124,51 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.activity,
     builder: (context, _) {
+      final theme = Theme.of(context);
       final running = widget.isRunning();
       final usage = _usage;
+      final String? message;
+      if (!running) {
+        message = 'Профиль закрыт. Откройте его, чтобы увидеть лимиты.';
+      } else if (!_loaded) {
+        message = 'Читаю лимиты профиля…';
+      } else if (_failed) {
+        message = 'Не удалось прочитать лимиты Claude.';
+      } else if (usage == null) {
+        message =
+            'Claude ещё не сохранил лимиты этого профиля. Откройте в нём '
+            '«Настройки → Использование».';
+      } else {
+        message = null;
+      }
       return SizedBox(
-        width: 500,
+        width: ProfileUsageMenu.width,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Text(
-                'Остаток лимитов',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (!running)
-                      const Text(
-                        'Профиль закрыт. Откройте его, чтобы посмотреть лимиты.',
-                      )
-                    else if (_loading && usage == null)
-                      const Text('Читаем лимиты профиля…')
-                    else if (_failed)
-                      const Text(
-                        'Не удалось прочитать лимиты. Попробуйте ещё раз.',
-                      )
-                    else if (usage == null)
-                      const Text(
-                        'Claude ещё не сохранил лимиты этого профиля. '
-                        'Откройте в Claude «Настройки → Использование» и проверьте позже.',
-                      )
-                    else ...[
-                      if (usage.limits.isEmpty)
-                        const Text(
-                          'Для этого профиля сервер не вернул лимитов.',
-                        ),
-                      for (final (index, limit) in usage.limits.indexed) ...[
-                        if (index > 0) const SizedBox(height: 16),
-                        _LimitRow(limit: limit),
+                    Text(
+                      'Лимиты',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (message != null)
+                      Text(message, style: theme.textTheme.bodySmall)
+                    else
+                      for (final (index, limit) in usage!.limits.indexed) ...[
+                        if (index > 0) const SizedBox(height: 14),
+                        _LimitRow(limit: limit, now: widget.now()),
                       ],
-                    ],
                   ],
                 ),
               ),
@@ -175,9 +177,8 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
             AnchoredMenuAction(
               icon: AppIcons.sync,
               label: 'Проверить снова',
-              backgroundColor: context.palette.field,
               loading: _loading,
-              onPressed: running && !_loading ? _recheck : null,
+              onPressed: running && !_loading ? _refresh : null,
             ),
           ],
         ),
@@ -187,12 +188,14 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
 }
 
 class _LimitRow extends StatelessWidget {
-  const _LimitRow({required this.limit});
+  const _LimitRow({required this.limit, required this.now});
 
   final UsageLimit limit;
+  final DateTime now;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final p = context.palette;
     final used = limit.usedPercent;
     final color = used >= 90
@@ -200,14 +203,12 @@ class _LimitRow extends StatelessWidget {
         : used >= 70
         ? p.warning
         : p.success;
-    final number = used == used.roundToDouble()
-        ? used.toStringAsFixed(0)
-        : used.toStringAsFixed(1).replaceAll('.', ',');
-    final reset = limit.resetDescription;
+    final percent = '${used.round()}%';
+    final reset = resetText(limit, now);
     return Semantics(
       label:
-          '${limit.label}: использовано $number процентов'
-          '${reset == null ? '' : ', ${_resetText(reset)}'}',
+          '${limit.label}: использовано $percent${reset == null ? '' : ', $reset'}',
+      excludeSemantics: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -216,38 +217,24 @@ class _LimitRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   limit.label,
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Tooltip(
-                  message: reset == null
-                      ? 'В доступных данных нет времени сброса'
-                      : _resetText(reset),
-                  child: Text(
-                    reset == null ? '—' : _resetText(reset),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  style: theme.textTheme.bodyMedium,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
-                'Использовано $number%',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                percent,
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(2),
             child: LinearProgressIndicator(
               value: (used / 100).clamp(0, 1),
               minHeight: 4,
@@ -255,40 +242,48 @@ class _LimitRow extends StatelessWidget {
               color: color,
             ),
           ),
+          if (reset != null) ...[
+            const SizedBox(height: 6),
+            Text(reset, style: theme.textTheme.bodySmall),
+          ],
         ],
       ),
     );
   }
-
-  static String _resetText(String value) {
-    final relative = RegExp(r'^Resets in (.+)$').firstMatch(value);
-    if (relative != null) {
-      final time = relative
-          .group(1)!
-          .replaceAll(RegExp(r'\bhrs?\b'), 'ч')
-          .replaceAll(RegExp(r'\bmins?\b'), 'мин')
-          .replaceAll(RegExp(r'\bdays?\b'), 'дн');
-      return 'Сброс через $time';
-    }
-    final weekly = RegExp(
-      r'^Resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2})(?::(\d{2}))? (AM|PM)$',
-    ).firstMatch(value);
-    if (weekly != null) {
-      const days = {
-        'Mon': 'пн',
-        'Tue': 'вт',
-        'Wed': 'ср',
-        'Thu': 'чт',
-        'Fri': 'пт',
-        'Sat': 'сб',
-        'Sun': 'вс',
-      };
-      final hour = int.parse(weekly.group(2)!);
-      if (hour >= 1 && hour <= 12) {
-        final h24 = hour % 12 + (weekly.group(4) == 'PM' ? 12 : 0);
-        return 'Сброс ${days[weekly.group(1)]}, ${h24.toString().padLeft(2, '0')}:${weekly.group(3) ?? '00'}';
-      }
-    }
-    return value;
-  }
 }
+
+/// «Сброс через 2 ч 10 мин», «Сброс в вс, 21:00», «Сброшен в 15:10» или
+/// «Начнётся с первого запроса»; null — время сброса неизвестно.
+String? resetText(UsageLimit limit, DateTime now) {
+  if (limit.idle) return 'Начнётся с первого запроса';
+  if (limit.wasResetAt case final was?) {
+    final at = _minute(was);
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${limit.resetApproximate ? 'Сброшен примерно' : 'Сброшен'} '
+        'в ${two(at.hour)}:${two(at.minute)}';
+  }
+  final resetsAt = limit.resetsAt;
+  if (resetsAt == null) return null;
+  final at = _minute(resetsAt);
+  final left = at.difference(now);
+  final prefix = limit.resetApproximate ? 'Сброс примерно' : 'Сброс';
+  if (left.inMinutes < 1) return '$prefix сейчас';
+  if (left < const Duration(hours: 24)) {
+    final hours = left.inHours;
+    final minutes = left.inMinutes % 60;
+    final time = hours == 0
+        ? '$minutes мин'
+        : minutes == 0
+        ? '$hours ч'
+        : '$hours ч $minutes мин';
+    return '$prefix через $time';
+  }
+  const days = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '$prefix в ${days[at.weekday - 1]}, ${two(at.hour)}:${two(at.minute)}';
+}
+
+/// Сервер ставит сброс на хх:59:59.98 — округляем до минуты.
+DateTime _minute(DateTime time) => DateTime.fromMillisecondsSinceEpoch(
+  (time.millisecondsSinceEpoch / 60000).round() * 60000,
+);
