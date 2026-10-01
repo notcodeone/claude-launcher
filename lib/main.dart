@@ -179,6 +179,8 @@ Future<void> main(List<String> args) async {
   // значка появляется новая запись, которую тоже нужно спрятать.
   if (settings.hideClaudeIcon) await launcher.setClaudeIconHidden(true);
 
+  await _stopWaitingWatchers();
+
   // Приём событий Claude Code, если пользователь его включил.
   await claudeCode.start();
 
@@ -251,6 +253,24 @@ Future<void> _startWatcher(List<int> claudePids) async {
   await Process.start(Platform.resolvedExecutable, [
     _watcherFlag,
   ], mode: ProcessStartMode.detached);
+}
+
+/// Лаунчер снова запущен и забирает уведомления себе — оболочки, которые ждут
+/// закрытия Claude после прошлых выходов (см. [_startWatcher]), больше не
+/// нужны, а иначе копятся. Наблюдателей, которые уже возвращают уведомления,
+/// не трогаем: они уйдут сами, увидев, что настройки у лаунчера. На Windows
+/// ждёт сам наблюдатель и уходит так же.
+Future<void> _stopWaitingWatchers() async {
+  if (!Platform.isMacOS) return;
+  try {
+    await Process.run('pkill', [
+      '-f',
+      r'^/bin/sh -c while .*; do sleep 3; done; exec "\$0" '
+          '$_watcherFlag',
+    ]);
+  } catch (error) {
+    debugPrint('Не удалось убрать ожидающих наблюдателей: $error');
+  }
 }
 
 /// Наблюдатель: лаунчер закрыли при открытом Claude, у которого он выключил
