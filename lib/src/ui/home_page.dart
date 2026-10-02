@@ -610,11 +610,10 @@ class _UpdateStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final version = updater.release?.version;
     final Widget child = switch (updater.phase) {
       UpdatePhase.idle => const SizedBox.shrink(),
       UpdatePhase.available => QuietTextButton(
-        label: 'Обновить до $version',
+        label: updater.actionLabel,
         style: style.copyWith(
           color: context.palette.text,
           fontWeight: FontWeight.w600,

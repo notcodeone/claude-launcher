@@ -27,11 +27,16 @@ abstract final class Snacks {
     duration: null,
   );
 
-  static Snack launcherUpdate(String version, VoidCallback install) => Snack(
+  /// [selfUpdates] — лаунчер обновит себя сам; иначе кнопка ведёт скачать.
+  static Snack launcherUpdate(
+    String version,
+    VoidCallback install, {
+    bool selfUpdates = true,
+  }) => Snack(
     id: 'launcher-update',
     icon: AppIcons.download,
     text: 'Вышел ClaudeLauncher $version',
-    action: 'Обновить',
+    action: selfUpdates ? 'Обновить' : 'Скачать',
     onAction: install,
     duration: const Duration(seconds: 10),
   );
@@ -124,7 +129,13 @@ class Announcements {
         version != null &&
         version != _launcherVersion) {
       _launcherVersion = version;
-      AppSnackbar.show(Snacks.launcherUpdate(version, updater.install));
+      AppSnackbar.show(
+        Snacks.launcherUpdate(
+          version,
+          updater.install,
+          selfUpdates: updater.selfUpdates,
+        ),
+      );
     }
     if (phase == UpdatePhase.failed && was != UpdatePhase.failed) {
       AppSnackbar.show(Snacks.launcherFailed(_openUpdates));

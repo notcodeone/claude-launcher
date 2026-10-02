@@ -186,6 +186,8 @@ class AppUpdater extends ChangeNotifier {
       final latest = await _latest();
       _checkedAt = DateTime.now();
       if (isNewerVersion(latest.version, currentVersion)) {
+        // Новый выпуск — прежняя причина «обновите вручную» к нему не относится.
+        if (latest.version != release?.version) error = null;
         release = latest;
         upToDateAt = null;
         if (phase != UpdatePhase.failed) phase = UpdatePhase.available;
@@ -233,11 +235,33 @@ class AppUpdater extends ChangeNotifier {
   /// запущен не из «Программ» или переносная версия Windows), открывает
   /// страницу выпуска.
   Future<void> install() async {
-    final release = this.release;
-    if (release == null) return;
+    final known = this.release;
+    if (known == null) return;
+    var release = known;
+    // Выпуск могли увидеть в первые минуты публикации, пока установщик ещё
+    // не загружен, — спросим GitHub ещё раз.
+    if (release.installer == null) {
+      try {
+        final latest = await _latest();
+        if (latest.version == release.version) {
+          this.release = latest;
+          release = latest;
+        }
+      } catch (e) {
+        debugPrint('Не удалось обновить сведения о выпуске: $e');
+      }
+    }
     final installer = release.installer;
     final target = Platform.isMacOS ? _macBundle() : _windowsInstalledExe();
     if (installer == null || target == null) {
+      // Обновиться самим нельзя — объясняем почему и ведём на страницу.
+      error = installer == null
+          ? 'в выпуске ${release.version} нет установщика для этой системы'
+          : Platform.isMacOS
+          ? 'лаунчер запущен не из «Программ» (${Platform.resolvedExecutable})'
+          : 'лаунчер не установлен установщиком — это переносная версия '
+                '(${p.dirname(Platform.resolvedExecutable)})';
+      notifyListeners();
       await launchUrl(release.page);
       return;
     }
@@ -382,13 +406,35 @@ rm -rf "$4"
   }
 
   /// Установленная версия Windows: `%LOCALAPPDATA%\Programs\ClaudeLauncher`.
+  /// Лаунчер поставлен установщиком — рядом с exe его деинсталлятор
+  /// (`unins000.exe`). Папка может быть любой: обновление сохраняет прежнюю,
+  /// в том числе «Claude Launcher» до переименования. Без деинсталлятора —
+  /// portable-версия: её лаунчер не обновляет, только ведёт на страницу выпуска.
   static String? _windowsInstalledExe() {
-    final local = Platform.environment['LOCALAPPDATA'];
-    if (local == null) return null;
-    final dir = p.join(local, 'Programs', 'ClaudeLauncher');
     final exe = Platform.resolvedExecutable;
-    return p.isWithin(dir.toLowerCase(), exe.toLowerCase()) ? exe : null;
+    try {
+      final installed = Directory(p.dirname(exe)).listSync().any(
+        (entity) => RegExp(
+          r'^unins\d{3}\.exe$',
+          caseSensitive: false,
+        ).hasMatch(p.basename(entity.path)),
+      );
+      return installed ? exe : null;
+    } on FileSystemException {
+      return null;
+    }
   }
+
+  /// Лаунчер обновит себя сам; false — только скачать со страницы выпуска
+  /// (portable-версия на Windows, приложение не из «Программ» на macOS).
+  bool get selfUpdates =>
+      release?.installer != null &&
+      (Platform.isMacOS ? _macBundle() : _windowsInstalledExe()) != null;
+
+  /// Подпись кнопки: «Обновить до 1.6.0» или «Скачать 1.6.0».
+  String get actionLabel => selfUpdates
+      ? 'Обновить до ${release?.version}'
+      : 'Скачать ${release?.version}';
 
   /// Установщик ждёт выхода лаунчера (`/update=1`, см. claude_launcher.iss),
   /// ставит тихо и запускает новую версию; если не вышло — прежнюю

@@ -71,6 +71,13 @@ class ClaudeUpdates extends ChangeNotifier {
 
   final Directory? _cacheDir;
 
+  /// Журнал установки, если он есть: после ошибки по нему видно, что
+  /// ответила система.
+  String? get installLog => switch (host.installLogPath) {
+    final path? when File(path).existsSync() => path,
+    _ => null,
+  };
+
   /// Значок установленного Claude (PNG) — для карточки в «Обновлениях».
   String? iconPath;
 

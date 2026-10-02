@@ -160,9 +160,8 @@ class WindowsClaudeHost extends ClaudeHost {
   ///
   /// Установку делает сценарий PowerShell из файла (`-ExecutionPolicy
   /// Bypass`: политика по умолчанию запрещает сценарии), итог он пишет в
-  /// файл — у процесса с повышенными правами вывод не прочитать. PowerShell —
-  /// без консоли (detached), чтобы не мелькало окно. Claude к этому моменту
-  /// закрыт; на каждую попытку — не больше 10 минут.
+  /// файл — у процесса с повышенными правами вывод не прочитать. Claude к
+  /// этому моменту закрыт; на каждую попытку — не больше 10 минут.
   @override
   Future<void> installUpdate(File package, String version) async {
     final work = Directory(p.join(ClaudeHost.workDir.path, 'claude-install'));
@@ -177,7 +176,7 @@ class WindowsClaudeHost extends ClaudeHost {
 
       // Журнал попыток — рядом, во временной папке лаунчера: по нему видно,
       // что ответила Windows, если обновление не встало.
-      final log = File(p.join(ClaudeHost.workDir.path, 'claude-install.log'));
+      final log = File(installLogPath);
       await log.writeAsString(
         '${DateTime.now()} Claude $version: ${package.path}\n',
       );
@@ -188,8 +187,7 @@ class WindowsClaudeHost extends ClaudeHost {
         if (!await _installed(version)) {
           throw StateError(
             'Windows не поставила пакет Claude: $outcome'
-            '${first == outcome ? '' : ' (без прав администратора: $first)'}. '
-            'Подробности — в ${log.path}',
+            '${first == outcome ? '' : ' (без прав администратора: $first)'}',
           );
         }
       }
@@ -219,23 +217,33 @@ class WindowsClaudeHost extends ClaudeHost {
     ].join('\r\n');
   }
 
-  /// Команда запуска сценария [script]. [elevated] — с правами
-  /// администратора: через `Start-Process -Verb RunAs`, Windows спросит
-  /// разрешение. Путь — в кавычках внутри одной строки: Start-Process
-  /// склеивает аргументы через пробел, а в пути к временной папке бывают
-  /// пробелы.
+  @override
+  String get installLogPath =>
+      p.join(ClaudeHost.workDir.path, 'claude-install.log');
+
+  /// Команда запуска сценария [script] для PowerShell: без профиля, без
+  /// вопросов, в обход запрета сценариев. Путь — в кавычках: в пути к
+  /// временной папке бывают пробелы.
   @visibleForTesting
-  static String launchCommand(String script, {required bool elevated}) {
-    final file = script.replaceAll("'", "''");
-    if (!elevated) return "& '$file'";
-    return "try { Start-Process powershell.exe -Verb RunAs -Wait "
-        "-WindowStyle Hidden -ArgumentList '-NoProfile -NonInteractive "
-        "-ExecutionPolicy Bypass -File \"$file\"' } catch { 'ERROR: ' + "
-        r"$_.Exception.Message }";
-  }
+  static String scriptArguments(String script) =>
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden '
+      '-File "$script"';
+
+  static String get _powerShell => p.join(
+    Platform.environment['SystemRoot'] ?? r'C:\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
 
   /// Запускает сценарий и ждёт его. Возвращает текст итога — для сообщения
   /// об ошибке.
+  ///
+  /// Напрямую через Windows: обычный запуск — `CreateProcess` без окна
+  /// (`CREATE_NO_WINDOW`), с правами администратора — `ShellExecuteEx` с
+  /// `runas`: Windows спросит разрешение и честно скажет, если отказали.
+  /// Через `Process.start` PowerShell без консоли завершался молча.
   static Future<String> _runInstall(
     File script,
     File result,
@@ -243,53 +251,105 @@ class WindowsClaudeHost extends ClaudeHost {
     required bool elevated,
   }) async {
     if (await result.exists()) await result.delete();
-    final process = await Process.start('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-InputFormat',
-      'None',
-      '-Command',
-      launchCommand(script.path, elevated: elevated),
-    ], mode: ProcessStartMode.detachedWithStdio);
-    // Ошибки PowerShell (например, не запустился сценарий) — в stderr.
-    final errors = process.stderr
-        .transform(const SystemEncoding().decoder)
-        .join()
-        .catchError((Object _) => '');
-    final output = await process.stdout
-        .transform(const SystemEncoding().decoder)
-        .join()
-        .timeout(
-          const Duration(minutes: 10),
-          onTimeout: () {
-            Process.killPid(process.pid);
-            return 'ERROR: установка не закончилась за 10 минут';
-          },
-        );
-    final stderr = await errors.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => '',
-    );
+    final arguments = scriptArguments(script.path);
+    final (process, error) = elevated
+        ? _shellExecuteElevated(_powerShell, arguments)
+        : _createProcess('"$_powerShell" $arguments');
+    var waited = 'не запустился';
+    if (process != null) {
+      waited = await _waitFor(process, const Duration(minutes: 10))
+          ? 'завершился'
+          : 'не закончил за 10 минут';
+      CloseHandle(process);
+    }
     final written = await result.exists()
         ? lastLine(await result.readAsString())
         : '';
     await log.writeAsString(
       '--- ${elevated ? 'с правами администратора' : 'обычная'}\n'
-      'итог: $written\nвывод: ${output.trim()}\nошибки: ${stderr.trim()}\n',
+      'PowerShell: $waited${error == 0 ? '' : ', ошибка Windows $error'}\n'
+      'итог: $written\n',
       mode: FileMode.append,
     );
-    final text = written.isNotEmpty
-        ? written
-        : lastLine(output).isNotEmpty
-        ? lastLine(output)
-        : lastLine(stderr);
-    return switch (text) {
-      '' when elevated => 'разрешение администратора не получено',
-      '' => 'нет ответа',
-      final text => text.replaceFirst(RegExp(r'^ERROR:\s*'), ''),
+    if (written.isNotEmpty) {
+      return written.replaceFirst(RegExp(r'^ERROR:\s*'), '');
+    }
+    return switch (error) {
+      _errorCancelled => 'разрешение администратора не получено',
+      0 when process != null => 'установка завершилась без ответа',
+      0 => 'PowerShell не запустился',
+      _ => 'PowerShell не запустился (ошибка Windows $error)',
     };
+  }
+
+  static const _errorCancelled = 1223;
+
+  /// `CreateProcess` без окна. Возвращает процесс или код ошибки Windows.
+  static (HANDLE?, int) _createProcess(String commandLine) {
+    final startup = calloc<STARTUPINFO>()..ref.cb = sizeOf<STARTUPINFO>();
+    final info = calloc<PROCESS_INFORMATION>();
+    final command = commandLine.toNativeUtf16();
+    try {
+      final created = CreateProcess(
+        null,
+        PWSTR(command),
+        null,
+        null,
+        false,
+        CREATE_NO_WINDOW,
+        null,
+        null,
+        startup,
+        info,
+      );
+      if (!created.value) return (null, created.error);
+      CloseHandle(info.ref.hThread);
+      return (info.ref.hProcess, 0);
+    } finally {
+      calloc.free(startup);
+      calloc.free(info);
+      calloc.free(command);
+    }
+  }
+
+  /// `ShellExecuteEx` с `runas`: Windows спросит разрешение администратора.
+  /// Возвращает процесс или код ошибки (1223 — пользователь отказал).
+  static (HANDLE?, int) _shellExecuteElevated(String file, String arguments) {
+    const seeMaskNoCloseProcess = 0x40;
+    const seeMaskNoAsync = 0x100;
+    final info = calloc<SHELLEXECUTEINFO>();
+    final verb = 'runas'.toNativeUtf16();
+    final path = file.toNativeUtf16();
+    final parameters = arguments.toNativeUtf16();
+    try {
+      info.ref
+        ..cbSize = sizeOf<SHELLEXECUTEINFO>()
+        ..fMask = seeMaskNoCloseProcess | seeMaskNoAsync
+        ..lpVerb = PWSTR(verb)
+        ..lpFile = PWSTR(path)
+        ..lpParameters = PWSTR(parameters)
+        ..nShow = SW_HIDE;
+      final executed = ShellExecuteEx(info);
+      if (!executed.value) return (null, executed.error);
+      final process = info.ref.hProcess;
+      return (process.address == 0 ? null : process, 0);
+    } finally {
+      calloc.free(info);
+      calloc.free(verb);
+      calloc.free(path);
+      calloc.free(parameters);
+    }
+  }
+
+  /// Ждёт завершения [process], не останавливая окно: спрашивает раз в
+  /// полсекунды. false — не дождались за [timeout].
+  static Future<bool> _waitFor(HANDLE process, Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (WaitForSingleObject(process, 0).value == WAIT_OBJECT_0) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return false;
   }
 
   /// Последняя непустая строка вывода, без метки порядка байтов UTF-8.

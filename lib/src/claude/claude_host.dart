@@ -92,6 +92,9 @@ abstract class ClaudeHost {
   Future<void> installUpdate(File package, String version) =>
       throw UnsupportedError('Обновлять Claude здесь лаунчер не умеет');
 
+  /// Журнал последней установки обновления Claude; `null` — его не ведём.
+  String? get installLogPath => null;
+
   /// Значок установленного Claude — PNG; `null` — не нашёлся.
   Future<String?> iconPath() async => null;
 

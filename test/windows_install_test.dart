@@ -20,18 +20,13 @@ void main() {
     expect(script, contains(r"('ERROR: ' + $_.Exception.Message)"));
   });
 
-  test('с правами администратора — RunAs, путь в кавычках целиком', () {
-    final command = WindowsClaudeHost.launchCommand(
+  test('аргументы сценария: в обход запрета, путь в кавычках целиком', () {
+    final arguments = WindowsClaudeHost.scriptArguments(
       r'C:\Users\Анна Нил\Temp\install.ps1',
-      elevated: true,
     );
-    expect(command, contains('Start-Process powershell.exe -Verb RunAs -Wait'));
-    expect(command, contains(r'-File "C:\Users\Анна Нил\Temp\install.ps1"'));
-    expect(command, contains('-ExecutionPolicy Bypass'));
-    expect(
-      WindowsClaudeHost.launchCommand(r'C:\x\install.ps1', elevated: false),
-      r"& 'C:\x\install.ps1'",
-    );
+    expect(arguments, contains('-ExecutionPolicy Bypass'));
+    expect(arguments, contains('-NonInteractive'));
+    expect(arguments, endsWith(r'-File "C:\Users\Анна Нил\Temp\install.ps1"'));
   });
 
   test('итог — последняя строка, без BOM', () {

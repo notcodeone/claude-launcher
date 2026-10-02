@@ -656,6 +656,15 @@ class _ClaudeVersionCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     _status(context),
+                    // Не встало — путь к журналу; по нажатию он откроется.
+                    if (updates.phase == ClaudeUpdatePhase.failed)
+                      if (updates.installLog case final log?) ...[
+                        const SizedBox(height: 6),
+                        InlineLink(
+                          label: log,
+                          onTap: () => launchUrl(Uri.file(log)),
+                        ),
+                      ],
                   ],
                 ),
               ),
@@ -820,7 +829,7 @@ class _VersionCard extends StatelessWidget {
               if (updater?.phase == UpdatePhase.available ||
                   updater?.phase == UpdatePhase.failed)
                 AppButton(
-                  label: 'Обновить до ${updater!.release!.version}',
+                  label: updater!.actionLabel,
                   onPressed: updater.install,
                 )
               else if (updater != null)
@@ -859,6 +868,11 @@ class _VersionCard extends StatelessWidget {
       AppUpdater(phase: UpdatePhase.failed, :final error) => StatusDot(
         label: 'Не удалось обновить${error == null ? '' : ': $error'}',
         color: p.danger,
+      ),
+      // Обновиться самим не вышло — почему; страница выпуска уже открыта.
+      AppUpdater(phase: UpdatePhase.available, :final error?) => StatusDot(
+        label: 'Скачайте $release вручную: $error',
+        color: p.warning,
       ),
       AppUpdater(phase: UpdatePhase.available) => StatusDot(
         label: 'Доступна версия $release',
