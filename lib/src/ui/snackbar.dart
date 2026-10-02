@@ -109,7 +109,10 @@ abstract final class AppSnackbar {
   }
 }
 
-/// Место оповещений в окне: приходят снизу и гаснут, уходят так же.
+/// Место оповещений в окне — нижний ряд, там же, где кнопка страницы
+/// («Добавить», «Создать»). Пока виден оповещение, кнопка уходит вниз и
+/// гаснет ([FabSlot]), а оповещение занимает всю ширину. Приходит снизу и
+/// гаснет, уходит так же.
 class SnackbarHost extends StatelessWidget {
   const SnackbarHost({super.key});
 
@@ -142,6 +145,36 @@ class SnackbarHost extends StatelessWidget {
   );
 }
 
+/// Кнопка страницы в нижнем ряду: пока виден оповещение, уходит вниз и
+/// гаснет — место ему; оповещение ушло — возвращается.
+class FabSlot extends StatelessWidget {
+  const FabSlot({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: AppSnackbar.current,
+    builder: (context, snack, child) {
+      final hidden = snack != null;
+      return IgnorePointer(
+        ignoring: hidden,
+        child: AnimatedSlide(
+          offset: Offset(0, hidden ? 0.6 : 0),
+          duration: const Duration(milliseconds: 260),
+          curve: hidden ? Curves.easeInCubic : Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: hidden ? 0 : 1,
+            duration: const Duration(milliseconds: 200),
+            child: child,
+          ),
+        ),
+      );
+    },
+    child: child,
+  );
+}
+
 /// Оповещение — чёрная плашка, как кнопка «Добавить»: значок, текст, кнопка
 /// действия и крестик.
 class SnackView extends StatelessWidget {
@@ -165,7 +198,8 @@ class SnackView extends StatelessWidget {
           color: p.primary,
           borderRadius: radius,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            // Высота — как у кнопки рядом (52), чтобы ряд был ровным.
+            padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 40),
               child: Row(
@@ -183,7 +217,9 @@ class SnackView extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Text(
                         snack.text,
-                        maxLines: 3,
+                        // Одна строка: тексты оповещений короткие (Snacks),
+                        // длинное название профиля — с многоточием.
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: p.onPrimary,

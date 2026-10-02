@@ -569,6 +569,11 @@ class WindowsClaudeHost extends ClaudeHost {
   /// Windows 11 хранит видимость значков трея в реестре пользователя:
   /// `IsPromoted = 0` — значок под стрелкой ▲, `1` — на панели задач.
   /// Путь к Claude.exe меняется с версиями, поэтому правим все его записи.
+  ///
+  /// Запись появляется, только когда Claude впервые показал значок, а после
+  /// обновления Claude — новая, по новому пути. Поэтому лаунчер вызывает это
+  /// снова, пока Claude открыт ([ClaudeIconKeeper]); пишем, только если
+  /// значение другое.
   @override
   Future<void> setClaudeIconHidden(bool hidden) async {
     final RegistryKey root;
@@ -586,7 +591,10 @@ class WindowsClaudeHost extends ClaudeHost {
           config: const RegistryOpenConfig(access: RegistryAccess.readWrite),
         );
         try {
-          icon.setValue('IsPromoted', RegistryValue.dword(hidden ? 0 : 1));
+          final want = hidden ? 0 : 1;
+          if (icon.getInt('IsPromoted') != want) {
+            icon.setValue('IsPromoted', RegistryValue.dword(want));
+          }
         } finally {
           icon.close();
         }

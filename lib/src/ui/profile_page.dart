@@ -8,6 +8,7 @@ import '../launcher_controller.dart';
 import '../profile.dart';
 import 'profile_dialog.dart';
 import 'profile_icons.dart';
+import 'announcements.dart' show Snacks;
 import 'settings_pages.dart' show AppearIn;
 import 'snackbar.dart';
 import 'theme.dart';
@@ -298,13 +299,7 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       if (!mounted) return;
       widget.onDone();
-      AppSnackbar.show(
-        Snack(
-          id: 'profile-saved',
-          icon: AppIcons.check,
-          text: 'Профиль «$name» сохранён',
-        ),
-      );
+      AppSnackbar.show(Snacks.profileSaved(name));
       return;
     }
     final profile = await widget.launcher.addProfile(
@@ -320,13 +315,7 @@ class _ProfilePageState extends State<ProfilePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => widget.onDone());
     final launcher = widget.launcher;
     AppSnackbar.show(
-      Snack(
-        id: 'profile-created',
-        icon: AppIcons.check,
-        text: 'Профиль «$name» создан. При первом запуске войдите в аккаунт.',
-        action: 'Открыть',
-        onAction: () => launcher.switchTo(profile),
-      ),
+      Snacks.profileCreated(name, () => launcher.switchTo(profile)),
     );
   }
 
@@ -493,15 +482,17 @@ class _ProfilePageState extends State<ProfilePage> {
           bottom: newProfileFabBottom,
           child: AppearIn(
             index: 3,
-            child: AppFab(
-              icon: AppIcons.check,
-              label: switch ((_isNew, _saving)) {
-                (true, false) => 'Создать',
-                (true, true) => 'Создаю…',
-                (false, false) => 'Сохранить',
-                (false, true) => 'Сохраняю…',
-              },
-              onPressed: _submit,
+            child: FabSlot(
+              child: AppFab(
+                icon: AppIcons.check,
+                label: switch ((_isNew, _saving)) {
+                  (true, false) => 'Создать',
+                  (true, true) => 'Создаю…',
+                  (false, false) => 'Сохранить',
+                  (false, true) => 'Сохраняю…',
+                },
+                onPressed: _submit,
+              ),
             ),
           ),
         ),

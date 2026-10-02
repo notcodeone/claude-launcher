@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import '../app_settings.dart';
 import '../claude/claude_updates.dart';
 import '../updates/app_updater.dart';
@@ -7,6 +9,80 @@ import 'home_page.dart' show AppPages;
 import 'settings_pages.dart' show SettingsSection;
 import 'snackbar.dart';
 import 'widgets.dart';
+
+/// Все оповещения лаунчера — в одном месте и коротко: каждое влезает в
+/// одну строку окна (проверяет тест).
+abstract final class Snacks {
+  static Snack trayHint({required VoidCallback onDismiss}) => Snack(
+    id: 'tray-hint',
+    icon: AppIcons.info,
+    text: Platform.isMacOS
+        ? 'ClaudeLauncher живёт в строке меню'
+        : 'ClaudeLauncher живёт в трее',
+    action: 'Понятно',
+    onAction: onDismiss,
+    onClose: onDismiss,
+    // Пока не закроют: иначе после перезапуска подсказка пропала бы
+    // непрочитанной.
+    duration: null,
+  );
+
+  static Snack launcherUpdate(String version, VoidCallback install) => Snack(
+    id: 'launcher-update',
+    icon: AppIcons.download,
+    text: 'Вышел ClaudeLauncher $version',
+    action: 'Обновить',
+    onAction: install,
+    duration: const Duration(seconds: 10),
+  );
+
+  static Snack launcherFailed(VoidCallback details) => Snack(
+    id: 'launcher-update',
+    icon: AppIcons.error,
+    error: true,
+    text: 'Не удалось обновить ClaudeLauncher',
+    action: 'Подробнее',
+    onAction: details,
+  );
+
+  static Snack claudeUpdate(String version, VoidCallback details) => Snack(
+    id: 'claude-update',
+    icon: AppIcons.download,
+    text: 'Вышел Claude $version',
+    action: 'Подробнее',
+    onAction: details,
+    duration: const Duration(seconds: 10),
+  );
+
+  static Snack claudeUpdated(String version) => Snack(
+    id: 'claude-update',
+    icon: AppIcons.check,
+    text: 'Claude обновлён до $version',
+  );
+
+  static Snack claudeFailed(VoidCallback details) => Snack(
+    id: 'claude-update',
+    icon: AppIcons.error,
+    error: true,
+    text: 'Не удалось обновить Claude',
+    action: 'Подробнее',
+    onAction: details,
+  );
+
+  static Snack profileCreated(String name, VoidCallback open) => Snack(
+    id: 'profile-created',
+    icon: AppIcons.check,
+    text: 'Профиль «$name» создан',
+    action: 'Открыть',
+    onAction: open,
+  );
+
+  static Snack profileSaved(String name) => Snack(
+    id: 'profile-saved',
+    icon: AppIcons.check,
+    text: 'Профиль «$name» сохранён',
+  );
+}
 
 /// Что лаунчер сообщает оповещением внизу окна ([AppSnackbar]): подсказку
 /// при первом запуске, вышедшие обновления лаунчера и Claude и чем они
@@ -25,23 +101,7 @@ class Announcements {
 
   void start() {
     if (!settings.trayHintDismissed) {
-      // Пока не закроют: иначе после перезапуска подсказка пропала бы
-      // непрочитанной.
-      AppSnackbar.show(
-        Snack(
-          id: 'tray-hint',
-          icon: AppIcons.info,
-          text: Platform.isMacOS
-              ? 'ClaudeLauncher живёт в строке меню — ищите его значок вверху '
-                    'экрана. Это окно можно закрыть.'
-              : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой '
-                    '▲). Это окно можно закрыть.',
-          action: 'Понятно',
-          onAction: settings.dismissTrayHint,
-          onClose: settings.dismissTrayHint,
-          duration: null,
-        ),
-      );
+      AppSnackbar.show(Snacks.trayHint(onDismiss: settings.dismissTrayHint));
     }
     updater?.addListener(_launcher);
     claudeUpdates?.addListener(_claude);
@@ -64,28 +124,10 @@ class Announcements {
         version != null &&
         version != _launcherVersion) {
       _launcherVersion = version;
-      AppSnackbar.show(
-        Snack(
-          id: 'launcher-update',
-          icon: AppIcons.download,
-          text: 'Вышел ClaudeLauncher $version',
-          action: 'Обновить',
-          onAction: updater.install,
-          duration: const Duration(seconds: 10),
-        ),
-      );
+      AppSnackbar.show(Snacks.launcherUpdate(version, updater.install));
     }
     if (phase == UpdatePhase.failed && was != UpdatePhase.failed) {
-      AppSnackbar.show(
-        const Snack(
-          id: 'launcher-update',
-          icon: AppIcons.error,
-          error: true,
-          text: 'Не удалось обновить ClaudeLauncher',
-          action: 'Подробнее',
-          onAction: _openUpdates,
-        ),
-      );
+      AppSnackbar.show(Snacks.launcherFailed(_openUpdates));
     }
   }
 
@@ -99,38 +141,14 @@ class Announcements {
         version != _claudeVersion &&
         phase == ClaudeUpdatePhase.idle) {
       _claudeVersion = version;
-      AppSnackbar.show(
-        Snack(
-          id: 'claude-update',
-          icon: AppIcons.download,
-          text: 'Вышел Claude $version',
-          action: 'Подробнее',
-          onAction: _openUpdates,
-          duration: const Duration(seconds: 10),
-        ),
-      );
+      AppSnackbar.show(Snacks.claudeUpdate(version, _openUpdates));
     }
     if (was == ClaudeUpdatePhase.installing &&
         phase == ClaudeUpdatePhase.idle) {
-      AppSnackbar.show(
-        Snack(
-          id: 'claude-update',
-          icon: AppIcons.check,
-          text: 'Claude обновлён до ${updates.installed}',
-        ),
-      );
+      AppSnackbar.show(Snacks.claudeUpdated('${updates.installed}'));
     }
     if (phase == ClaudeUpdatePhase.failed && was != ClaudeUpdatePhase.failed) {
-      AppSnackbar.show(
-        const Snack(
-          id: 'claude-update',
-          icon: AppIcons.error,
-          error: true,
-          text: 'Не удалось обновить Claude',
-          action: 'Подробнее',
-          onAction: _openUpdates,
-        ),
-      );
+      AppSnackbar.show(Snacks.claudeFailed(_openUpdates));
     }
   }
 }

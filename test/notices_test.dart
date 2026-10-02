@@ -1,7 +1,12 @@
+import 'dart:io';
+
+import 'package:claude_launcher/src/ui/announcements.dart';
 import 'package:claude_launcher/src/ui/snackbar.dart';
 import 'package:claude_launcher/src/ui/theme.dart';
 import 'package:claude_launcher/src/ui/widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _app(Widget child) => MaterialApp(
@@ -20,7 +25,7 @@ void main() {
     var updated = 0;
     await tester.pumpWidget(
       _app(
-        const Align(alignment: Alignment.bottomCenter, child: SnackbarHost()),
+        Align(alignment: Alignment.bottomCenter, child: const SnackbarHost()),
       ),
     );
     AppSnackbar.show(
@@ -87,4 +92,107 @@ void main() {
     await tester.tap(find.byTooltip('Закрыть'));
     expect(closed, 1);
   });
+
+  testWidgets('пока видно оповещение, кнопка страницы скрыта', (tester) async {
+    var pressed = 0;
+    await tester.pumpWidget(
+      _app(
+        Stack(
+          children: [
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: FabSlot(
+                child: AppFab(
+                  icon: AppIcons.add,
+                  label: 'Добавить',
+                  onPressed: () => pressed++,
+                ),
+              ),
+            ),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SnackbarHost(),
+            ),
+          ],
+        ),
+      ),
+    );
+    double opacity() => tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byType(AppFab),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+    expect(opacity(), 1);
+
+    AppSnackbar.show(
+      const Snack(id: 'x', text: 'Вышел Claude', duration: null),
+    );
+    await tester.pumpAndSettle();
+    expect(opacity(), 0);
+    // Скрытая кнопка не нажимается.
+    await tester.tap(find.byType(AppFab), warnIfMissed: false);
+    expect(pressed, 0);
+
+    AppSnackbar.dismiss();
+    await tester.pumpAndSettle();
+    expect(opacity(), 1);
+    AppSnackbar.reset();
+  });
+
+  // Шрифт системы — тексты меряются так же, как в окне (в тестах по умолчанию
+  // шрифт-заглушка с квадратными буквами, он шире). Где его нет — пропускаем.
+  final sf = File('/System/Library/Fonts/SFNS.ttf');
+  testWidgets('каждое оповещение — в одну строку окна', (tester) async {
+    await tester.runAsync(() async {
+      await (FontLoader('Roboto')
+            ..addFont(Future.value(ByteData.view(sf.readAsBytesSync().buffer))))
+          .load();
+    });
+    void none() {}
+    final snacks = [
+      Snacks.trayHint(onDismiss: none),
+      // Обе подсказки: на macOS и на Windows текст свой.
+      const Snack(
+        id: 'w',
+        text: 'ClaudeLauncher живёт в трее',
+        action: 'Понятно',
+      ),
+      Snacks.launcherUpdate('1.10.10', none),
+      Snacks.launcherFailed(none),
+      Snacks.claudeUpdate('2.19675.0', none),
+      Snacks.claudeUpdated('2.19675.0'),
+      Snacks.claudeFailed(none),
+      Snacks.profileCreated('Рабочий', none),
+      Snacks.profileSaved('Рабочий'),
+    ];
+    // Окно 560 с полями по 24 — кнопка страницы скрыта, вся ширина.
+    const width = 560.0 - 2 * 24;
+    for (final snack in snacks) {
+      await tester.pumpWidget(
+        _app(
+          Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: width,
+              child: SnackView(snack: snack),
+            ),
+          ),
+        ),
+      );
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.text(snack.text),
+      );
+      expect(
+        paragraph.didExceedMaxLines,
+        isFalse,
+        reason: '«${snack.text}» не влезает в строку',
+      );
+    }
+  }, skip: !sf.existsSync());
 }

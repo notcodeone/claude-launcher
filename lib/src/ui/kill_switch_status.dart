@@ -4,29 +4,54 @@ import '../location/kill_switch.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Что Kill Switch делает сейчас: строка состояния и цвет — для настроек,
-/// окна Kill Switch и точки на его кнопке в шапке.
-({String label, Color color})? killSwitchState(
+/// Что Kill Switch делает сейчас: строка состояния и цвет — для настроек и
+/// точки на кнопке сети в шапке; [short] — строка в окне сети, в одну
+/// строку: «Kill Switch активен».
+({String label, String short, Color color})? killSwitchState(
   BuildContext context,
   KillSwitch killSwitch,
 ) {
   final p = context.palette;
   if (killSwitch.passthrough) {
-    return (label: 'Защита снимется, когда закроете Claude', color: p.warning);
+    return (
+      label: 'Защита снимется, когда закроете Claude',
+      short: 'Kill Switch снимется после закрытия Claude',
+      color: p.warning,
+    );
   }
   if (!killSwitch.enabled) return null;
   if (killSwitch.unprotected) {
-    return (label: 'Не подключён: настройки Claude заняты', color: p.danger);
+    return (
+      label: 'Не подключён: настройки Claude заняты',
+      short: 'Kill Switch не подключён',
+      color: p.danger,
+    );
   }
   if (killSwitch.lastFired != null && !killSwitch.open) {
-    return (label: 'Сработал — Claude закрыт', color: p.danger);
+    return (
+      label: 'Сработал — Claude закрыт',
+      short: 'Kill Switch сработал',
+      color: p.danger,
+    );
   }
   if (killSwitch.needsRestart) {
-    return (label: 'Перезапустите Claude для защиты', color: p.warning);
+    return (
+      label: 'Перезапустите Claude для защиты',
+      short: 'Kill Switch ждёт перезапуска Claude',
+      color: p.warning,
+    );
   }
   return killSwitch.open
-      ? (label: 'Сеть проверена — трафик идёт', color: p.success)
-      : (label: 'Проверяю сеть — трафик ждёт', color: p.warning);
+      ? (
+          label: 'Сеть проверена — трафик идёт',
+          short: 'Kill Switch активен',
+          color: p.success,
+        )
+      : (
+          label: 'Проверяю сеть — трафик ждёт',
+          short: 'Kill Switch проверяет сеть',
+          color: p.warning,
+        );
 }
 
 /// Строка состояния Kill Switch; null — выключен.

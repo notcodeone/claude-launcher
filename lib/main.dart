@@ -14,8 +14,10 @@ import 'src/app_window.dart';
 import 'src/claude/claude_host.dart';
 import 'src/integrations/claude_code_hooks.dart';
 import 'src/integrations/claude_code_integration.dart';
+import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/launcher_controller.dart';
+import 'src/claude/claude_icon_keeper.dart';
 import 'src/claude/claude_updates.dart';
 import 'src/location/egress_config.dart';
 import 'src/location/kill_switch.dart';
@@ -113,8 +115,11 @@ Future<void> main(List<String> args) async {
   );
   // Перед запуском профиля: уведомления Claude — лаунчеру, а при Kill
   // switch — закрепить профиль за затвором (Claude читает это при запуске).
+  // «Скрывать значок Claude» — настройкой самого Claude в папке профиля.
+  final trayIcon = ClaudeTrayIcon(settings: settings, launcher: launcher);
   launcher.beforeLaunch = (dataDir) async {
     await claudeCode.beforeLaunch(dataDir);
+    await trayIcon.beforeLaunch(dataDir);
     await killSwitch.beforeLaunch(dataDir);
   };
   // Пока включён Kill Switch, Claude обновляет лаунчер — через проверенную сеть.
@@ -244,6 +249,14 @@ Future<void> main(List<String> args) async {
   // Повторно при каждом запуске: на Windows после обновления Claude у его
   // значка появляется новая запись, которую тоже нужно спрятать.
   if (settings.hideClaudeIcon) await launcher.setClaudeIconHidden(true);
+  trayIcon.start();
+  // Windows: и пока Claude открыт — запись появляется, когда он показал
+  // значок, а не когда запустился лаунчер. Это для Claude, открытого до
+  // включения настройки: значок уйдёт под стрелку ▲, а совсем пропадёт после
+  // перезапуска Claude.
+  if (Platform.isWindows) {
+    ClaudeIconKeeper(settings: settings, launcher: launcher).start();
+  }
 
   await _stopWaitingWatchers();
   await _stopKillSwitchGuard(supportDir, launcher.host);
@@ -658,6 +671,19 @@ Future<void> _cleanup(Directory supportDir) async {
     debugPrint('Не удалось вернуть уведомления Claude: $error');
   }
   if (settings.hideClaudeIcon) {
+    try {
+      final launcher = LauncherController(
+        host: host,
+        store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
+      );
+      await launcher.init();
+      final trayIcon = ClaudeTrayIcon(settings: settings, launcher: launcher);
+      for (final profile in launcher.profiles) {
+        await trayIcon.apply(launcher.dataDirOf(profile), hidden: false);
+      }
+    } catch (error) {
+      debugPrint('Не удалось вернуть значок Claude: $error');
+    }
     try {
       await host.setClaudeIconHidden(false);
     } catch (error) {

@@ -11,7 +11,6 @@ import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
 import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
-import '../location/countries.dart';
 import '../location/kill_switch.dart';
 import '../location/location_guard.dart';
 import '../profile.dart';
@@ -272,10 +271,12 @@ class HomePage extends StatelessWidget {
             child: ProfileHero.fab(
               fabIcon: AppIcons.add,
               fabLabel: 'Добавить',
-              child: AppFab(
-                icon: AppIcons.add,
-                label: 'Добавить',
-                onPressed: () => _addProfile(context),
+              child: FabSlot(
+                child: AppFab(
+                  icon: AppIcons.add,
+                  label: 'Добавить',
+                  onPressed: () => _addProfile(context),
+                ),
               ),
             ),
           ),
@@ -470,12 +471,13 @@ class HomePage extends StatelessWidget {
             height: _footerHeight,
             child: _Footer(version: version, updater: updater),
           ),
-          // Оповещения — над кнопкой «Добавить», поверх страниц.
-          const Positioned(
+          // Оповещения — в нижнем ряду, на месте кнопки страницы, поверх
+          // страниц (см. SnackbarHost).
+          Positioned(
             left: gutter,
             right: gutter,
-            bottom: _footerHeight + 8 + 52 + 12,
-            child: SnackbarHost(),
+            bottom: _footerHeight + 8,
+            child: const SnackbarHost(),
           ),
         ],
       ),
@@ -1016,43 +1018,47 @@ class _HeaderBar extends StatelessWidget {
                         key: const ValueKey('buttons'),
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          AnimatedSize(
+                          // Страна и Kill Switch — одна кнопка: пока Kill
+                          // Switch включён, он отвечает за сеть, и в его окне
+                          // — и страна, и защита.
+                          AnimatedSwitcher(
                             duration: duration,
-                            curve: Curves.easeOutCubic,
                             child: switch (killSwitch) {
                               final killSwitch?
                                   when killSwitch.enabled ||
                                       killSwitch.passthrough =>
                                 CircleIconButton(
-                                  icon: killSwitch.lastFired != null
+                                  key: const ValueKey('network'),
+                                  icon: _networkAlarm(killSwitch)
                                       ? AppIcons.shieldAlert
                                       : AppIcons.shield,
-                                  badge: killSwitchState(
-                                    context,
+                                  badge: _networkBadge(
+                                    context.palette,
                                     killSwitch,
-                                  )?.color,
-                                  tooltip: interactive ? 'Kill Switch' : null,
+                                  ),
+                                  tooltip: interactive
+                                      ? 'Страна и Kill Switch'
+                                      : null,
                                   onPressed: () {
                                     if (interactive) {
-                                      _openKillSwitchMenu(
-                                        cardContext,
-                                        killSwitch,
-                                      );
+                                      _openNetworkMenu(cardContext, killSwitch);
                                     }
                                   },
                                 ),
-                              _ => const SizedBox.shrink(),
-                            },
-                          ),
-                          CircleIconButton(
-                            icon: location.enabled
-                                ? AppIcons.location
-                                : AppIcons.locationOff,
-                            badge: _locationBadge(context.palette),
-                            loading: location.showsProgress,
-                            tooltip: interactive ? 'Страна' : null,
-                            onPressed: () {
-                              if (interactive) _openLocationMenu(cardContext);
+                              _ => CircleIconButton(
+                                key: const ValueKey('country'),
+                                icon: location.enabled
+                                    ? AppIcons.location
+                                    : AppIcons.locationOff,
+                                badge: _locationBadge(context.palette),
+                                loading: location.showsProgress,
+                                tooltip: interactive ? 'Страна' : null,
+                                onPressed: () {
+                                  if (interactive) {
+                                    _openLocationMenu(cardContext);
+                                  }
+                                },
+                              ),
                             },
                           ),
                           CircleIconButton(
@@ -1098,7 +1104,27 @@ class _HeaderBar extends StatelessWidget {
     interactive: false,
   );
 
-  Future<void> _openKillSwitchMenu(
+  /// Тревога: Kill Switch сработал или страна недоступна.
+  bool _networkAlarm(KillSwitch killSwitch) =>
+      killSwitch.lastFired != null ||
+      location.state == LocationState.unsupported;
+
+  /// Точка на кнопке сети: красная — тревога, иначе — как у Kill Switch
+  /// (зелёная — трафик идёт, жёлтая — проверка или нужен перезапуск).
+  Color? _networkBadge(Palette p, KillSwitch killSwitch) {
+    if (_networkAlarm(killSwitch)) return p.danger;
+    return switch (killSwitch) {
+      KillSwitch(passthrough: true) => p.warning,
+      KillSwitch(unprotected: true) => p.danger,
+      KillSwitch(needsRestart: true) => p.warning,
+      KillSwitch(open: true) => p.success,
+      _ => p.warning,
+    };
+  }
+
+  /// Окно сети, пока включён Kill Switch: страна, доступен ли в ней Claude и
+  /// что делает защита.
+  Future<void> _openNetworkMenu(
     BuildContext cardContext,
     KillSwitch killSwitch,
   ) async {
@@ -1108,16 +1134,11 @@ class _HeaderBar extends StatelessWidget {
       caption: ListenableBuilder(
         listenable: Listenable.merge([killSwitch, location]),
         builder: (context, _) =>
-            _KillSwitchCaption(killSwitch: killSwitch, location: location),
+            _NetworkCaption(killSwitch: killSwitch, location: location),
       ),
-      entries: [
-        if (killSwitch.armed)
-          const MenuEntry(
-            value: 'check',
-            icon: AppIcons.sync,
-            label: 'Проверить сеть',
-          ),
-        const MenuEntry(
+      entries: const [
+        MenuEntry(value: 'check', icon: AppIcons.sync, label: 'Проверить сеть'),
+        MenuEntry(
           value: 'settings',
           icon: AppIcons.settings,
           label: 'Настройки Kill Switch',
@@ -1125,8 +1146,10 @@ class _HeaderBar extends StatelessWidget {
       ],
     );
     switch (action) {
-      case 'check':
+      case 'check' when killSwitch.armed:
         await killSwitch.checkNow();
+      case 'check':
+        await location.check(force: true);
       case 'settings':
         AppPages.open(SettingsSection.experiments.route);
     }
@@ -1183,9 +1206,11 @@ class _SwitchBanner extends StatelessWidget {
   );
 }
 
-/// Что Kill Switch делает сейчас — над пунктами меню его кнопки.
-class _KillSwitchCaption extends StatelessWidget {
-  const _KillSwitchCaption({required this.killSwitch, required this.location});
+/// Страна и Kill Switch — над пунктами меню кнопки сети: флаг и страна,
+/// доступен ли в ней Claude, что делает защита и когда проверено (или что
+/// случилось, если Kill Switch сработал).
+class _NetworkCaption extends StatelessWidget {
+  const _NetworkCaption({required this.killSwitch, required this.location});
 
   final KillSwitch killSwitch;
   final LocationGuard location;
@@ -1196,44 +1221,74 @@ class _KillSwitchCaption extends StatelessWidget {
     final p = context.palette;
     final state = killSwitchState(context, killSwitch);
     final event = killSwitch.lastFired;
-    final country = switch (killSwitch.baseline) {
-      final code? when killSwitch.open => countryNames[code] ?? code,
-      _ => null,
+    final known =
+        !location.checking &&
+        location.country != null &&
+        (location.state == LocationState.supported ||
+            location.state == LocationState.unsupported);
+    final supported = location.state == LocationState.supported;
+    final title = switch (location) {
+      LocationGuard(checking: true) => 'Проверяю страну…',
+      _ when known =>
+        Platform.isMacOS
+            ? '${countryFlag(location.country!)} ${location.countryName}'
+            : location.countryName!,
+      LocationGuard(checkedAt: null) => 'Страна ещё не проверена',
+      _ => 'Страну определить не удалось',
     };
-    final details = [
-      if (country != null) 'Трафик Claude выпускается в стране «$country»',
-      if (location.checkedAt case final at? when killSwitch.armed)
-        'Проверено в ${_LocationCaption._clock(at)}',
-    ].join(' / ');
+    // Сработал — что случилось; время — в строке Kill Switch.
+    final details = switch (event) {
+      final event? => KillSwitch.describe(event),
+      null => _LocationCaption._checked(location),
+    };
+    final status = switch (event) {
+      final event? when state != null && !killSwitch.open =>
+        'Kill Switch сработал в ${_LocationCaption._clock(event.at)}',
+      _ => state?.short,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(
-              event != null ? AppIcons.shieldAlert : AppIcons.shield,
-              size: 22,
-              color: state?.color ?? p.muted,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Kill Switch',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
-            ),
-          ],
+        Text(
+          title,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
         ),
+        const SizedBox(height: 8),
+        if (known)
+          StatusDot(
+            label: supported ? 'Claude доступен' : 'Claude недоступен',
+            color: supported ? p.success : p.danger,
+          ),
         if (state != null) ...[
-          const SizedBox(height: 8),
-          StatusDot(label: state.label, color: state.color),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                event != null ? AppIcons.shieldAlert : AppIcons.shield,
+                size: 15,
+                color: state.color,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  status!,
+                  style: TextStyle(
+                    color: state.color,
+                    fontSize: 12.5,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
-        if (event != null) ...[
-          const SizedBox(height: 8),
-          Text(KillSwitch.describe(event), style: theme.textTheme.bodySmall),
-        ] else if (details.isNotEmpty) ...[
+        if (details.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text(details, style: theme.textTheme.bodySmall),
         ],
@@ -1253,10 +1308,7 @@ class _LocationCaption extends StatelessWidget {
     final theme = Theme.of(context);
     final p = context.palette;
     final checkedAt = location.checkedAt;
-    final checked = [
-      if (checkedAt != null) 'Проверено в ${_clock(checkedAt)}',
-      ?location.source,
-    ].join(' / ');
+    final checked = _checked(location);
 
     // Страна известна: флаг и название крупно, под ними — доступен ли Claude.
     if (location case LocationGuard(
@@ -1324,6 +1376,12 @@ class _LocationCaption extends StatelessWidget {
       ],
     );
   }
+
+  /// «Проверено в 12:33 @ Cloudflare»: когда и какой сервис ответил.
+  static String _checked(LocationGuard location) => [
+    if (location.checkedAt case final at?) 'Проверено в ${_clock(at)}',
+    ?location.source,
+  ].join(' @ ');
 
   static String _clock(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:'

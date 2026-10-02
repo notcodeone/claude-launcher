@@ -611,6 +611,9 @@ extension on SettingsSectionPage {
 }
 
 /// Версия и обновление: «ClaudeLauncher 1.4.0 · Последняя версия».
+/// Размер значков приложений в «Обновлениях»: лаунчера и Claude.
+const appIconSize = 48.0;
+
 /// Claude — рядом с версией лаунчера. Пока включён Kill Switch, его
 /// обновляет лаунчер ([ClaudeUpdates]); иначе Claude обновляется сам.
 class _ClaudeVersionCard extends StatelessWidget {
@@ -635,8 +638,8 @@ class _ClaudeVersionCard extends StatelessWidget {
               switch (updates.iconPath) {
                 final icon? => Image.file(
                   File(icon),
-                  width: 40,
-                  height: 40,
+                  width: appIconSize,
+                  height: appIconSize,
                   filterQuality: FilterQuality.medium,
                   errorBuilder: (_, _, _) => _placeholder(p),
                 ),
@@ -698,14 +701,21 @@ class _ClaudeVersionCard extends StatelessWidget {
     );
   }
 
-  static Widget _placeholder(Palette p) => Container(
-    width: 40,
-    height: 40,
-    decoration: BoxDecoration(
-      color: p.field,
-      borderRadius: BorderRadius.circular(10),
+  /// Пока значок Claude не найден — серая плитка того же размера, что
+  /// рисунок значка приложения.
+  static Widget _placeholder(Palette p) => SizedBox.square(
+    dimension: appIconSize,
+    child: Center(
+      child: Container(
+        width: appIconSize * 0.8,
+        height: appIconSize * 0.8,
+        decoration: BoxDecoration(
+          color: p.field,
+          borderRadius: BorderRadius.circular(appIconSize * 0.18),
+        ),
+        child: Icon(AppIcons.download, size: 20, color: p.text),
+      ),
     ),
-    child: Icon(AppIcons.download, size: 20, color: p.text),
   );
 
   Widget _status(BuildContext context) {
@@ -764,7 +774,6 @@ class _VersionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final p = context.palette;
     final updater = this.updater;
     final status = _status(context);
     final busy =
@@ -778,20 +787,14 @@ class _VersionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                padding: const EdgeInsets.all(9),
-                decoration: BoxDecoration(
-                  color: p.primary,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Image.asset(
-                  'assets/icon/mark.png',
-                  color: p.onPrimary,
-                  colorBlendMode: BlendMode.srcIn,
-                  filterQuality: FilterQuality.medium,
-                ),
+              // Значок приложения — тот же, что в Dock и Finder. Сетка как у
+              // значков macOS: рисунок занимает ~80% холста, поэтому рядом
+              // со значком Claude они одного размера.
+              Image.asset(
+                'assets/icon/app_icon.png',
+                width: appIconSize,
+                height: appIconSize,
+                filterQuality: FilterQuality.medium,
               ),
               const SizedBox(width: 12),
               Expanded(
