@@ -16,6 +16,7 @@ import 'claude_code_sessions.dart';
 import 'code_notifications.dart';
 import 'code_profile_resolver.dart';
 import 'notification_handoff.dart';
+import 'pending_code_events.dart';
 
 /// События Claude Code: подключение хуков, приём событий, сессии открытого
 /// профиля (показываются на его карточке) и уведомления о них вместо самих
@@ -31,8 +32,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     this.notifier,
     this.onOpenWindow,
     this.tickInterval = const Duration(seconds: 1),
+    this.metadataRetryInterval = const Duration(seconds: 2),
   }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser(),
        windowVisible = windowVisible ?? ValueNotifier(true) {
+    _previousParallelMode = launcher.parallelLaunch;
     launcher.addListener(_onLauncherChanged);
     this.windowVisible.addListener(_updateWatching);
     notifier?.onTap = _onNotificationTap;
@@ -61,6 +64,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
 
   /// Как часто обновлять время и токены работающих сессий.
   final Duration tickInterval;
+  final Duration metadataRetryInterval;
+  final _pending = PendingCodeEvents();
+  Timer? _metadataRetry;
+  bool? _previousParallelMode;
 
   ClaudeCodeEventServer? _server;
   Timer? _ticker;
@@ -204,6 +211,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
 
   Future<void> _disconnect() async {
     _eventGeneration++;
+    _clearPending();
     await _server?.stop();
     _server = null;
     _ticker?.cancel();
@@ -237,7 +245,42 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   Future<void> _handleEvent(ClaudeCodeEvent event, int generation) async {
     Profile? profile;
     if (launcher.parallelLaunch) {
-      final id = await profileResolver.resolve(event, {
+      final id = await _resolveProfile(event);
+      if (_disposed || generation != _eventGeneration) return;
+      profile = launcher.runningProfiles.where((p) => p.id == id).firstOrNull;
+    } else {
+      final running = launcher.runningProfiles;
+      profile = launcher.instances.length == 1 && running.length == 1
+          ? running.single
+          : null;
+    }
+    if (launcher.parallelLaunch) {
+      if (profile == null) {
+        _pending.add(event, _runningOwners, DateTime.now());
+        _scheduleMetadataRetry();
+      } else {
+        _replay(event, profile.id);
+      }
+    }
+    final before = sessions.byId(event.sessionId)?.state;
+    if (profile != null) {
+      sessions.handle(event, profile.id);
+      _notify();
+    }
+    await _showNotification(event, before, profile);
+    if (profile != null) await _refresh();
+  }
+
+  Map<String, Set<int>> get _runningOwners => {
+    for (final profile in launcher.runningProfiles)
+      profile.id: {
+        for (final instance in launcher.instances)
+          if (launcher.profileOf(instance)?.id == profile.id) instance.pid,
+      },
+  };
+
+  Future<String?> _resolveProfile(ClaudeCodeEvent event) =>
+      profileResolver.resolve(event, {
         for (final candidate in launcher.profiles)
           candidate.id: launcher.host.readableDataDirs(
             ClaudeInstance(
@@ -248,21 +291,60 @@ class ClaudeCodeIntegration extends ChangeNotifier {
             ),
           ),
       });
-      if (_disposed || generation != _eventGeneration) return;
-      profile = launcher.runningProfiles.where((p) => p.id == id).firstOrNull;
-    } else {
-      final running = launcher.runningProfiles;
-      profile = launcher.instances.length == 1 && running.length == 1
-          ? running.single
-          : null;
+
+  void _replay(ClaudeCodeEvent event, String profileId) {
+    _pending.expire(DateTime.now());
+    final pids = _runningOwners[profileId] ?? <int>{};
+    for (final entry in _pending.take(event.sessionId, event.hostSessionId)) {
+      if (entry.accepts(profileId, pids)) {
+        sessions.handle(entry.event, profileId);
+      }
     }
-    final before = sessions.byId(event.sessionId)?.state;
-    if (profile != null) {
-      sessions.handle(event, profile.id);
-      _notify();
+  }
+
+  void _clearPending() {
+    _pending.clear();
+    _metadataRetry?.cancel();
+    _metadataRetry = null;
+  }
+
+  void _scheduleMetadataRetry() {
+    if (_disposed || !connected || _pending.isEmpty || _metadataRetry != null) {
+      return;
     }
-    await _showNotification(event, before, profile);
-    if (profile != null) await _refresh();
+    _metadataRetry = Timer(metadataRetryInterval, () {
+      retryPendingMetadata().whenComplete(() {
+        _metadataRetry = null;
+        _scheduleMetadataRetry();
+      });
+    });
+  }
+
+  /// Serialized with incoming hooks; replay changes cards, never notifications.
+  @visibleForTesting
+  Future<void> retryPendingMetadata() {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          if (_disposed || generation != _eventGeneration) return;
+          if (!launcher.parallelLaunch) {
+            _clearPending();
+            return;
+          }
+          _pending.expire(DateTime.now());
+          final visited = <(String, String)>{};
+          for (final entry in _pending.entries) {
+            final event = entry.event;
+            if (!visited.add((event.sessionId, event.hostSessionId))) continue;
+            final id = await _resolveProfile(event);
+            if (_disposed || generation != _eventGeneration) return;
+            if (id != null) _replay(event, id);
+          }
+          await _refresh();
+        })
+        .catchError((Object error) {
+          debugPrint('Не удалось повторить события Code: ${error.runtimeType}');
+        });
   }
 
   Future<void> _showNotification(
@@ -378,6 +460,11 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   void _onLauncherChanged() {
+    if (_previousParallelMode != launcher.parallelLaunch) {
+      _previousParallelMode = launcher.parallelLaunch;
+      _eventGeneration++;
+      _clearPending();
+    }
     _prune();
     _updateWatching();
     // Claude открыли или закрыли, профиль добавили или убрали — сверяем,
@@ -450,6 +537,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _clearPending();
     launcher.removeListener(_onLauncherChanged);
     windowVisible.removeListener(_updateWatching);
     _ticker?.cancel();

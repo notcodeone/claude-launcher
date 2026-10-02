@@ -203,6 +203,100 @@ void main() {
     });
   });
 
+  test(
+    'parallel: delayed metadata replays in order without another hook',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('claude_replay');
+      addTearDown(() => dir.delete(recursive: true));
+      final host = ProfileMetadataHost(dir.path);
+      final launcher = LauncherController(
+        host: host,
+        store: ProfileStore(File('${dir.path}/profiles.json')),
+      );
+      await launcher.init();
+      addTearDown(launcher.dispose);
+      launcher.setParallelLaunch(true);
+      final first = launcher.profiles.single;
+      final second = await launcher.addProfile(name: 'Second');
+      host.start(null);
+      final secondInstance = host.start(launcher.dataDirOf(second));
+      await launcher.refresh();
+      final settings = AppSettings(File('${dir.path}/settings.json'));
+      await settings.load();
+      await settings.setEventsPort(0);
+      final notifier = FakeNotifier();
+      final hooks = ClaudeCodeHooks(File('${dir.path}/hooks.json'));
+      final integration = ClaudeCodeIntegration(
+        settings: settings,
+        launcher: launcher,
+        hooks: hooks,
+        notifier: notifier,
+        handoff: NotificationHandoff(
+          stateFile: File('${dir.path}/handoff.json'),
+          hooks: hooks,
+          samePath: host.samePath,
+        ),
+        metadataRetryInterval: const Duration(hours: 1),
+      );
+      addTearDown(integration.dispose);
+      await integration.setEnabled(true);
+      Future<void> send(String id, String kind) async {
+        await post(
+          settings.eventsPort,
+          {'hook_event_name': kind, 'session_id': id},
+          token: settings.eventsToken,
+          hostSession: 'local_$id',
+        );
+        await integration.pendingEvents;
+      }
+
+      Future<void> record(String root, String id) async {
+        final file = File(
+          '$root/claude-code-sessions/account/org/local_$id.json',
+        );
+        await file.parent.create(recursive: true);
+        await file.writeAsString(
+          jsonEncode({'sessionId': 'local_$id', 'cliSessionId': id}),
+        );
+      }
+
+      await send('delayed', 'UserPromptSubmit');
+      await send('delayed', 'Stop');
+      expect(integration.sessions.isEmpty, isTrue);
+      final notificationsBeforeReplay = List<String>.of(notifier.log);
+      expect(notificationsBeforeReplay, isNotEmpty);
+      await record(host.defaultDataDir, 'delayed');
+      await integration.retryPendingMetadata();
+      expect(
+        integration.sessions.of(first.id).single.state,
+        CodeSessionState.done,
+      );
+      expect(integration.sessions.of(second.id), isEmpty);
+      expect(notifier.log, notificationsBeforeReplay);
+      await send('ended', 'UserPromptSubmit');
+      await send('ended', 'SessionEnd');
+      await record(host.defaultDataDir, 'ended');
+      await integration.retryPendingMetadata();
+      expect(integration.sessions.byId('ended'), isNull);
+      // A process that starts after the event cannot inherit the old task.
+      await send('closed', 'Stop');
+      await record(launcher.dataDirOf(second), 'closed');
+      host.instances.remove(secondInstance);
+      host.start(launcher.dataDirOf(second));
+      await launcher.refresh();
+      await integration.retryPendingMetadata();
+      expect(integration.sessions.byId('closed'), isNull);
+      // Switching modes cancels pending replay, even when metadata arrives later.
+      await send('mode', 'Stop');
+      launcher.setParallelLaunch(false);
+      launcher.setParallelLaunch(true);
+      await record(host.defaultDataDir, 'mode');
+      await integration.retryPendingMetadata();
+      expect(integration.sessions.byId('mode'), isNull);
+      await integration.setEnabled(false);
+    },
+  );
+
   test('интеграция: включение, событие открытого профиля, выключение', () async {
     final dir = await Directory.systemTemp.createTemp('claude_launcher_int');
     addTearDown(() => dir.delete(recursive: true));
