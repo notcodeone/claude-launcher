@@ -631,15 +631,17 @@ class _ClaudeVersionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: p.field,
-                  borderRadius: BorderRadius.circular(10),
+              // Значок самого Claude — из установленного приложения.
+              switch (updates.iconPath) {
+                final icon? => Image.file(
+                  File(icon),
+                  width: 40,
+                  height: 40,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (_, _, _) => _placeholder(p),
                 ),
-                child: Icon(AppIcons.download, size: 20, color: p.text),
-              ),
+                null => _placeholder(p),
+              },
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -695,6 +697,16 @@ class _ClaudeVersionCard extends StatelessWidget {
       ),
     );
   }
+
+  static Widget _placeholder(Palette p) => Container(
+    width: 40,
+    height: 40,
+    decoration: BoxDecoration(
+      color: p.field,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Icon(AppIcons.download, size: 20, color: p.text),
+  );
 
   Widget _status(BuildContext context) {
     final p = context.palette;

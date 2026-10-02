@@ -75,12 +75,19 @@ class MacClaudeHost extends ClaudeHost {
 
   /// Распаковывает архив обновления, проверяет подпись — та же команда
   /// разработчика (Team ID), что у установленного Claude, — и меняет
-  /// приложение целиком. Старое удаляется, только когда новое на месте.
+  /// приложение целиком. Прежнее уходит во временную папку лаунчера, а не
+  /// остаётся рядом в «Программах»; если удалить его не вышло (например,
+  /// процесс Claude ещё держал файл), обновление всё равно состоялось —
+  /// остаток уберётся в следующий раз.
   @override
   Future<void> installUpdate(File package, String version) async {
     final appPath = _appPath ?? await locate();
     if (appPath == null) throw StateError('Claude не найден');
-    final work = await Directory.systemTemp.createTemp('claude-update');
+    final work = Directory(p.join(ClaudeHost.workDir.path, 'claude-install'));
+    await ClaudeHost.removeQuietly(work.path);
+    // Остаток прежних версий лаунчера, которые оставляли копию рядом.
+    await ClaudeHost.removeQuietly('$appPath.old');
+    await work.create(recursive: true);
     try {
       await _run('ditto', ['-x', '-k', package.path, work.path]);
       final fresh = p.join(work.path, 'Claude.app');
@@ -95,10 +102,7 @@ class MacClaudeHost extends ClaudeHost {
       if (team == null || team != await _teamId(appPath)) {
         throw StateError('Обновление подписано не тем же разработчиком');
       }
-      final old = '$appPath.old';
-      if (await Directory(old).exists()) {
-        await Directory(old).delete(recursive: true);
-      }
+      final old = p.join(work.path, 'Claude-old.app');
       await _run('mv', [appPath, old]);
       try {
         await _run('mv', [fresh, appPath]);
@@ -106,10 +110,56 @@ class MacClaudeHost extends ClaudeHost {
         await _run('mv', [old, appPath]);
         rethrow;
       }
-      await Directory(old).delete(recursive: true);
+      _icon = null;
     } finally {
-      await work.delete(recursive: true);
+      await ClaudeHost.removeQuietly(work.path);
     }
+  }
+
+  String? _icon;
+
+  /// Значок из бандла Claude (icns) — один раз переводим в PNG.
+  @override
+  Future<String?> iconPath() async {
+    if (_icon case final icon? when File(icon).existsSync()) return icon;
+    final appPath = _appPath ?? await locate();
+    if (appPath == null) return null;
+    final name = await _plistValue(appPath, 'CFBundleIconFile');
+    if (name == null) return null;
+    final icns = p.join(
+      appPath,
+      'Contents',
+      'Resources',
+      name.endsWith('.icns') ? name : '$name.icns',
+    );
+    if (!File(icns).existsSync()) return null;
+    final out = p.join(
+      ClaudeHost.workDir.path,
+      'claude-icon-${await _bundleVersion(appPath)}.png',
+    );
+    await ClaudeHost.workDir.create(recursive: true);
+    final result = await Process.run('sips', [
+      '-s',
+      'format',
+      'png',
+      icns,
+      '--resampleHeightWidthMax',
+      '128',
+      '--out',
+      out,
+    ]);
+    return result.exitCode == 0 ? _icon = out : null;
+  }
+
+  static Future<String?> _plistValue(String appPath, String key) async {
+    final result = await Process.run('plutil', [
+      '-extract',
+      key,
+      'raw',
+      p.join(appPath, 'Contents', 'Info.plist'),
+    ]);
+    final value = (result.stdout as String).trim();
+    return result.exitCode == 0 && value.isNotEmpty ? value : null;
   }
 
   static Future<String?> _bundleVersion(String appPath) async {

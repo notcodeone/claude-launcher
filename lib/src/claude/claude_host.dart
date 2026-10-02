@@ -92,6 +92,30 @@ abstract class ClaudeHost {
   Future<void> installUpdate(File package, String version) =>
       throw UnsupportedError('Обновлять Claude здесь лаунчер не умеет');
 
+  /// Значок установленного Claude — PNG; `null` — не нашёлся.
+  Future<String?> iconPath() async => null;
+
+  /// Папка лаунчера во временных файлах: загрузка обновления Claude и его
+  /// распаковка. Одна на всё — после ошибки там не копятся копии.
+  static Directory get workDir =>
+      Directory(p.join(Directory.systemTemp.path, 'ClaudeLauncher'));
+
+  /// Удаляет [path] без ошибок: если не вышло, уберём в следующий раз.
+  static Future<void> removeQuietly(String path) async {
+    try {
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type == FileSystemEntityType.notFound) return;
+      if (!Platform.isWindows) {
+        // rm -rf надёжнее рекурсивного delete на больших бандлах.
+        await Process.run('rm', ['-rf', path]);
+      } else {
+        await Directory(path).delete(recursive: true);
+      }
+    } catch (_) {
+      // Временная папка — уберём при следующем обновлении.
+    }
+  }
+
   /// Kill Switch: немедленно завершает Claude со всеми его процессами — и
   /// Claude Code, который он запустил: дочерние процессы при резком
   /// завершении родителя иначе остались бы работать.

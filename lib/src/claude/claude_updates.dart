@@ -66,7 +66,13 @@ class ClaudeUpdates extends ChangeNotifier {
     this.checkEvery = const Duration(hours: 2),
     this.feedBase = 'https://api.anthropic.com/api/desktop',
     @visibleForTesting this.downloadOverride,
+    @visibleForTesting this._cacheDir,
   });
+
+  final Directory? _cacheDir;
+
+  /// Значок установленного Claude (PNG) — для карточки в «Обновлениях».
+  String? iconPath;
 
   final ClaudeHost host;
   final LauncherController launcher;
@@ -113,6 +119,17 @@ class ClaudeUpdates extends ChangeNotifier {
     settings.addListener(_maybeCheck);
     _timer = Timer.periodic(const Duration(minutes: 10), (_) => _maybeCheck());
     _maybeCheck();
+    unawaited(_loadIcon());
+  }
+
+  Future<void> _loadIcon() async {
+    try {
+      iconPath = await host.iconPath();
+      installed ??= await host.installedVersion();
+      notifyListeners();
+    } catch (error) {
+      debugPrint('Не удалось найти значок Claude: $error');
+    }
   }
 
   @override
@@ -125,9 +142,11 @@ class ClaudeUpdates extends ChangeNotifier {
 
   void _maybeCheck() {
     if (!active) {
-      // Kill Switch выключен — Claude снова обновляется сам.
+      // Kill Switch выключен — Claude снова обновляется сам; скачанное
+      // лаунчером больше не понадобится.
       if (available != null && !busy) {
         available = null;
+        unawaited(ClaudeHost.removeQuietly(cacheDir.path));
         notifyListeners();
       }
       return;
@@ -195,10 +214,8 @@ class ClaudeUpdates extends ChangeNotifier {
     phase = ClaudeUpdatePhase.downloading;
     progress = 0;
     notifyListeners();
-    final work = await Directory.systemTemp.createTemp('claude-download');
     try {
-      final package = File(p.join(work.path, p.basename(release.url.path)));
-      await _download(release, package);
+      final package = await _cachedPackage(release);
 
       phase = ClaudeUpdatePhase.installing;
       progress = null;
@@ -215,23 +232,72 @@ class ClaudeUpdates extends ChangeNotifier {
         );
       }
       await host.installUpdate(package, release.version);
+      // Поставили — загрузка больше не нужна.
+      await ClaudeHost.removeQuietly(cacheDir.path);
       installed = release.version;
+      iconPath = await host.iconPath();
       available = null;
       phase = ClaudeUpdatePhase.idle;
       notifyListeners();
       if (reopen.isNotEmpty) await launcher.switchTo(reopen.first);
     } catch (e) {
-      error = '$e';
+      // Без имени класса исключения: «Claude не закрылся — …», а не
+      // «Bad state: …».
+      error = switch (e) {
+        StateError(:final message) => message,
+        FileSystemException(:final message, :final path?) => '$message: $path',
+        ProcessException(:final message) when message.isNotEmpty => message,
+        _ => '$e',
+      };
       phase = ClaudeUpdatePhase.failed;
       notifyListeners();
     } finally {
       progress = null;
-      try {
-        await work.delete(recursive: true);
-      } on FileSystemException {
-        // Временная папка — уберёт система.
+    }
+  }
+
+  /// Папка загрузки: в ней не больше одного архива — той версии, что
+  /// ставим. После ошибки архив остаётся, и повторная попытка не качает его
+  /// снова; после установки папка удаляется.
+  Directory get cacheDir =>
+      _cacheDir ?? Directory(p.join(ClaudeHost.workDir.path, 'claude-update'));
+
+  /// Готовый к установке архив [release]: уже скачанный и проверенный — или
+  /// скачанный сейчас. Всё остальное в папке загрузки удаляется.
+  Future<File> _cachedPackage(ClaudeRelease release) async {
+    final dir = cacheDir;
+    await dir.create(recursive: true);
+    final file = File(p.join(dir.path, p.basename(release.url.path)));
+    await for (final entity in dir.list()) {
+      if (entity.path != file.path) {
+        await ClaudeHost.removeQuietly(entity.path);
       }
     }
+    // Архив появляется под своим именем, только когда скачан целиком.
+    if (await file.exists() && await _matches(file, release)) {
+      progress = 1;
+      notifyListeners();
+      return file;
+    }
+    final part = File('${file.path}.part');
+    try {
+      await _download(release, part);
+      if (!await _matches(part, release)) {
+        throw StateError('Скачанный архив повреждён: не сошлась сумма');
+      }
+      return await part.rename(file.path);
+    } finally {
+      if (await part.exists()) await part.delete();
+    }
+  }
+
+  /// Сумма из ленты (на macOS). Без неё (Windows) — архив цел, раз скачан
+  /// до конца, а подпись пакета проверит сама система при установке.
+  static Future<bool> _matches(File file, ClaudeRelease release) async {
+    final expected = release.sha256;
+    if (expected == null) return true;
+    return '${await sha256.bind(file.openRead()).first}' ==
+        expected.toLowerCase();
   }
 
   /// Скачивает [release] в [file]. Затвор закрылся — сеть сменилась, и
@@ -273,12 +339,6 @@ class ClaudeUpdates extends ChangeNotifier {
         }
       } finally {
         await sink.close();
-      }
-      final expected = release.sha256;
-      if (expected != null &&
-          '${await sha256.bind(file.openRead()).first}' !=
-              expected.toLowerCase()) {
-        throw StateError('Скачанный архив повреждён: не сошлась сумма');
       }
     } on SocketException {
       if (!killSwitch.open) {

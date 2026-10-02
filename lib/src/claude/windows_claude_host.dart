@@ -116,6 +116,40 @@ class WindowsClaudeHost extends ClaudeHost {
     return _installation?.version;
   }
 
+  /// Значок — логотип пакета MSIX из его манифеста. Файлы лежат с
+  /// пометкой масштаба (`Square150x150Logo.scale-200.png`) — берём самый
+  /// крупный.
+  @override
+  Future<String?> iconPath() async {
+    if (_installation == null) await locate();
+    final root = _installation?.root;
+    if (root == null) return null;
+    try {
+      final manifest = await File(
+        p.join(root, 'AppxManifest.xml'),
+      ).readAsString();
+      final logo =
+          RegExp(
+            r'Square150x150Logo="([^"]+)"',
+          ).firstMatch(manifest)?.group(1) ??
+          RegExp(r'<Logo>([^<]+)</Logo>').firstMatch(manifest)?.group(1);
+      if (logo == null) return null;
+      final path = p.join(root, logo.replaceAll('/', r'\'));
+      if (File(path).existsSync()) return path;
+      final dir = Directory(p.dirname(path));
+      final stem = p.basenameWithoutExtension(path).toLowerCase();
+      final variants = [
+        for (final file in dir.listSync().whereType<File>())
+          if (p.basename(file.path).toLowerCase().startsWith('$stem.') &&
+              file.path.toLowerCase().endsWith('.png'))
+            file,
+      ]..sort((a, b) => b.lengthSync().compareTo(a.lengthSync()));
+      return variants.isEmpty ? null : variants.first.path;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
   /// Пакет MSIX ставит сама Windows: она же проверяет подпись Anthropic.
   ///
   /// PowerShell — отдельным процессом без консоли (detached): иначе у
@@ -236,6 +270,7 @@ class WindowsClaudeHost extends ClaudeHost {
       appId: appId ?? 'Claude',
       version: package.version.join('.'),
       architecture: package.architecture,
+      root: root,
     );
   }
 
@@ -584,6 +619,7 @@ class _Installation {
     this.appId,
     this.version,
     this.architecture,
+    this.root,
   });
 
   final String exe;
@@ -596,6 +632,9 @@ class _Installation {
   /// Архитектура пакета: лаунчер собран под x64 и на ARM работает в
   /// эмуляции, поэтому берём её у самого Claude, а не у себя.
   final String? architecture;
+
+  /// Папка пакета MSIX — в ней манифест и логотипы.
+  final String? root;
 
   String? get aumid =>
       familyName != null && appId != null ? '$familyName!$appId' : null;

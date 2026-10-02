@@ -17,6 +17,9 @@ class UpdatableHost extends FakeHost {
   String version = '2.100.0';
   List<int>? installedBytes;
 
+  /// Сколько раз установка ещё сорвётся.
+  int failures = 0;
+
   @override
   String get updateFeed => 'darwin/universal/squirrel';
 
@@ -25,6 +28,10 @@ class UpdatableHost extends FakeHost {
 
   @override
   Future<void> installUpdate(File package, String version) async {
+    if (failures > 0) {
+      failures--;
+      throw const FileSystemException('Directory not empty');
+    }
     installedBytes = await package.readAsBytes();
     this.version = version;
   }
@@ -70,11 +77,13 @@ void main() {
     late Map<String, String> query;
     late List<int> archive;
     late String? sha;
+    late int downloads;
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('claude_updates');
       archive = List<int>.generate(100000, (i) => i % 251);
       sha = '${sha256.convert(archive)}';
+      downloads = 0;
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((request) async {
         if (request.uri.path.endsWith('/update')) {
@@ -90,6 +99,7 @@ void main() {
             ),
           );
         } else {
+          downloads++;
           request.response.add(archive);
         }
         await request.response.close();
@@ -132,6 +142,7 @@ void main() {
       settings: settings,
       feedBase: 'http://127.0.0.1:${server.port}/api/desktop',
       downloadOverride: Uri.parse('http://127.0.0.1:${server.port}/Claude.zip'),
+      cacheDir: Directory('${dir.path}/cache'),
     );
 
     test('находит новую версию со случайным device_id', () async {
@@ -169,6 +180,49 @@ void main() {
       await u.install();
       expect(u.phase, ClaudeUpdatePhase.failed);
       expect(host.installedBytes, isNull);
+    });
+
+    test('ошибка установки — повтор не качает архив заново', () async {
+      final u = updates();
+      await u.check();
+      host.failures = 1;
+      await u.install();
+      expect(u.phase, ClaudeUpdatePhase.failed);
+      expect(downloads, 1);
+      // Архив ждёт повтора — один, без копий.
+      final cached = Directory('${dir.path}/cache').listSync();
+      expect(cached, hasLength(1));
+      expect(cached.single.path, endsWith('Claude.zip'));
+
+      await u.install();
+      expect(u.error, isNull);
+      expect(downloads, 1);
+      expect(host.installedBytes, archive);
+      // Поставили — папка загрузки убрана.
+      expect(Directory('${dir.path}/cache').existsSync(), isFalse);
+    });
+
+    test('остатки прежних загрузок удаляются', () async {
+      final cache = Directory('${dir.path}/cache')..createSync();
+      File('${cache.path}/Claude-old.zip').writeAsBytesSync([1, 2, 3]);
+      File('${cache.path}/Claude.zip.part').writeAsBytesSync([4, 5]);
+      final u = updates();
+      await u.check();
+      host.failures = 1;
+      await u.install();
+      expect(cache.listSync().map((e) => e.path.split('/').last), [
+        'Claude.zip',
+      ]);
+    });
+
+    test('испорченный архив в папке не ставится — качается заново', () async {
+      final cache = Directory('${dir.path}/cache')..createSync();
+      File('${cache.path}/Claude.zip').writeAsBytesSync([9, 9, 9]);
+      final u = updates();
+      await u.check();
+      await u.install();
+      expect(downloads, 1);
+      expect(host.installedBytes, archive);
     });
   });
 }
