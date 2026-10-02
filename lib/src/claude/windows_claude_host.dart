@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:win32/win32.dart';
 import 'package:win32_registry/win32_registry.dart';
@@ -152,24 +153,111 @@ class WindowsClaudeHost extends ClaudeHost {
 
   /// Пакет MSIX ставит сама Windows: она же проверяет подпись Anthropic.
   ///
-  /// PowerShell — отдельным процессом без консоли (detached): иначе у
-  /// лаунчера, у которого консоли нет, мелькнуло бы окно, а PowerShell мог бы
-  /// ждать ввода. Кода выхода у такого процесса нет — итог он печатает сам.
-  /// Claude к этому моменту закрыт, поэтому зависнуть установка не должна:
-  /// не больше 10 минут.
+  /// В пакете Claude — служба (машина Cowork, `packagedServices`), а такие
+  /// пакеты Windows обычно ставит только с правами администратора. Поэтому
+  /// сначала — обычная установка, а если Windows отказала — та же, но с
+  /// повышением прав: Windows спросит разрешение (UAC).
+  ///
+  /// Установку делает сценарий PowerShell из файла (`-ExecutionPolicy
+  /// Bypass`: политика по умолчанию запрещает сценарии), итог он пишет в
+  /// файл — у процесса с повышенными правами вывод не прочитать. PowerShell —
+  /// без консоли (detached), чтобы не мелькало окно. Claude к этому моменту
+  /// закрыт; на каждую попытку — не больше 10 минут.
   @override
   Future<void> installUpdate(File package, String version) async {
-    final path = package.path.replaceAll("'", "''");
+    final work = Directory(p.join(ClaudeHost.workDir.path, 'claude-install'));
+    await ClaudeHost.removeQuietly(work.path);
+    await work.create(recursive: true);
+    try {
+      final result = File(p.join(work.path, 'result.txt'));
+      final script = File(p.join(work.path, 'install.ps1'));
+      await script.writeAsString(
+        installScript(package: package.path, result: result.path),
+      );
+
+      // Журнал попыток — рядом, во временной папке лаунчера: по нему видно,
+      // что ответила Windows, если обновление не встало.
+      final log = File(p.join(ClaudeHost.workDir.path, 'claude-install.log'));
+      await log.writeAsString(
+        '${DateTime.now()} Claude $version: ${package.path}\n',
+      );
+      var outcome = await _runInstall(script, result, log, elevated: false);
+      if (!await _installed(version)) {
+        final first = outcome;
+        outcome = await _runInstall(script, result, log, elevated: true);
+        if (!await _installed(version)) {
+          throw StateError(
+            'Windows не поставила пакет Claude: $outcome'
+            '${first == outcome ? '' : ' (без прав администратора: $first)'}. '
+            'Подробности — в ${log.path}',
+          );
+        }
+      }
+    } finally {
+      await ClaudeHost.removeQuietly(work.path);
+    }
+  }
+
+  /// Сценарий установки: итог — «OK» или «ERROR: …» — в файле [result].
+  @visibleForTesting
+  static String installScript({
+    required String package,
+    required String result,
+  }) {
+    String quote(String value) => "'${value.replaceAll("'", "''")}'";
+    return [
+      r"$ProgressPreference = 'SilentlyContinue'",
+      r"$ErrorActionPreference = 'Stop'",
+      'try {',
+      '  Add-AppxPackage -Path ${quote(package)} -ForceApplicationShutdown',
+      "  'OK' | Out-File -Encoding utf8 ${quote(result)}",
+      '} catch {',
+      r"  ('ERROR: ' + $_.Exception.Message) | Out-File -Encoding utf8 "
+          '${quote(result)}',
+      '}',
+      '',
+    ].join('\r\n');
+  }
+
+  /// Команда запуска сценария [script]. [elevated] — с правами
+  /// администратора: через `Start-Process -Verb RunAs`, Windows спросит
+  /// разрешение. Путь — в кавычках внутри одной строки: Start-Process
+  /// склеивает аргументы через пробел, а в пути к временной папке бывают
+  /// пробелы.
+  @visibleForTesting
+  static String launchCommand(String script, {required bool elevated}) {
+    final file = script.replaceAll("'", "''");
+    if (!elevated) return "& '$file'";
+    return "try { Start-Process powershell.exe -Verb RunAs -Wait "
+        "-WindowStyle Hidden -ArgumentList '-NoProfile -NonInteractive "
+        "-ExecutionPolicy Bypass -File \"$file\"' } catch { 'ERROR: ' + "
+        r"$_.Exception.Message }";
+  }
+
+  /// Запускает сценарий и ждёт его. Возвращает текст итога — для сообщения
+  /// об ошибке.
+  static Future<String> _runInstall(
+    File script,
+    File result,
+    File log, {
+    required bool elevated,
+  }) async {
+    if (await result.exists()) await result.delete();
     final process = await Process.start('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
       '-InputFormat',
       'None',
       '-Command',
-      "try { Add-AppxPackage -Path '$path' -ForceApplicationShutdown "
-          "-ErrorAction Stop; 'OK' } catch { 'ERROR: ' + "
-          r"$_.Exception.Message }",
+      launchCommand(script.path, elevated: elevated),
     ], mode: ProcessStartMode.detachedWithStdio);
+    // Ошибки PowerShell (например, не запустился сценарий) — в stderr.
+    final errors = process.stderr
+        .transform(const SystemEncoding().decoder)
+        .join()
+        .catchError((Object _) => '');
     final output = await process.stdout
         .transform(const SystemEncoding().decoder)
         .join()
@@ -180,18 +268,43 @@ class WindowsClaudeHost extends ClaudeHost {
             return 'ERROR: установка не закончилась за 10 минут';
           },
         );
+    final stderr = await errors.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => '',
+    );
+    final written = await result.exists()
+        ? lastLine(await result.readAsString())
+        : '';
+    await log.writeAsString(
+      '--- ${elevated ? 'с правами администратора' : 'обычная'}\n'
+      'итог: $written\nвывод: ${output.trim()}\nошибки: ${stderr.trim()}\n',
+      mode: FileMode.append,
+    );
+    final text = written.isNotEmpty
+        ? written
+        : lastLine(output).isNotEmpty
+        ? lastLine(output)
+        : lastLine(stderr);
+    return switch (text) {
+      '' when elevated => 'разрешение администратора не получено',
+      '' => 'нет ответа',
+      final text => text.replaceFirst(RegExp(r'^ERROR:\s*'), ''),
+    };
+  }
+
+  /// Последняя непустая строка вывода, без метки порядка байтов UTF-8.
+  @visibleForTesting
+  static String lastLine(String text) => text
+      .replaceAll('﻿', '')
+      .trim()
+      .split('\n')
+      .map((line) => line.trim())
+      .lastWhere((line) => line.isNotEmpty, orElse: () => '');
+
+  Future<bool> _installed(String version) async {
     await locate();
     final installed = _installation?.version;
-    if (installed == null || !_atLeast(installed, version)) {
-      final error = output
-          .trim()
-          .split('\n')
-          .lastWhere(
-            (line) => line.trim().isNotEmpty,
-            orElse: () => 'нет ответа',
-          );
-      throw StateError('Windows не поставила пакет Claude: ${error.trim()}');
-    }
+    return installed != null && _atLeast(installed, version);
   }
 
   static bool _atLeast(String installed, String version) {
