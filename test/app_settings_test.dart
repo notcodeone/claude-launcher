@@ -74,6 +74,17 @@ void main() {
     },
   );
 
+  test('параллельный режим выключен по умолчанию и сохраняется', () async {
+    final file = File('${dir.path}/settings.json');
+    final settings = AppSettings(file);
+    await settings.load();
+    expect(settings.parallelLaunch, isFalse);
+    await settings.setParallelLaunch(true);
+    final reloaded = AppSettings(file);
+    await reloaded.load();
+    expect(reloaded.parallelLaunch, isTrue);
+  });
+
   test('повреждённый файл не ломает запуск', () async {
     final file = File('${dir.path}/settings.json')
       ..writeAsStringSync('{не json');

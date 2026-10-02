@@ -157,6 +157,97 @@ void main() {
     expect(saved.lastLaunchedAt, isNotNull);
   });
 
+  group('параллельный запуск', () {
+    setUp(() => launcher.setParallelLaunch(true));
+
+    test(
+      'сохраняет открытый и неизвестный профили, запускает с защитой',
+      () async {
+        final first = host.start(null);
+        final unknown = host.start('/outside');
+        launcher.launchGuard = ({required strict}) async =>
+            host.calls.add('guard');
+        launcher.beforeLaunch = (dir) async => host.calls.add('prepare $dir');
+        await launcher.switchTo(personal);
+        expect(host.calls, [
+          'guard',
+          'prepare /support/Claude-Lichnyy',
+          'launch /support/Claude-Lichnyy',
+        ]);
+        expect(host.instances, containsAll([first, unknown]));
+        expect(launcher.runningProfiles, hasLength(2));
+      },
+    );
+
+    test('показ и закрытие адресованы только выбранному профилю', () async {
+      final first = host.start(null);
+      final second = host.start(launcher.dataDirOf(personal));
+      await launcher.switchTo(work);
+      expect(host.calls, ['activate ${first.pid}']);
+      await launcher.close(personal);
+      expect(host.calls.last, 'quit ${second.pid}');
+      expect(host.instances, [first]);
+    });
+
+    test(
+      'отказ защиты и ошибка подготовки сохраняют соседний профиль',
+      () async {
+        final first = host.start(null);
+        launcher.launchGuard = ({required strict}) async =>
+            throw const LaunchBlocked('blocked');
+        await launcher.switchTo(personal);
+        expect(host.instances, [first]);
+        expect(host.calls, isEmpty);
+        launcher.launchGuard = null;
+        launcher.beforeLaunch = (_) async => throw StateError('prepare failed');
+        await launcher.switchTo(personal);
+        expect(host.instances, [first]);
+        expect(host.calls, isEmpty);
+        expect(launcher.lastError, contains('prepare failed'));
+      },
+    );
+
+    test('два быстрых нажатия не создают дубликат', () async {
+      await Future.wait([
+        launcher.switchTo(personal),
+        launcher.switchTo(personal),
+      ]);
+      expect(host.instances, hasLength(1));
+      expect(host.calls, ['launch /support/Claude-Lichnyy']);
+    });
+
+    test(
+      'не отправляет неоднозначную ссылку; один экземпляр получает её',
+      () async {
+        final first = host.start(null);
+        final second = host.start(launcher.dataDirOf(personal));
+        final link = Uri.parse('claude://claude.ai/epitaxy/local_test');
+        await launcher.openLink(personal, link);
+        expect(host.calls, isEmpty);
+        expect(
+          launcher.lastError,
+          contains('Переход к сессии пока недоступен'),
+        );
+        host.instances.remove(first);
+        await launcher.openLink(personal, link);
+        expect(host.calls, ['link ${second.pid} $link']);
+      },
+    );
+
+    test(
+      'выключение не закрывает процессы до следующего переключения',
+      () async {
+        final first = host.start(null);
+        host.start(launcher.dataDirOf(personal));
+        launcher.setParallelLaunch(false);
+        expect(host.instances, hasLength(2));
+        await launcher.switchTo(personal);
+        expect(host.calls.first, 'quit ${first.pid}');
+        expect(host.instances, hasLength(1));
+      },
+    );
+  });
+
   test('если Claude не запущен, профиль просто запускается', () async {
     await launcher.switchTo(personal);
 

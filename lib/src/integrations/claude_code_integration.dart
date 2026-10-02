@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -208,13 +209,25 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     _notify();
   }
 
-  /// Одновременно открыт один профиль — событие относится к нему.
+  /// Обычный режим сохраняет историческую привязку к единственному профилю.
+  /// В параллельном режиме обновляем только ранее опознанные сессии.
   /// Состояние (и точка на свёрнутой карточке) меняется сразу, а переписку
   /// дочитываем, только если время и токены сейчас видны. Уведомляем и без
   /// открытого профиля: сессия может идти в терминале.
   Future<void> _onEvent(ClaudeCodeEvent event) async {
     final running = launcher.runningProfiles;
-    final profile = running.length == 1 ? running.single : null;
+    final knownId = sessions.byId(event.sessionId)?.profileId;
+    final known = running.where((p) => p.id == knownId).firstOrNull;
+    // Уже известная сессия сохраняет профиль при открытии соседнего. Новое
+    // неоднозначное событие не присваиваем случайной карточке, даже если
+    // остался один экземпляр: событие может запоздать от закрытого соседа.
+    final profile =
+        known ??
+        (!launcher.parallelLaunch &&
+                launcher.instances.length == 1 &&
+                running.length == 1
+            ? running.single
+            : null);
     final before = sessions.byId(event.sessionId)?.state;
     if (profile != null) {
       sessions.handle(event, profile.id);
@@ -260,7 +273,12 @@ class ClaudeCodeIntegration extends ChangeNotifier {
         id: id,
         title: title,
         body: body,
-        payload: event.hostSessionId,
+        payload: event.hostSessionId.isEmpty || profile == null
+            ? ''
+            : jsonEncode({
+                'profileId': profile.id,
+                'hostSessionId': event.hostSessionId,
+              }),
       );
       _shown.add(event.sessionId);
     } catch (e) {
@@ -294,14 +312,29 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     }
   }
 
-  void _onNotificationTap(String hostSessionId) {
-    final link = CodeSession.linkFor(hostSessionId);
-    final running = launcher.runningProfiles;
-    if (link != null && running.length == 1) {
-      launcher.openLink(running.single, link);
-    } else {
-      onOpenWindow?.call();
+  void _onNotificationTap(String payload) {
+    // Профиль фиксируется в момент уведомления. После закрытия профиля,
+    // перезапуска лаунчера или смены активного аккаунта не открываем чужой.
+    try {
+      final target = jsonDecode(payload);
+      if (target is Map<String, dynamic>) {
+        final id = target['profileId'];
+        final sessionId = target['hostSessionId'];
+        final profile = launcher.runningProfiles
+            .where((p) => p.id == id)
+            .firstOrNull;
+        final link = sessionId is String
+            ? CodeSession.linkFor(sessionId)
+            : null;
+        if (profile != null && link != null) {
+          launcher.openLink(profile, link);
+          return;
+        }
+      }
+    } on FormatException {
+      // Старое уведомление без профиля: безопасно открыть список профилей.
     }
+    onOpenWindow?.call();
   }
 
   /// Время и токены видны, только когда окно открыто, а карточка профиля

@@ -246,7 +246,15 @@ class ClaudeUpdates extends ChangeNotifier {
       available = null;
       phase = ClaudeUpdatePhase.idle;
       notifyListeners();
-      if (reopen.isNotEmpty) await launcher.switchTo(reopen.first);
+      for (final profile in launcher.parallelLaunch ? reopen : reopen.take(1)) {
+        await launcher.switchTo(profile);
+        if (launcher.lastError != null) {
+          throw StateError(
+            'Claude обновлён, но профиль «${profile.name}» '
+            'не восстановлен: ${launcher.lastError}',
+          );
+        }
+      }
     } catch (e) {
       // Без имени класса исключения: «Claude не закрылся — …», а не
       // «Bad state: …».

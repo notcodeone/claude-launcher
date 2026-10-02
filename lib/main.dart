@@ -83,6 +83,10 @@ Future<void> main(List<String> args) async {
   );
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  launcher.setParallelLaunch(settings.parallelLaunch);
+  settings.addListener(
+    () => launcher.setParallelLaunch(settings.parallelLaunch),
+  );
   // Страну узнаём сразу, пока грузится остальное: к запуску профиля по
   // умолчанию ответ обычно уже готов.
   final location = LocationGuard(settings: settings);

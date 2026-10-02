@@ -247,6 +247,34 @@ void main() {
       await send('Stop');
       expect(session.state, CodeSessionState.done);
 
+      launcher.setParallelLaunch(true);
+      final other = await launcher.addProfile(name: 'Другой');
+      final otherInstance = host.start(launcher.dataDirOf(other));
+      await launcher.refresh();
+      await send('UserPromptSubmit');
+      expect(
+        integration.sessions.of(profile.id).single.state,
+        CodeSessionState.working,
+      );
+      await post(
+        port,
+        {'hook_event_name': 'UserPromptSubmit', 'session_id': 'unknown'},
+        token: settings.eventsToken,
+        hostSession: 'local_unknown',
+      );
+      expect(integration.sessions.byId('unknown'), isNull);
+      expect(integration.sessions.of(other.id), isEmpty);
+      host.instances.remove(otherInstance);
+      await launcher.refresh();
+      await post(
+        port,
+        {'hook_event_name': 'UserPromptSubmit', 'session_id': 'late_unknown'},
+        token: settings.eventsToken,
+        hostSession: 'local_other_closed',
+      );
+      expect(integration.sessions.byId('late_unknown'), isNull);
+      launcher.setParallelLaunch(false);
+
       // Пока окно закрыто, переписку не читаем; открыли — сразу догоняем.
       final transcript = File('${dir.path}/s2.jsonl')..writeAsStringSync('');
       windowVisible.value = false;
@@ -389,7 +417,11 @@ void main() {
     await send('UserPromptSubmit');
     await send('Stop');
     expect(notifier.log.single, startsWith('show demo: Готово за '));
-    expect(notifier.log.single, endsWith('[local_abc]'));
+    final target = jsonEncode({
+      'profileId': profile.id,
+      'hostSessionId': 'local_abc',
+    });
+    expect(notifier.log.single, endsWith('[$target]'));
     await send('Notification', type: 'idle_prompt');
     expect(notifier.log, hasLength(1), reason: 'о готовом уже сказали');
     expect(
@@ -408,7 +440,7 @@ void main() {
     host.frontmostPid = null;
 
     // Нажатие открывает сессию в Claude, без ссылки — окно лаунчера.
-    notifier.onTap!('local_abc');
+    notifier.onTap!(target);
     notifier.onTap!('');
     await Future<void>.delayed(Duration.zero);
     expect(
@@ -418,6 +450,18 @@ void main() {
       ),
     );
     expect(opened, ['window']);
+
+    // Уведомление прежнего профиля не открывается в оставшемся другом.
+    host.calls.clear();
+    host.instances.clear();
+    final other = await launcher.addProfile(name: 'Другой');
+    host.start(launcher.dataDirOf(other));
+    await launcher.refresh();
+    notifier.onTap!(target);
+    notifier.onTap!('local_legacy');
+    await Future<void>.delayed(Duration.zero);
+    expect(host.calls, isEmpty);
+    expect(opened, ['window', 'window', 'window']);
 
     // Система запретила уведомления лаунчеру — уведомляет сам Claude.
     notifier.permitted = false;

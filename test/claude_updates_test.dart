@@ -172,6 +172,20 @@ void main() {
       expect(u.available, isNull);
     });
 
+    test('после обновления восстанавливает все параллельные профили', () async {
+      launcher.setParallelLaunch(true);
+      final personal = await launcher.addProfile(name: 'Личный');
+      host.start(null);
+      host.start(launcher.dataDirOf(personal));
+      await launcher.refresh();
+      final u = updates();
+      await u.check();
+      await u.install();
+      expect(u.error, isNull);
+      expect(launcher.runningProfiles, hasLength(2));
+      expect(host.calls.where((c) => c.startsWith('launch ')), hasLength(2));
+    });
+
     test('сумма не сошлась — не ставит', () async {
       final u = updates();
       await u.check();

@@ -557,6 +557,22 @@ class SettingsSectionPage extends StatelessWidget {
       _Card(
         rows: [
           SettingSwitchRow(
+            title: 'Параллельные профили — тест',
+            description:
+                'Открывает несколько профилей, сохраняя уже запущенные. '
+                'Для входа оставьте открытым только нужный профиль. '
+                'Переходы к сессиям при нескольких профилях отключены; '
+                'события Code без подтверждённого профиля не появляются '
+                'на карточках. Одновременный Cowork ещё не проверен. '
+                'После выключения следующий выбор профиля снова закроет остальные.',
+            value: settings.parallelLaunch,
+            onChanged: settings.setParallelLaunch,
+          ),
+        ],
+      ),
+      _Card(
+        rows: [
+          SettingSwitchRow(
             title: 'Лимиты профиля',
             description:
                 'Кнопка с графиками на открытом профиле: сколько использовано '

@@ -495,6 +495,15 @@ class HomePage extends StatelessWidget {
   List<Widget> _banners(BuildContext context) {
     final status = launcher.switchStatus;
     return [
+      if (settings.parallelLaunch)
+        const NoticeRow(
+          icon: AppIcons.experiments,
+          tone: NoticeTone.neutral,
+          title: 'Параллельные профили — тест',
+          detail:
+              'Для входа оставьте один профиль. Переходы к сессиям при '
+              'нескольких профилях отключены. Code и Cowork требуют проверки.',
+        ),
       // Ход проверки и переключения — в шапке (headerStatus); строка — только
       // когда Claude не закрылся сам и нужен выбор пользователя.
       if (status != null && status.phase == SwitchPhase.waitingForUser)

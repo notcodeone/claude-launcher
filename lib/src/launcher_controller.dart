@@ -78,6 +78,17 @@ class LauncherController extends ChangeNotifier {
   /// Экземпляры, которые сейчас закрываются (см. [forceClose]).
   Set<int> _closingPids = {};
   bool _disposed = false;
+  bool _operating = false;
+  bool _parallelLaunch = false;
+
+  bool get parallelLaunch => _parallelLaunch;
+
+  /// Изменение режима само по себе не закрывает ни одного экземпляра.
+  void setParallelLaunch(bool enabled) {
+    if (_parallelLaunch == enabled) return;
+    _parallelLaunch = enabled;
+    _notify();
+  }
 
   Future<void> init() async {
     profiles = await store.load();
@@ -151,11 +162,12 @@ class LauncherController extends ChangeNotifier {
   // ------------------------------------------------------------ переключение
 
   /// Закрывает все остальные экземпляры Claude и открывает [target].
-  /// Одновременно открыт только один: так ссылка входа из браузера всегда
-  /// попадает в нужный экземпляр, и не конфликтуют виртуальные машины Cowork.
+  /// В тестовом parallelLaunch остальные экземпляры остаются открытыми.
+  /// Обычный режим сохраняет последовательное переключение.
   /// [strict] — см. [launchGuard].
   Future<void> switchTo(Profile target, {bool strict = false}) async {
-    if (switchStatus != null) return;
+    if (_operating) return;
+    _operating = true;
     lastError = null;
     _cancelRequested = false;
 
@@ -185,7 +197,7 @@ class LauncherController extends ChangeNotifier {
         await launchGuard!(strict: strict);
       }
 
-      if (others.isNotEmpty) {
+      if (!parallelLaunch && others.isNotEmpty) {
         final closed = await _closeAll(target, others);
         if (!closed) return;
       }
@@ -207,6 +219,7 @@ class LauncherController extends ChangeNotifier {
       lastError = '$error';
       onNeedsAttention?.call();
     } finally {
+      _operating = false;
       switchStatus = null;
       _notify();
     }
@@ -215,15 +228,30 @@ class LauncherController extends ChangeNotifier {
   /// Открывает ссылку `claude://` (например, сессию Claude Code) в окне
   /// открытого профиля [profile].
   Future<void> openLink(Profile profile, Uri link) async {
-    if (switchStatus != null) return;
-    final instance = instances
-        .where((instance) => profileOf(instance)?.id == profile.id)
-        .firstOrNull;
-    if (instance == null) return;
+    if (_operating) return;
+    _operating = true;
+    lastError = null;
     try {
+      await refresh();
+      // Системный обработчик URL пока не адресует конкретный экземпляр.
+      if (instances.length > 1) {
+        throw StateError(
+          'Переход к сессии пока недоступен при нескольких профилях. '
+          'Покажите окно нужного профиля и выберите сессию в Claude.',
+        );
+      }
+      final instance = instances
+          .where((instance) => profileOf(instance)?.id == profile.id)
+          .firstOrNull;
+      if (instance == null) return;
       await host.openLink(instance, link);
     } catch (error) {
-      lastError = 'Не удалось открыть в Claude: $error';
+      lastError = error is StateError
+          ? error.message
+          : 'Не удалось открыть в Claude: $error';
+      onNeedsAttention?.call();
+    } finally {
+      _operating = false;
       _notify();
     }
   }
@@ -265,7 +293,8 @@ class LauncherController extends ChangeNotifier {
 
   /// Завершает работу открытого профиля так же, как обычный выход из Claude.
   Future<void> close(Profile profile) async {
-    if (switchStatus != null) return;
+    if (_operating) return;
+    _operating = true;
     lastError = null;
     _cancelRequested = false;
     try {
@@ -279,6 +308,7 @@ class LauncherController extends ChangeNotifier {
       lastError = '$error';
       onNeedsAttention?.call();
     } finally {
+      _operating = false;
       switchStatus = null;
       _notify();
     }
@@ -349,6 +379,12 @@ class LauncherController extends ChangeNotifier {
       )) {
         return;
       }
+    }
+    if (!_disposed) {
+      throw StateError(
+        'Claude не открыл выбранный профиль за 20 секунд. '
+        'Проверьте окно Claude и попробуйте снова.',
+      );
     }
   }
 

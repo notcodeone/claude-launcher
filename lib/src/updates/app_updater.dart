@@ -175,6 +175,15 @@ class AppUpdater extends ChangeNotifier {
   /// [manual] — по пункту меню: проверяет, даже если автоматическая проверка
   /// выключена в настройках.
   Future<void> check({bool manual = false}) async {
+    // Тестовая сборка не заменяется стабильным выпуском с другой семантикой.
+    // macOS упаковывает 1.5.10-parallelism.1 как 1.5.10.1.
+    if (parseVersion(currentVersion) == null) {
+      if (manual) {
+        error = 'Тестовая сборка: установите следующую версию вручную.';
+        notifyListeners();
+      }
+      return;
+    }
     if (checking || (!manual && !settings.checkUpdates)) return;
     if (phase == UpdatePhase.downloading || phase == UpdatePhase.installing) {
       return;

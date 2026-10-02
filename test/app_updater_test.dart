@@ -1,9 +1,32 @@
 import 'dart:io';
 
 import 'package:claude_launcher/src/updates/app_updater.dart';
+import 'package:claude_launcher/src/app_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'тестовая версия, включая нормализованную macOS, не проверяет stable',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('preview-updater');
+      addTearDown(() => dir.delete(recursive: true));
+      for (final version in ['1.5.10-parallelism.1', '1.5.10.1']) {
+        final updater = AppUpdater(
+          currentVersion: version,
+          settings: AppSettings(File('${dir.path}/settings.json')),
+          quit: () async {},
+        );
+        await updater.check();
+        expect(updater.checkedAt, isNull);
+        expect(updater.error, isNull);
+        await updater.check(manual: true);
+        expect(updater.error, contains('Тестовая сборка'));
+        expect(updater.release, isNull);
+        updater.dispose();
+      }
+    },
+  );
+
   test('сравнение версий', () {
     expect(isNewerVersion('1.2.3', '1.2.2'), isTrue);
     expect(isNewerVersion('1.10.0', '1.9.9'), isTrue);

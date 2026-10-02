@@ -56,6 +56,9 @@ class AppSettings extends ChangeNotifier {
   /// У каждого эксперимента — свой переключатель (раздел «Эксперименты»).
   bool usageLimits = false;
 
+  /// Тестовый режим: запуск профиля сохраняет остальные экземпляры.
+  bool parallelLaunch = false;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
@@ -87,6 +90,7 @@ class AppSettings extends ChangeNotifier {
             json['usageLimits'] as bool? ??
             json['experimentalFeatures'] as bool? ??
             false;
+        parallelLaunch = json['parallelLaunch'] as bool? ?? false;
         checkUpdates = json['checkUpdates'] as bool? ?? true;
         dockIcon = json['dockIcon'] as bool? ?? false;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
@@ -133,6 +137,9 @@ class AppSettings extends ChangeNotifier {
   Future<void> setUsageLimits(bool enabled) =>
       _update(() => usageLimits = enabled);
 
+  Future<void> setParallelLaunch(bool enabled) =>
+      _update(() => parallelLaunch = enabled);
+
   Future<void> setHideClaudeIcon(bool hide) =>
       _update(() => hideClaudeIcon = hide);
 
@@ -168,6 +175,7 @@ class AppSettings extends ChangeNotifier {
         'startupProfileId': startupProfileId,
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
+        'parallelLaunch': parallelLaunch,
         'experimentsAccepted': experimentsAccepted,
         'killSwitch': killSwitch,
         'killSwitchStrict': killSwitchStrict,

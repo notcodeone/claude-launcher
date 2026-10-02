@@ -3,11 +3,26 @@ import 'dart:io';
 import 'package:claude_launcher/src/app_settings.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/location/kill_switch.dart';
+import 'package:claude_launcher/src/location/egress_config.dart';
 import 'package:claude_launcher/src/location/location_guard.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'launcher_controller_test.dart' show FakeHost;
+
+class MemoryEgressConfig extends EgressConfig {
+  final pinned = <String>{};
+  @override
+  Future<bool> isPinned(String dir) async => pinned.contains(dir);
+  @override
+  Future<bool> pin(String dir, int port) async {
+    pinned.add(dir);
+    return true;
+  }
+
+  @override
+  Future<void> unpin(String dir) async => pinned.remove(dir);
+}
 
 void main() {
   late Directory dir;
@@ -289,6 +304,29 @@ void main() {
       expect(await ks.gate.allow(), isTrue);
     },
   );
+
+  test('один защищённый профиль не скрывает соседний без прокси', () async {
+    final other = await launcher.addProfile(name: 'Другой');
+    final unpinned = host.start(launcher.dataDirOf(other));
+    await launcher.refresh();
+    final config = MemoryEgressConfig()..pinned.add(host.defaultDataDir);
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      pollEvery: const Duration(hours: 1),
+    );
+    ks.start();
+    addTearDown(() => ks.shutdown(keepPinned: false));
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(unpinned);
+    await launcher.refresh();
+    expect(host.instances, isNotEmpty);
+    expect(ks.needsRestart, isFalse);
+  });
 
   test('записка, а Claude уже закрыт, — затвор не нужен', () async {
     await settings.setKillSwitch(false);
