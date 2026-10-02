@@ -775,87 +775,134 @@ class _InlineLinkState extends State<InlineLink> {
   }
 }
 
-/// Спокойная серая плашка для подсказок, статуса и ошибок.
-class InfoBanner extends StatelessWidget {
-  const InfoBanner({
+/// Насколько важна строка [NoticeRow].
+enum NoticeTone {
+  /// Сработала защита или запуск невозможен — красная.
+  danger,
+
+  /// Нужно решение пользователя — серая со значком предупреждения.
+  attention,
+
+  /// Просто к сведению — серая.
+  neutral,
+}
+
+/// Важное над профилями — компактной строкой: значок, заголовок в одну
+/// строку и кнопки справа. Подробности — второй строкой, по нажатию
+/// раскрываются целиком. Оповещения попроще — [Snack] внизу окна.
+class NoticeRow extends StatefulWidget {
+  const NoticeRow({
     super.key,
     required this.icon,
-    required this.text,
-    this.error = false,
-    this.progress = false,
-    this.action,
-    this.footer,
+    required this.title,
+    this.detail,
+    this.tone = NoticeTone.danger,
+    this.actions = const [],
     this.onClose,
   });
 
   final IconData icon;
-  final String text;
-  final bool error;
-  final bool progress;
+  final String title;
+  final String? detail;
+  final NoticeTone tone;
 
-  /// Кнопка справа от текста.
-  final Widget? action;
+  /// Кнопки справа — обычно одна.
+  final List<Widget> actions;
 
-  /// Ряд кнопок под текстом — когда их несколько.
-  final Widget? footer;
-
-  /// Крестик справа: подсказку можно закрыть.
+  /// Крестик: строку можно убрать.
   final VoidCallback? onClose;
+
+  @override
+  State<NoticeRow> createState() => _NoticeRowState();
+}
+
+class _NoticeRowState extends State<NoticeRow> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final foreground = error ? p.danger : p.text;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      // Как у карточек — 16 со всех сторон.
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: BoxDecoration(
-        color: error ? p.dangerSurface : p.field,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 20, color: error ? p.danger : p.muted),
-              const SizedBox(width: 12),
-              Expanded(
-                child: SelectableText(
-                  text,
-                  style: TextStyle(
-                    color: foreground,
-                    fontSize: 13.5,
-                    height: 1.4,
+    final theme = Theme.of(context);
+    final danger = widget.tone == NoticeTone.danger;
+    final accent = switch (widget.tone) {
+      NoticeTone.danger => p.danger,
+      NoticeTone.attention => p.warning,
+      NoticeTone.neutral => p.muted,
+    };
+    final detail = widget.detail;
+    final radius = BorderRadius.circular(14);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: danger ? p.dangerSurface : p.field,
+        borderRadius: radius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: detail == null
+              ? null
+              : () => setState(() => _expanded = !_expanded),
+          hoverColor: Colors.transparent,
+          splashFactory: NoSplash.splashFactory,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Icon(widget.icon, size: 18, color: accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.title,
+                        maxLines: _expanded ? null : 1,
+                        overflow: _expanded ? null : TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: danger ? p.danger : p.text,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (detail != null) ...[
+                        const SizedBox(height: 2),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          alignment: Alignment.topLeft,
+                          child: Text(
+                            detail,
+                            maxLines: _expanded ? null : 1,
+                            overflow: _expanded ? null : TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ),
-              // Текст кнопки — по тому же краю, что значки в карточках: у кнопки
-              // свои 16 px отступа, поэтому сдвигаем её к краю плашки.
-              if (action != null)
-                Transform.translate(offset: const Offset(16, 0), child: action),
-              // Крестик — по краю значков в карточках: у кнопки 8 px вокруг значка.
-              if (onClose != null)
-                Transform.translate(
-                  offset: const Offset(8, 0),
-                  child: CircleIconButton(
-                    icon: AppIcons.close,
-                    tooltip: 'Закрыть',
+                for (final action in widget.actions) ...[
+                  const SizedBox(width: 8),
+                  action,
+                ],
+                if (widget.onClose case final onClose?)
+                  IconButton(
                     onPressed: onClose,
-                  ),
-                ),
-            ],
-          ),
-          if (progress) ...[
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: const LinearProgressIndicator(),
+                    tooltip: 'Закрыть',
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 16,
+                    color: danger ? p.danger : p.muted,
+                    icon: const Icon(AppIcons.close),
+                  )
+                else
+                  const SizedBox(width: 6),
+              ],
             ),
-          ],
-          if (footer != null) ...[const SizedBox(height: 12), footer!],
-        ],
+          ),
+        ),
       ),
     );
   }

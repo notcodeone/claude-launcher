@@ -94,6 +94,12 @@ class ClaudeUpdates extends ChangeNotifier {
   bool _checking = false;
   Timer? _timer;
 
+  /// Когда лента ответила в последний раз.
+  DateTime? get checkedAt => _checkedAt;
+
+  /// Лента спрашивается прямо сейчас.
+  bool get checking => _checking;
+
   /// Лаунчер обновляет Claude сам: Kill Switch включён, а Claude — такой,
   /// какой лаунчер умеет обновлять.
   bool get active => settings.killSwitch && host.updateFeed != null;
@@ -142,6 +148,7 @@ class ClaudeUpdates extends ChangeNotifier {
     final feed = host.updateFeed;
     if (feed == null || !killSwitch.open || _checking) return;
     _checking = true;
+    notifyListeners();
     try {
       final version = installed = await host.installedVersion();
       if (version == null) return;
@@ -175,6 +182,7 @@ class ClaudeUpdates extends ChangeNotifier {
       debugPrint('Не удалось проверить обновление Claude: $error');
     } finally {
       _checking = false;
+      notifyListeners();
     }
   }
 

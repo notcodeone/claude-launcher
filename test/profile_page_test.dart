@@ -8,6 +8,7 @@ import 'package:claude_launcher/src/location/location_guard.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:claude_launcher/src/ui/home_page.dart';
 import 'package:claude_launcher/src/ui/profile_page.dart';
+import 'package:claude_launcher/src/ui/snackbar.dart';
 import 'package:claude_launcher/src/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -82,6 +83,11 @@ void main() {
     expect(launcher.profiles.last.name, 'Клиент');
     expect(AppPages.current.value, AppPages.home);
     expect(find.text('Клиент'), findsOneWidget);
+    // Оповещение внизу — с кнопкой «Открыть».
+    expect(find.textContaining('Профиль «Клиент» создан'), findsOneWidget);
+    expect(find.text('Открыть'), findsOneWidget);
+    AppSnackbar.dismiss();
+    await settle(tester);
 
     // Правка — та же страница: поля заполнены, «Сохранить» меняет профиль.
     final created = launcher.profiles.last;
@@ -103,5 +109,7 @@ void main() {
     expect(launcher.profiles.last.id, created.id);
     expect(launcher.profiles.last.name, 'Клиент Б');
     expect(find.text('Клиент Б'), findsOneWidget);
+    expect(find.text('Профиль «Клиент Б» сохранён'), findsOneWidget);
+    AppSnackbar.reset();
   });
 }

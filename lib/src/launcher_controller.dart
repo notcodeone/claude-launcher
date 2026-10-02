@@ -241,6 +241,13 @@ class LauncherController extends ChangeNotifier {
     return false;
   }
 
+  /// Пользователь закрыл сообщение об ошибке.
+  void clearError() {
+    if (lastError == null) return;
+    lastError = null;
+    _notify();
+  }
+
   /// Kill Switch: немедленно завершает Claude со всем, что он запустил.
   Future<void> killAll() async {
     await host.killEverything();

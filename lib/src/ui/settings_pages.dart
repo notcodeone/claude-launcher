@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_settings.dart';
+import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
 import '../location/kill_switch.dart';
@@ -41,6 +42,7 @@ class SettingsContext {
     required this.version,
     this.updater,
     this.killSwitch,
+    this.claudeUpdates,
   });
 
   final LauncherController launcher;
@@ -49,10 +51,17 @@ class SettingsContext {
   final LocationGuard location;
   final AppUpdater? updater;
   final KillSwitch? killSwitch;
+  final ClaudeUpdates? claudeUpdates;
   final String version;
 
-  Listenable get changes =>
-      Listenable.merge([settings, claudeCode, location, updater, killSwitch]);
+  Listenable get changes => Listenable.merge([
+    settings,
+    claudeCode,
+    location,
+    updater,
+    killSwitch,
+    claudeUpdates,
+  ]);
 }
 
 /// Предупреждение перед разделом «Эксперименты». Пропустить нельзя: ни кликом
@@ -180,6 +189,10 @@ class SettingsListPage extends StatelessWidget {
     return switch (section) {
       SettingsSection.general => 'Главные настройки приложения',
       SettingsSection.claudeCode => 'Настройки интеграции с Claude',
+      SettingsSection.updates
+          when c.claudeUpdates?.available != null &&
+              (c.claudeUpdates?.active ?? false) =>
+        'Вышел Claude ${c.claudeUpdates!.available!.version}',
       SettingsSection.updates => switch (c.updater) {
         AppUpdater(phase: UpdatePhase.available, :final release?) =>
           'Вышла версия ${release.version} — обновление в один клик',
@@ -503,6 +516,8 @@ class SettingsSectionPage extends StatelessWidget {
     final updater = c.updater;
     return [
       _VersionCard(version: c.version, updater: updater),
+      if (c.claudeUpdates case final claude?)
+        _ClaudeVersionCard(updates: claude),
       _Card(
         rows: [
           SettingSwitchRow(
@@ -596,6 +611,134 @@ extension on SettingsSectionPage {
 }
 
 /// Версия и обновление: «ClaudeLauncher 1.4.0 · Последняя версия».
+/// Claude — рядом с версией лаунчера. Пока включён Kill Switch, его
+/// обновляет лаунчер ([ClaudeUpdates]); иначе Claude обновляется сам.
+class _ClaudeVersionCard extends StatelessWidget {
+  const _ClaudeVersionCard({required this.updates});
+
+  final ClaudeUpdates updates;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = context.palette;
+    final release = updates.available;
+    final installed = updates.installed;
+    final canAct = updates.active && !updates.busy;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: p.field,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(AppIcons.download, size: 20, color: p.text),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      installed == null ? 'Claude' : 'Claude $installed',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    _status(context),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            updates.active
+                ? 'Пока включён Kill Switch, Claude обновляет лаунчер: '
+                      'встроенное обновление Claude ходит мимо прокси. Лаунчер '
+                      'качает только через проверенную сеть, проверяет архив и '
+                      'подпись, закрывает Claude, ставит новую версию и '
+                      'открывает Claude снова.'
+                : 'Claude обновляется сам. Лаунчер берёт это на себя, только '
+                      'пока включён Kill Switch.',
+            style: theme.textTheme.bodySmall,
+          ),
+          if (updates.active) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (release != null &&
+                    (updates.phase == ClaudeUpdatePhase.idle ||
+                        updates.phase == ClaudeUpdatePhase.failed))
+                  AppButton(
+                    label: 'Обновить до ${release.version}',
+                    onPressed: canAct ? updates.install : null,
+                  )
+                else
+                  _FieldButton(
+                    label: 'Проверить сейчас',
+                    onPressed: canAct && !updates.checking
+                        ? updates.check
+                        : null,
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _status(BuildContext context) {
+    final p = context.palette;
+    final version = updates.available?.version;
+    final checked = updates.checkedAt;
+    if (!updates.active) {
+      return StatusDot(label: 'Обновляется сам', color: p.muted);
+    }
+    return switch (updates.phase) {
+      ClaudeUpdatePhase.downloading => StatusDot(
+        label: switch (updates.progress) {
+          final share? when share > 0 =>
+            'Скачиваю $version — ${(share * 100).round()}%',
+          _ => 'Скачиваю $version…',
+        },
+        color: p.info,
+      ),
+      ClaudeUpdatePhase.installing => StatusDot(
+        label: 'Устанавливаю $version…',
+        color: p.info,
+      ),
+      ClaudeUpdatePhase.failed => StatusDot(
+        label: 'Не удалось обновить: ${updates.error}',
+        color: p.danger,
+      ),
+      _ when version != null => StatusDot(
+        label: 'Доступна версия $version',
+        color: p.info,
+      ),
+      _ when updates.checking => StatusDot(
+        label: 'Проверяю обновления…',
+        color: p.muted,
+      ),
+      _ when checked != null => StatusDot(
+        label: 'Последняя версия · проверено в ${_VersionCard._clock(checked)}',
+      ),
+      _ => StatusDot(
+        label: 'Проверю, когда сеть будет проверена',
+        color: p.muted,
+      ),
+    };
+  }
+}
+
 class _VersionCard extends StatelessWidget {
   const _VersionCard({required this.version, required this.updater});
 

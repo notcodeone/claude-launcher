@@ -24,6 +24,7 @@ import 'src/location/windows_network_watch.dart';
 import 'src/notifications.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
+import 'src/ui/announcements.dart';
 import 'src/ui/home_page.dart';
 import 'src/ui/settings_dialog.dart';
 import 'src/ui/theme.dart';
@@ -253,6 +254,12 @@ Future<void> main(List<String> args) async {
   );
   killSwitch.start();
   claudeUpdates.start();
+  // Оповещения внизу окна: подсказка, вышедшие обновления и их итог.
+  Announcements(
+    settings: settings,
+    updater: updater,
+    claudeUpdates: claudeUpdates,
+  ).start();
   // На macOS о смене сети сообщает MainFlutterWindow (networkChanged), на
   // Windows — сама система через iphlpapi.
   if (Platform.isWindows) {

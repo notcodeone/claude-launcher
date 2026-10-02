@@ -9,6 +9,7 @@ import '../profile.dart';
 import 'profile_dialog.dart';
 import 'profile_icons.dart';
 import 'settings_pages.dart' show AppearIn;
+import 'snackbar.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -297,6 +298,13 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       if (!mounted) return;
       widget.onDone();
+      AppSnackbar.show(
+        Snack(
+          id: 'profile-saved',
+          icon: AppIcons.check,
+          text: 'Профиль «$name» сохранён',
+        ),
+      );
       return;
     }
     final profile = await widget.launcher.addProfile(
@@ -310,6 +318,16 @@ class _ProfilePageState extends State<ProfilePage> {
     // Новый тег — до возврата: аватар улетит в карточку нового профиля.
     setState(() => _heroTag = ProfileHero.avatarTag(profile.id));
     WidgetsBinding.instance.addPostFrameCallback((_) => widget.onDone());
+    final launcher = widget.launcher;
+    AppSnackbar.show(
+      Snack(
+        id: 'profile-created',
+        icon: AppIcons.check,
+        text: 'Профиль «$name» создан. При первом запуске войдите в аккаунт.',
+        action: 'Открыть',
+        onAction: () => launcher.switchTo(profile),
+      ),
+    );
   }
 
   @override

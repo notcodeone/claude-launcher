@@ -23,6 +23,7 @@ import 'profile_dialog.dart';
 import 'profile_page.dart';
 import 'profile_usage_menu.dart';
 import 'settings_pages.dart';
+import 'snackbar.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -194,6 +195,7 @@ class HomePage extends StatelessWidget {
       location: location,
       updater: updater,
       killSwitch: killSwitch,
+      claudeUpdates: claudeUpdates,
       version: version,
     );
     if (route == AppPages.newProfile) {
@@ -445,6 +447,7 @@ class HomePage extends StatelessWidget {
                 updater,
                 settings,
                 killSwitch,
+                claudeUpdates,
                 AppPages.current,
               ]),
               builder: (context, _) => _HeaderBar(
@@ -454,6 +457,7 @@ class HomePage extends StatelessWidget {
                 location: location,
                 updater: updater,
                 killSwitch: killSwitch,
+                claudeUpdates: claudeUpdates,
                 page: AppPages.current.value,
               ),
             ),
@@ -466,100 +470,66 @@ class HomePage extends StatelessWidget {
             height: _footerHeight,
             child: _Footer(version: version, updater: updater),
           ),
+          // Оповещения — над кнопкой «Добавить», поверх страниц.
+          const Positioned(
+            left: gutter,
+            right: gutter,
+            bottom: _footerHeight + 8 + 52 + 12,
+            child: SnackbarHost(),
+          ),
         ],
       ),
     );
   }
 
+  /// Важное над профилями — компактными строками. Оповещения попроще
+  /// (подсказки, обновления, «профиль создан») — внизу окна ([AppSnackbar]).
   List<Widget> _banners(BuildContext context) {
     final status = launcher.switchStatus;
     return [
-      // Пока не закроют крестиком: иначе после перезапуска лаунчера подсказка
-      // пропала бы непрочитанной.
-      if (!settings.trayHintDismissed && status == null)
-        InfoBanner(
-          icon: AppIcons.info,
-          onClose: settings.dismissTrayHint,
-          text: Platform.isMacOS
-              ? 'ClaudeLauncher живёт в строке меню — ищите вверху экрана его значок, '
-                    'как в шапке этого окна. Это окно можно закрыть.'
-              : 'ClaudeLauncher живёт в трее у часов (возможно, под стрелкой ▲). '
-                    'Это окно можно закрыть.',
-        ),
-      // Ход проверки и переключения — в шапке (headerStatus); плашка — только
+      // Ход проверки и переключения — в шапке (headerStatus); строка — только
       // когда Claude не закрылся сам и нужен выбор пользователя.
       if (status != null && status.phase == SwitchPhase.waitingForUser)
-        _SwitchBanner(launcher: launcher, status: status),
+        _SwitchBanner(launcher: launcher),
       if (location.blocksLaunch && !location.showsProgress)
-        InfoBanner(
+        NoticeRow(
           icon: AppIcons.locationOff,
-          error: true,
-          text:
-              'Claude недоступен в стране «${location.countryName}» — так её '
-              'определяет IP-адрес. Пока это так, профили не запускаются.',
+          title: 'Claude недоступен: ${location.countryName}',
+          detail:
+              'Так страну определяет IP-адрес. Пока это так, профили не '
+              'запускаются.',
         ),
       if (killSwitch?.lastFired case final event?)
-        InfoBanner(
+        NoticeRow(
           icon: AppIcons.shieldAlert,
-          error: true,
+          title: 'Kill Switch закрыл Claude',
+          detail: KillSwitch.describe(event),
           onClose: killSwitch!.dismiss,
-          text: 'Kill Switch закрыл Claude. ${KillSwitch.describe(event)}',
         ),
-      if (claudeUpdates case final updates? when updates.active)
-        ?_claudeUpdateBanner(updates),
       if (launcher.lastError case final error?)
-        InfoBanner(icon: AppIcons.error, error: true, text: error),
+        // Первое предложение — заголовок, остальное — подробности.
+        NoticeRow(
+          icon: AppIcons.error,
+          title: _firstSentence(error).$1,
+          detail: _firstSentence(error).$2,
+          onClose: launcher.clearError,
+        ),
       for (final instance in launcher.unknownInstances)
-        InfoBanner(
+        NoticeRow(
           icon: AppIcons.unknown,
-          text:
-              'Запущен Claude с папкой, которой нет в профилях:\n'
+          tone: NoticeTone.neutral,
+          title: 'Claude открыт не из профиля',
+          detail:
+              'Его папки нет в профилях: '
               '${launcher.host.dataDirOf(instance)}',
         ),
     ];
   }
 
-  /// Пока включён Kill Switch, Claude обновляет лаунчер — плашка о новой
-  /// версии и ходе обновления.
-  Widget? _claudeUpdateBanner(ClaudeUpdates updates) {
-    final release = updates.available;
-    return switch (updates.phase) {
-      ClaudeUpdatePhase.downloading => InfoBanner(
-        icon: AppIcons.download,
-        progress: true,
-        text: switch (updates.progress) {
-          final share? when share > 0 =>
-            'Скачиваю Claude ${release?.version} — ${(share * 100).round()}%',
-          _ => 'Скачиваю Claude ${release?.version}…',
-        },
-      ),
-      ClaudeUpdatePhase.installing => InfoBanner(
-        icon: AppIcons.download,
-        progress: true,
-        text: 'Обновляю Claude до ${release?.version}…',
-      ),
-      ClaudeUpdatePhase.failed => InfoBanner(
-        icon: AppIcons.error,
-        error: true,
-        text: 'Не удалось обновить Claude: ${updates.error}',
-        action: release == null
-            ? null
-            : AppButton(
-                label: 'Повторить',
-                kind: AppButtonKind.secondary,
-                onPressed: updates.install,
-              ),
-      ),
-      ClaudeUpdatePhase.idle when release != null => InfoBanner(
-        icon: AppIcons.download,
-        text:
-            'Вышел Claude ${release.version}. Пока включён Kill Switch, его '
-            'обновляет лаунчер — только через проверенную сеть. Claude '
-            'закроется и откроется снова.',
-        action: AppButton(label: 'Обновить', onPressed: updates.install),
-      ),
-      ClaudeUpdatePhase.idle => null,
-    };
+  static (String, String?) _firstSentence(String text) {
+    final end = text.indexOf('. ');
+    if (end < 0) return (text, null);
+    return (text.substring(0, end + 1), text.substring(end + 2));
   }
 
   /// Новый профиль — отдельной страницей (см. [NewProfilePage]).
@@ -705,6 +675,7 @@ HeaderStatus? headerStatus(
   LocationGuard location, [
   AppUpdater? updater,
   KillSwitch? killSwitch,
+  ClaudeUpdates? claudeUpdates,
 ]) {
   final version = updater?.release?.version;
   final progress = updater?.progress;
@@ -718,6 +689,20 @@ HeaderStatus? headerStatus(
       );
     case UpdatePhase.installing:
       return HeaderStatus('update-install', 'Устанавливаю $version…');
+    default:
+  }
+  final claude = claudeUpdates?.available?.version;
+  switch (claudeUpdates?.phase) {
+    case ClaudeUpdatePhase.downloading:
+      final share = claudeUpdates!.progress;
+      return HeaderStatus(
+        'claude-download',
+        'Скачиваю Claude $claude…'
+            '${share == null || share == 0 ? '' : ' ${(share * 100).round()}%'}',
+        downloading: true,
+      );
+    case ClaudeUpdatePhase.installing:
+      return HeaderStatus('claude-install', 'Обновляю Claude…');
     default:
   }
   final status = launcher.switchStatus;
@@ -944,6 +929,7 @@ class _HeaderBar extends StatelessWidget {
     required this.location,
     this.updater,
     this.killSwitch,
+    this.claudeUpdates,
     this.page = AppPages.home,
     this.interactive = true,
   });
@@ -958,6 +944,9 @@ class _HeaderBar extends StatelessWidget {
   /// открытого Claude).
   final KillSwitch? killSwitch;
 
+  /// Ход обновления Claude — в статусе шапки.
+  final ClaudeUpdates? claudeUpdates;
+
   /// Открытая страница: на профилях — название и кнопки, в настройках —
   /// «← Настройки».
   final String page;
@@ -968,9 +957,18 @@ class _HeaderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final home = page == AppPages.home;
-    final busy = headerStatus(launcher, location, updater, killSwitch);
+    final busy = headerStatus(
+      launcher,
+      location,
+      updater,
+      killSwitch,
+      claudeUpdates,
+    );
     // В настройках — «Настройки»; из статусов там виден только ход обновления.
-    final status = home || (busy?.id.startsWith('update') ?? false)
+    final status =
+        home ||
+            (busy?.id.startsWith('update') ?? false) ||
+            (busy?.id.startsWith('claude-') ?? false)
         ? busy
         : page.startsWith(AppPages.settings)
         ? const HeaderStatus('settings', 'Настройки', plain: true)
@@ -1095,6 +1093,7 @@ class _HeaderBar extends StatelessWidget {
     location: location,
     updater: updater,
     killSwitch: killSwitch,
+    claudeUpdates: claudeUpdates,
     page: page,
     interactive: false,
   );
@@ -1162,59 +1161,26 @@ class _HeaderBar extends StatelessWidget {
       : SizedBox(height: 36, child: child);
 }
 
+/// Claude не закрылся сам (на Windows ушёл в трей) — даём закрыть его
+/// принудительно одной кнопкой, но только по явному выбору; крестик — отмена.
 class _SwitchBanner extends StatelessWidget {
-  const _SwitchBanner({required this.launcher, required this.status});
+  const _SwitchBanner({required this.launcher});
 
   final LauncherController launcher;
-  final SwitchStatus status;
 
   @override
-  Widget build(BuildContext context) {
-    final closing = status.closing.map((name) => '«$name»').join(', ');
-    final target = status.target == null ? null : '«${status.target!.name}»';
-    final text = switch (status.phase) {
-      // Проверку страны показывает своя плашка (см. HomePage._banners).
-      SwitchPhase.checking => 'Проверяю, можно ли открыть $target…',
-      SwitchPhase.closing when target == null => 'Закрываю $closing…',
-      SwitchPhase.closing => 'Закрываю $closing, чтобы открыть $target…',
-      SwitchPhase.waitingForUser => launcher.host.manualQuitHint,
-      SwitchPhase.launching => 'Открываю $target…',
-    };
-    final cancel = AppButton(
-      label: 'Отмена',
-      kind: AppButtonKind.secondary,
-      onPressed: launcher.cancelSwitch,
-    );
-    if (status.phase == SwitchPhase.waitingForUser) {
-      // Claude не закрылся сам (на Windows ушёл в трей) — даём закрыть его
-      // принудительно одной кнопкой, но только по явному выбору.
-      return InfoBanner(
-        icon: AppIcons.hand,
-        text:
-            '$text При принудительном закрытии несохранённое в Claude может '
-            'потеряться.',
-        progress: true,
-        footer: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            cancel,
-            const SizedBox(width: 8),
-            AppButton(
-              label: 'Закрыть принудительно',
-              onPressed: launcher.forceClose,
-            ),
-          ],
-        ),
-      );
-    }
-    return InfoBanner(
-      icon: AppIcons.sync,
-      text: text,
-      progress: true,
-      // Отменить можно только ожидание закрытия.
-      action: status.phase == SwitchPhase.closing ? cancel : null,
-    );
-  }
+  Widget build(BuildContext context) => NoticeRow(
+    icon: AppIcons.hand,
+    tone: NoticeTone.attention,
+    title: 'Claude не закрылся сам',
+    detail:
+        '${launcher.host.manualQuitHint} При принудительном закрытии '
+        'несохранённое в Claude может потеряться.',
+    actions: [
+      AppButton(label: 'Закрыть принудительно', onPressed: launcher.forceClose),
+    ],
+    onClose: launcher.cancelSwitch,
+  );
 }
 
 /// Что Kill Switch делает сейчас — над пунктами меню его кнопки.
