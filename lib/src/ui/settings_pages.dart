@@ -7,6 +7,7 @@ import '../app_settings.dart';
 import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
+import '../location/cowork_firewall.dart';
 import '../location/kill_switch.dart';
 import '../location/location_guard.dart';
 import '../updates/app_updater.dart';
@@ -43,6 +44,7 @@ class SettingsContext {
     this.updater,
     this.killSwitch,
     this.claudeUpdates,
+    this.coworkFirewall,
   });
 
   final LauncherController launcher;
@@ -52,6 +54,9 @@ class SettingsContext {
   final AppUpdater? updater;
   final KillSwitch? killSwitch;
   final ClaudeUpdates? claudeUpdates;
+
+  /// Windows: правило брандмауэра для службы Cowork; null — не Windows.
+  final CoworkFirewall? coworkFirewall;
   final String version;
 
   Listenable get changes => Listenable.merge([
@@ -61,6 +66,7 @@ class SettingsContext {
     updater,
     killSwitch,
     claudeUpdates,
+    coworkFirewall,
   ]);
 }
 
@@ -572,9 +578,33 @@ class SettingsSectionPage extends StatelessWidget {
                 'ждут, пока лаунчер проверит страну. Та же страна — работа '
                 'продолжается, другая — Claude закрывается.',
             value: settings.killSwitch,
-            onChanged: settings.setKillSwitch,
+            onChanged: (enabled) async {
+              await settings.setKillSwitch(enabled);
+              // Без Kill Switch правило оставило бы Cowork без сети.
+              final firewall = deps.coworkFirewall;
+              if (!enabled && (firewall?.active ?? false)) {
+                await firewall!.disable();
+              }
+            },
             link: _killSwitchStatus(context),
           ),
+          if (settings.killSwitch)
+            if (deps.coworkFirewall case final firewall?)
+              SettingSwitchRow(
+                title: 'Cowork — только через Kill Switch',
+                description:
+                    'Машина Cowork работает в службе Windows, которую Kill '
+                    'Switch не закрывает. Правило брандмауэра не выпустит её в '
+                    'интернет мимо затвора. Windows спросит разрешение '
+                    'администратора — и чтобы поставить правило, и чтобы снять.',
+                value: firewall.active ?? false,
+                // Пока ждём Windows — второе нажатие ничего не делает.
+                onChanged: (enabled) {
+                  if (firewall.busy) return;
+                  enabled ? firewall.enable() : firewall.disable();
+                },
+                link: _firewallStatus(context, firewall),
+              ),
           if (settings.killSwitch)
             SettingSwitchRow(
               title: 'Закрывать Claude при любой смене сети',
@@ -603,6 +633,22 @@ class SettingsSectionPage extends StatelessWidget {
 }
 
 extension on SettingsSectionPage {
+  /// Что с правилом брандмауэра для Cowork.
+  Widget? _firewallStatus(BuildContext context, CoworkFirewall firewall) {
+    final p = context.palette;
+    if (firewall.busy) {
+      return StatusDot(label: 'Жду разрешения Windows…', color: p.warning);
+    }
+    if (firewall.error case final error?) {
+      return StatusDot(label: 'Не вышло: $error', color: p.danger);
+    }
+    return switch (firewall.active) {
+      true => const StatusDot(label: 'Правило брандмауэра стоит'),
+      false => null,
+      null => StatusDot(label: 'Проверяю правило…', color: p.muted),
+    };
+  }
+
   /// Под переключателем Kill Switch — что он делает прямо сейчас.
   Widget? _killSwitchStatus(BuildContext context) {
     final killSwitch = deps.killSwitch;

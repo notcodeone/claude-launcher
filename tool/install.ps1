@@ -25,10 +25,24 @@
   Unblock-File $setup
 
   # Закрываем только свой лаунчер — не запущенный другими пользователями.
+  # Сначала — как из его меню (--quit): он вернёт Claude уведомления и, если
+  # включён Kill Switch, передаст затвор своему фоновому процессу.
   $session = (Get-Process -Id $PID).SessionId
-  Get-Process claude_launcher -ErrorAction SilentlyContinue |
-    Where-Object { $_.SessionId -eq $session } |
-    Stop-Process -ErrorAction SilentlyContinue
+  $running = @(Get-CimInstance Win32_Process -Filter "Name = 'claude_launcher.exe'" |
+    Where-Object { $_.SessionId -eq $session })
+  $main = @($running | Where-Object {
+    $_.CommandLine -notmatch '--kill-switch-guard|--return-claude-notifications|--cleanup'
+  })
+  if ($main.Count -gt 0) {
+    Start-Process $main[0].ExecutablePath -ArgumentList '--quit' -WindowStyle Hidden
+    # Ждём сами процессы, а не код выхода: лаунчер до 1.5.9 --quit не знает.
+    # Не вышел за 10 секунд — закрываем принудительно. Фоновые процессы
+    # лаунчера не трогаем: их закроет установщик, а новый лаунчер заберёт работу.
+    $main | ForEach-Object {
+      Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+      Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+    }
+  }
 
   # /update=1 — установщик дождётся выхода лаунчера и запустит новый. Ждём только
   # сам установщик: Start-Process -Wait ждал бы и запущенный им лаунчер.

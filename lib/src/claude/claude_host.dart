@@ -111,8 +111,11 @@ abstract class ClaudeHost {
       if (!Platform.isWindows) {
         // rm -rf надёжнее рекурсивного delete на больших бандлах.
         await Process.run('rm', ['-rf', path]);
-      } else {
+      } else if (type == FileSystemEntityType.directory) {
         await Directory(path).delete(recursive: true);
+      } else {
+        // Файл (архив прежней версии, недокачанный кусок) — не папка.
+        await File(path).delete();
       }
     } catch (_) {
       // Временная папка — уберём при следующем обновлении.

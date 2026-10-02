@@ -19,6 +19,7 @@ import 'src/integrations/notification_handoff.dart';
 import 'src/launcher_controller.dart';
 import 'src/claude/claude_icon_keeper.dart';
 import 'src/claude/claude_updates.dart';
+import 'src/location/cowork_firewall.dart';
 import 'src/location/egress_config.dart';
 import 'src/location/kill_switch.dart';
 import 'src/location/location_guard.dart';
@@ -122,6 +123,9 @@ Future<void> main(List<String> args) async {
     await trayIcon.beforeLaunch(dataDir);
     await killSwitch.beforeLaunch(dataDir);
   };
+  // Windows: правило брандмауэра для службы Cowork (см. настройки Kill Switch).
+  final coworkFirewall = Platform.isWindows ? CoworkFirewall() : null;
+  unawaited(coworkFirewall?.refresh());
   // Пока включён Kill Switch, Claude обновляет лаунчер — через проверенную сеть.
   final claudeUpdates = ClaudeUpdates(
     host: launcher.host,
@@ -185,6 +189,26 @@ Future<void> main(List<String> args) async {
     exit(0);
   }
 
+  /// Windows завершает сеанс (выход, перезагрузка) или установщик закрывает
+  /// лаунчер: быстрый корректный выход — runner ждёт его до 4 секунд, —
+  /// без наблюдателя и охранника: их процессы Windows тоже завершит. Kill
+  /// Switch остаётся закреплённым: защиту не ослабляем — Claude не пойдёт
+  /// мимо затвора, а затвор поднимет лаунчер при следующем запуске.
+  Future<void> endSession() async {
+    try {
+      await claudeCode.releaseOnQuit().timeout(const Duration(seconds: 2));
+    } catch (error) {
+      debugPrint('Не удалось вернуть уведомления Claude: $error');
+    }
+    try {
+      await killSwitch.shutdown(keepPinned: true);
+    } catch (error) {
+      debugPrint('Kill Switch: не удалось остановить затвор: $error');
+    }
+    // Сначала ответ runner'у, потом выход.
+    Timer(const Duration(milliseconds: 200), () => exit(0));
+  }
+
   // Версия из самого приложения — её Flutter берёт из pubspec.yaml.
   final version = (await PackageInfo.fromPlatform()).version;
   final updater = AppUpdater(
@@ -205,6 +229,7 @@ Future<void> main(List<String> args) async {
   _nativeChannel.setMethodCallHandler((call) async {
     if (call.method == 'reopen') await window.show();
     if (call.method == 'quit') await quit();
+    if (call.method == 'endSession') await endSession();
     if (call.method == 'networkChanged') await killSwitch.networkChanged();
   });
   // Окно открыли — заодно проверим обновления, если давно не проверяли.
@@ -230,6 +255,7 @@ Future<void> main(List<String> args) async {
       updater: updater,
       killSwitch: killSwitch,
       claudeUpdates: claudeUpdates,
+      coworkFirewall: coworkFirewall,
       version: version,
     ),
   );
@@ -281,6 +307,8 @@ Future<void> main(List<String> args) async {
 
   // Приём событий Claude Code, если пользователь его включил.
   await claudeCode.start();
+  // Лаунчер запустили нажатием на его уведомление — открыть ту сессию.
+  await claudeCode.openLaunchNotification();
 
   // Первый запуск: окно приветствия с настройками.
   if (!settings.onboardingDone) {
@@ -638,6 +666,12 @@ Future<void> _cleanup(Directory supportDir) async {
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
   final host = ClaudeHost.forCurrentPlatform();
+  // Windows: правило брандмауэра для Cowork — Windows спросит разрешение.
+  if (Platform.isWindows) {
+    final firewall = CoworkFirewall();
+    await firewall.refresh();
+    if (firewall.active ?? false) await firewall.disable();
+  }
   try {
     await _stopKillSwitchGuard(supportDir, host);
     final launcher = LauncherController(
@@ -702,6 +736,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.updater,
     required this.killSwitch,
     required this.claudeUpdates,
+    this.coworkFirewall,
     required this.version,
   });
 
@@ -712,6 +747,7 @@ class ClaudeLauncherApp extends StatelessWidget {
   final AppUpdater updater;
   final KillSwitch killSwitch;
   final ClaudeUpdates claudeUpdates;
+  final CoworkFirewall? coworkFirewall;
   final String version;
 
   @override
@@ -733,6 +769,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           updater: updater,
           killSwitch: killSwitch,
           claudeUpdates: claudeUpdates,
+          coworkFirewall: coworkFirewall,
           version: version,
         ),
       ),

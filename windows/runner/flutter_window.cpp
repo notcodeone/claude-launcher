@@ -1,7 +1,9 @@
 #include "flutter_window.h"
 
+#include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
+#include <memory>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -40,6 +42,30 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+// Просит Dart быстро и корректно выйти (`endSession`) и ждёт ответа до 4
+// секунд, разбирая сообщения: ответ Dart приходит через очередь окна. Windows
+// убьёт процесс, как только мы вернём управление.
+void FlutterWindow::EndSession() {
+  auto done = std::make_shared<bool>(false);
+  native_channel_->InvokeMethod(
+      "endSession", nullptr,
+      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+          [done](const flutter::EncodableValue*) { *done = true; },
+          [done](const std::string&, const std::string&,
+                 const flutter::EncodableValue*) { *done = true; },
+          [done]() { *done = true; }));
+  const ULONGLONG deadline = ::GetTickCount64() + 4000;
+  MSG msg;
+  while (!*done && ::GetTickCount64() < deadline) {
+    if (::PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      ::TranslateMessage(&msg);
+      ::DispatchMessageW(&msg);
+    } else {
+      ::Sleep(10);
+    }
+  }
+}
+
 void FlutterWindow::OnDestroy() {
   native_channel_ = nullptr;
   if (flutter_controller_) {
@@ -57,6 +83,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   // как на macOS: Dart покажет его тем же методом, что и пункт меню.
   if (message == ReopenMessage()) {
     if (native_channel_) native_channel_->InvokeMethod("reopen", nullptr);
+    return 0;
+  }
+  if (message == QuitMessage()) {
+    if (native_channel_) native_channel_->InvokeMethod("quit", nullptr);
+    return 0;
+  }
+  // Windows завершает сеанс (выход, перезагрузка) или установщик закрывает
+  // лаунчер (Restart Manager): иначе процесс просто убьют, без выхода.
+  if (message == WM_QUERYENDSESSION) return TRUE;
+  if (message == WM_ENDSESSION) {
+    if (wparam && native_channel_) EndSession();
     return 0;
   }
 

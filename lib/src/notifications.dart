@@ -22,6 +22,10 @@ abstract class Notifier {
 
   Future<void> cancel(int id);
 
+  /// Лаунчер запустили нажатием на его уведомление (он был закрыт) — `payload`
+  /// этого уведомления; иначе null.
+  Future<String?> launchPayload() async => null;
+
   /// Системные настройки уведомлений лаунчера.
   Future<void> openSettings();
 }
@@ -106,6 +110,15 @@ class SystemNotifier extends Notifier {
   Future<void> cancel(int id) async {
     await _init();
     await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<String?> launchPayload() async {
+    await _init();
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details == null || !details.didNotificationLaunchApp) return null;
+    final payload = details.notificationResponse?.payload;
+    return payload == null || payload.isEmpty ? null : payload;
   }
 
   @override

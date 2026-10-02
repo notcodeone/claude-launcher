@@ -1,4 +1,5 @@
 import 'package:claude_launcher/src/claude/windows_claude_host.dart';
+import 'package:claude_launcher/src/claude/windows_powershell.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -8,8 +9,8 @@ void main() {
       r"C:\Users\Анна О'Нил\AppData\Local\Temp\ClaudeLauncher\claude-install\result.txt";
 
   test('сценарий: без прогресса, итог в файл, кавычки экранированы', () {
-    final script = WindowsClaudeHost.installScript(
-      package: package,
+    final script = WindowsPowerShell.wrap(
+      WindowsClaudeHost.installScript(package),
       result: result,
     );
     expect(script, contains(r"$ProgressPreference = 'SilentlyContinue'"));
@@ -21,22 +22,30 @@ void main() {
   });
 
   test('аргументы сценария: в обход запрета, путь в кавычках целиком', () {
-    final arguments = WindowsClaudeHost.scriptArguments(
-      r'C:\Users\Анна Нил\Temp\install.ps1',
+    final arguments = WindowsPowerShell.scriptArguments(
+      r'C:\Users\Анна Нил\Temp\script.ps1',
     );
     expect(arguments, contains('-ExecutionPolicy Bypass'));
     expect(arguments, contains('-NonInteractive'));
-    expect(arguments, endsWith(r'-File "C:\Users\Анна Нил\Temp\install.ps1"'));
+    expect(arguments, endsWith(r'-File "C:\Users\Анна Нил\Temp\script.ps1"'));
   });
 
   test('итог — последняя строка, без BOM', () {
-    expect(WindowsClaudeHost.lastLine('\uFEFFOK\r\n'), 'OK');
+    expect(WindowsPowerShell.lastLine('\uFEFFOK\r\n'), 'OK');
     expect(
-      WindowsClaudeHost.lastLine(
+      WindowsPowerShell.lastLine(
         '\uFEFFERROR: Deployment failed 0x80073CF9\r\n\r\n',
       ),
       'ERROR: Deployment failed 0x80073CF9',
     );
-    expect(WindowsClaudeHost.lastLine(''), '');
+    expect(WindowsPowerShell.lastLine(''), '');
+  });
+
+  test('сетевой %APPDATA% — по тому же признаку, что у Claude', () {
+    expect(
+      WindowsClaudeHost.isUnc(r'\\server\profiles\anna\AppData\Roaming'),
+      isTrue,
+    );
+    expect(WindowsClaudeHost.isUnc(r'C:\Users\anna\AppData\Roaming'), isFalse);
   });
 }

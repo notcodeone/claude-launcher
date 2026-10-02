@@ -25,13 +25,17 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  // Windows завершает сеанс: попросить Dart выйти и дождаться (до 4 секунд).
+  void EndSession();
+
   // The project to run.
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
-  // Канал к Dart: `reopen` — лаунчер запустили ещё раз, показать окно.
+  // Канал к Dart: `reopen` — лаунчер запустили ещё раз, показать окно;
+  // `quit` — выйти, как из меню; `endSession` — Windows завершает сеанс.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       native_channel_;
 };
@@ -39,6 +43,13 @@ class FlutterWindow : public Win32Window {
 // Сообщение, которым второй запуск лаунчера будит первый (см. main.cpp).
 inline UINT ReopenMessage() {
   static const UINT message = ::RegisterWindowMessageW(L"ClaudeLauncher.Reopen");
+  return message;
+}
+
+// Сообщение «выйти, как из меню» — его шлёт `claude_launcher.exe --quit`
+// (команда установки, см. tool/install.ps1).
+inline UINT QuitMessage() {
+  static const UINT message = ::RegisterWindowMessageW(L"ClaudeLauncher.Quit");
   return message;
 }
 

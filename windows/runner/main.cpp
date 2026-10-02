@@ -14,6 +14,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // выхода из лаунчера возвращает Claude уведомления: они окна и трея не
   // создают, а лаунчер должен запускаться и при работающем наблюдателе.
   // Имя мьютекса знает и установщик (AppMutex), чтобы попросить закрыть лаунчер.
+  // `--quit` — попросить запущенный лаунчер выйти, как из меню, и дождаться
+  // его (до 10 секунд). Так его закрывает команда установки (install.ps1).
+  // Код выхода 1 — не вышел.
+  if (wcsstr(command_line, L"--quit") != nullptr) {
+    HANDLE running = ::OpenMutexW(SYNCHRONIZE, FALSE,
+                                  L"Local\\ClaudeLauncher.SingleInstance");
+    if (running == nullptr) return EXIT_SUCCESS;  // Не запущен.
+    ::PostMessageW(HWND_BROADCAST, QuitMessage(), 0, 0);
+    // Лаунчер держит мьютекс до выхода: при выходе он «брошен» — дождались.
+    const DWORD waited = ::WaitForSingleObject(running, 10000);
+    if (waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED) {
+      ::ReleaseMutex(running);
+    }
+    ::CloseHandle(running);
+    return waited == WAIT_TIMEOUT ? 1 : EXIT_SUCCESS;
+  }
+
   const bool headless =
       wcsstr(command_line, L"--cleanup") != nullptr ||
       wcsstr(command_line, L"--return-claude-notifications") != nullptr ||

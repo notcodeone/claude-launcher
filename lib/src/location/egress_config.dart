@@ -43,35 +43,25 @@ class EgressConfig {
     'AnthropicPBC.Claude_fnn82j28hfe8t',
   ];
 
-  /// Куда писать конфигурацию. На Windows Claude из пакета MSIX видит
-  /// %LOCALAPPDATA% через виртуализацию: копия в папке пакета
-  /// (`Packages\<пакет>\LocalCache\Local\Claude-3p`) заслонила бы нашу,
-  /// поэтому пишем и туда — у каждого установленного пакета Claude.
-  static List<String> configDirs(String dataDir) {
-    final dirs = [configDir(dataDir)];
+  /// Копии в папке пакета MSIX (`Packages\<пакет>\LocalCache\Local\
+  /// Claude-3p`), которые писали версии 1.5.1–1.5.8. Они не нужны: Claude
+  /// исключил `%LOCALAPPDATA%\Claude-3p` из виртуализации (манифест пакета)
+  /// и читает настоящую папку. Остались — убираем вместе со своей записью.
+  static List<String> _legacyMirrors() {
     final local = Platform.environment['LOCALAPPDATA'];
-    if (Platform.isWindows && local != null) {
-      for (final family in _packageFamilies) {
-        final package = p.join(local, 'Packages', family);
-        if (Directory(package).existsSync()) {
-          dirs.add(p.join(package, 'LocalCache', 'Local', 'Claude-3p'));
-        }
-      }
-    }
-    return dirs;
+    if (!Platform.isWindows || local == null) return const [];
+    return [
+      for (final family in _packageFamilies)
+        p.join(local, 'Packages', family, 'LocalCache', 'Local', 'Claude-3p'),
+    ];
   }
 
   /// Закрепляет профиль за прокси на [port]. false — папка занята чужой
   /// конфигурацией, профиль не защищён.
   Future<bool> pin(String dataDir, int port) async {
-    final dirs = configDirs(dataDir);
-    for (final dir in dirs) {
-      if (await _foreign(dir)) return false;
-    }
-    for (final dir in dirs) {
-      if (!await _pinDir(dir, port)) return false;
-    }
-    return true;
+    final dir = configDir(dataDir);
+    if (await _foreign(dir)) return false;
+    return _pinDir(dir, port);
   }
 
   /// В папке уже чужая конфигурация — её мог настроить администратор.
@@ -116,9 +106,9 @@ class EgressConfig {
     }
   }
 
-  /// Убирает свою запись — из всех папок, куда писал [pin].
+  /// Убирает свою запись — и копии от прежних версий лаунчера.
   Future<void> unpin(String dataDir) async {
-    for (final dir in configDirs(dataDir)) {
+    for (final dir in [configDir(dataDir), ..._legacyMirrors()]) {
       await _unpinDir(dir);
     }
   }
@@ -147,13 +137,10 @@ class EgressConfig {
 
   /// Закреплён ли профиль за прокси лаунчера.
   Future<bool> isPinned(String dataDir) async {
-    for (final dir in configDirs(dataDir)) {
-      final meta = await _readJson(
-        File(p.join(dir, 'configLibrary', '_meta.json')),
-      );
-      if (meta?['appliedId'] == entryId) return true;
-    }
-    return false;
+    final meta = await _readJson(
+      File(p.join(configDir(dataDir), 'configLibrary', '_meta.json')),
+    );
+    return meta?['appliedId'] == entryId;
   }
 
   static Future<Map<String, Object?>?> _readJson(File file) async {

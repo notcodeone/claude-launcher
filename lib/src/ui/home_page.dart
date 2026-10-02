@@ -11,6 +11,7 @@ import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
 import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
+import '../location/cowork_firewall.dart';
 import '../location/kill_switch.dart';
 import '../location/location_guard.dart';
 import '../profile.dart';
@@ -122,6 +123,7 @@ class HomePage extends StatelessWidget {
     this.updater,
     this.killSwitch,
     this.claudeUpdates,
+    this.coworkFirewall,
     this.version = '',
   });
 
@@ -138,6 +140,9 @@ class HomePage extends StatelessWidget {
 
   /// Обновление Claude лаунчером, пока включён Kill Switch; null — без него.
   final ClaudeUpdates? claudeUpdates;
+
+  /// Windows: правило брандмауэра для службы Cowork.
+  final CoworkFirewall? coworkFirewall;
 
   /// Версия приложения — в подвале.
   final String version;
@@ -195,6 +200,7 @@ class HomePage extends StatelessWidget {
       updater: updater,
       killSwitch: killSwitch,
       claudeUpdates: claudeUpdates,
+      coworkFirewall: coworkFirewall,
       version: version,
     );
     if (route == AppPages.newProfile) {

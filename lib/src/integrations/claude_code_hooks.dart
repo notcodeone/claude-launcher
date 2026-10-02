@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 /// Хуки Claude Code, через которые лаунчер узнаёт, что делает Claude Code:
@@ -14,12 +15,21 @@ import 'package:path/path.dart' as p;
 class ClaudeCodeHooks {
   ClaudeCodeHooks(this.settingsFile);
 
-  /// Файл по умолчанию: `~/.claude/settings.json`.
-  factory ClaudeCodeHooks.forCurrentUser() {
+  /// Файл настроек Claude Code: `~/.claude/settings.json`, а если задана
+  /// переменная `CLAUDE_CONFIG_DIR` — в её папке, как у самого Claude Code.
+  factory ClaudeCodeHooks.forCurrentUser() =>
+      ClaudeCodeHooks(File(settingsPath(Platform.environment)));
+
+  @visibleForTesting
+  static String settingsPath(Map<String, String> environment) {
+    final custom = environment['CLAUDE_CONFIG_DIR']?.trim();
+    if (custom != null && custom.isNotEmpty) {
+      return p.join(custom, 'settings.json');
+    }
     final home = Platform.isWindows
-        ? Platform.environment['USERPROFILE']!
-        : Platform.environment['HOME']!;
-    return ClaudeCodeHooks(File(p.join(home, '.claude', 'settings.json')));
+        ? environment['USERPROFILE']!
+        : environment['HOME']!;
+    return p.join(home, '.claude', 'settings.json');
   }
 
   final File settingsFile;

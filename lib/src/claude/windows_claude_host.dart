@@ -10,6 +10,7 @@ import 'package:win32_registry/win32_registry.dart';
 import 'claude_host.dart';
 import 'command_line.dart';
 import 'windows_package.dart';
+import 'windows_powershell.dart';
 
 /// Windows: Claude ставится пакетом MSIX, путь к `Claude.exe` меняется с каждым
 /// обновлением, поэтому ищем его заново перед запуском.
@@ -30,8 +31,23 @@ class WindowsClaudeHost extends ClaudeHost {
   @override
   String get profilesBaseDir => _appData;
 
+  /// Где стандартная папка, решает сам Claude: если %APPDATA% на сетевом
+  /// диске (перемещаемые профили в организациях), данные — в
+  /// `%LOCALAPPDATA%\Claude-Data`, иначе — в %APPDATA%\Claude, у пакета MSIX
+  /// виртуализированном в папку пакета.
   @override
-  String get defaultDataDir => switch (_installation?.familyName) {
+  String get defaultDataDir {
+    if (isUnc(_appData) && !isUnc(_localAppData)) {
+      return p.join(_localAppData, 'Claude-Data');
+    }
+    return _roamingDataDir;
+  }
+
+  /// Путь на сетевом диске: `\\server\share\…`.
+  @visibleForTesting
+  static bool isUnc(String path) => path.startsWith(r'\\');
+
+  String get _roamingDataDir => switch (_installation?.familyName) {
     // У пакета MSIX %APPDATA% виртуализирован в папку пакета.
     final family? => p.join(
       _localAppData,
@@ -156,34 +172,35 @@ class WindowsClaudeHost extends ClaudeHost {
   /// В пакете Claude — служба (машина Cowork, `packagedServices`), а такие
   /// пакеты Windows обычно ставит только с правами администратора. Поэтому
   /// сначала — обычная установка, а если Windows отказала — та же, но с
-  /// повышением прав: Windows спросит разрешение (UAC).
-  ///
-  /// Установку делает сценарий PowerShell из файла (`-ExecutionPolicy
-  /// Bypass`: политика по умолчанию запрещает сценарии), итог он пишет в
-  /// файл — у процесса с повышенными правами вывод не прочитать. Claude к
-  /// этому моменту закрыт; на каждую попытку — не больше 10 минут.
+  /// повышением прав: Windows спросит разрешение (UAC). Claude к этому моменту
+  /// закрыт; на каждую попытку — не больше 10 минут ([WindowsPowerShell]).
   @override
   Future<void> installUpdate(File package, String version) async {
     final work = Directory(p.join(ClaudeHost.workDir.path, 'claude-install'));
     await ClaudeHost.removeQuietly(work.path);
-    await work.create(recursive: true);
     try {
-      final result = File(p.join(work.path, 'result.txt'));
-      final script = File(p.join(work.path, 'install.ps1'));
-      await script.writeAsString(
-        installScript(package: package.path, result: result.path),
-      );
-
-      // Журнал попыток — рядом, во временной папке лаунчера: по нему видно,
-      // что ответила Windows, если обновление не встало.
+      // Журнал попыток — во временной папке лаунчера: по нему видно, что
+      // ответила Windows, если обновление не встало.
       final log = File(installLogPath);
+      await log.parent.create(recursive: true);
       await log.writeAsString(
         '${DateTime.now()} Claude $version: ${package.path}\n',
       );
-      var outcome = await _runInstall(script, result, log, elevated: false);
+      final script = installScript(package.path);
+      var (_, outcome) = await WindowsPowerShell.run(
+        script,
+        work: work,
+        elevated: false,
+        log: log,
+      );
       if (!await _installed(version)) {
         final first = outcome;
-        outcome = await _runInstall(script, result, log, elevated: true);
+        (_, outcome) = await WindowsPowerShell.run(
+          script,
+          work: work,
+          elevated: true,
+          log: log,
+        );
         if (!await _installed(version)) {
           throw StateError(
             'Windows не поставила пакет Claude: $outcome'
@@ -196,170 +213,15 @@ class WindowsClaudeHost extends ClaudeHost {
     }
   }
 
-  /// Сценарий установки: итог — «OK» или «ERROR: …» — в файле [result].
+  /// Установка пакета — тело сценария для [WindowsPowerShell.run].
   @visibleForTesting
-  static String installScript({
-    required String package,
-    required String result,
-  }) {
-    String quote(String value) => "'${value.replaceAll("'", "''")}'";
-    return [
-      r"$ProgressPreference = 'SilentlyContinue'",
-      r"$ErrorActionPreference = 'Stop'",
-      'try {',
-      '  Add-AppxPackage -Path ${quote(package)} -ForceApplicationShutdown',
-      "  'OK' | Out-File -Encoding utf8 ${quote(result)}",
-      '} catch {',
-      r"  ('ERROR: ' + $_.Exception.Message) | Out-File -Encoding utf8 "
-          '${quote(result)}',
-      '}',
-      '',
-    ].join('\r\n');
-  }
+  static String installScript(String package) =>
+      'Add-AppxPackage -Path ${WindowsPowerShell.quote(package)} '
+      '-ForceApplicationShutdown';
 
   @override
   String get installLogPath =>
       p.join(ClaudeHost.workDir.path, 'claude-install.log');
-
-  /// Команда запуска сценария [script] для PowerShell: без профиля, без
-  /// вопросов, в обход запрета сценариев. Путь — в кавычках: в пути к
-  /// временной папке бывают пробелы.
-  @visibleForTesting
-  static String scriptArguments(String script) =>
-      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden '
-      '-File "$script"';
-
-  static String get _powerShell => p.join(
-    Platform.environment['SystemRoot'] ?? r'C:\Windows',
-    'System32',
-    'WindowsPowerShell',
-    'v1.0',
-    'powershell.exe',
-  );
-
-  /// Запускает сценарий и ждёт его. Возвращает текст итога — для сообщения
-  /// об ошибке.
-  ///
-  /// Напрямую через Windows: обычный запуск — `CreateProcess` без окна
-  /// (`CREATE_NO_WINDOW`), с правами администратора — `ShellExecuteEx` с
-  /// `runas`: Windows спросит разрешение и честно скажет, если отказали.
-  /// Через `Process.start` PowerShell без консоли завершался молча.
-  static Future<String> _runInstall(
-    File script,
-    File result,
-    File log, {
-    required bool elevated,
-  }) async {
-    if (await result.exists()) await result.delete();
-    final arguments = scriptArguments(script.path);
-    final (process, error) = elevated
-        ? _shellExecuteElevated(_powerShell, arguments)
-        : _createProcess('"$_powerShell" $arguments');
-    var waited = 'не запустился';
-    if (process != null) {
-      waited = await _waitFor(process, const Duration(minutes: 10))
-          ? 'завершился'
-          : 'не закончил за 10 минут';
-      CloseHandle(process);
-    }
-    final written = await result.exists()
-        ? lastLine(await result.readAsString())
-        : '';
-    await log.writeAsString(
-      '--- ${elevated ? 'с правами администратора' : 'обычная'}\n'
-      'PowerShell: $waited${error == 0 ? '' : ', ошибка Windows $error'}\n'
-      'итог: $written\n',
-      mode: FileMode.append,
-    );
-    if (written.isNotEmpty) {
-      return written.replaceFirst(RegExp(r'^ERROR:\s*'), '');
-    }
-    return switch (error) {
-      _errorCancelled => 'разрешение администратора не получено',
-      0 when process != null => 'установка завершилась без ответа',
-      0 => 'PowerShell не запустился',
-      _ => 'PowerShell не запустился (ошибка Windows $error)',
-    };
-  }
-
-  static const _errorCancelled = 1223;
-
-  /// `CreateProcess` без окна. Возвращает процесс или код ошибки Windows.
-  static (HANDLE?, int) _createProcess(String commandLine) {
-    final startup = calloc<STARTUPINFO>()..ref.cb = sizeOf<STARTUPINFO>();
-    final info = calloc<PROCESS_INFORMATION>();
-    final command = commandLine.toNativeUtf16();
-    try {
-      final created = CreateProcess(
-        null,
-        PWSTR(command),
-        null,
-        null,
-        false,
-        CREATE_NO_WINDOW,
-        null,
-        null,
-        startup,
-        info,
-      );
-      if (!created.value) return (null, created.error);
-      CloseHandle(info.ref.hThread);
-      return (info.ref.hProcess, 0);
-    } finally {
-      calloc.free(startup);
-      calloc.free(info);
-      calloc.free(command);
-    }
-  }
-
-  /// `ShellExecuteEx` с `runas`: Windows спросит разрешение администратора.
-  /// Возвращает процесс или код ошибки (1223 — пользователь отказал).
-  static (HANDLE?, int) _shellExecuteElevated(String file, String arguments) {
-    const seeMaskNoCloseProcess = 0x40;
-    const seeMaskNoAsync = 0x100;
-    final info = calloc<SHELLEXECUTEINFO>();
-    final verb = 'runas'.toNativeUtf16();
-    final path = file.toNativeUtf16();
-    final parameters = arguments.toNativeUtf16();
-    try {
-      info.ref
-        ..cbSize = sizeOf<SHELLEXECUTEINFO>()
-        ..fMask = seeMaskNoCloseProcess | seeMaskNoAsync
-        ..lpVerb = PWSTR(verb)
-        ..lpFile = PWSTR(path)
-        ..lpParameters = PWSTR(parameters)
-        ..nShow = SW_HIDE;
-      final executed = ShellExecuteEx(info);
-      if (!executed.value) return (null, executed.error);
-      final process = info.ref.hProcess;
-      return (process.address == 0 ? null : process, 0);
-    } finally {
-      calloc.free(info);
-      calloc.free(verb);
-      calloc.free(path);
-      calloc.free(parameters);
-    }
-  }
-
-  /// Ждёт завершения [process], не останавливая окно: спрашивает раз в
-  /// полсекунды. false — не дождались за [timeout].
-  static Future<bool> _waitFor(HANDLE process, Duration timeout) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (WaitForSingleObject(process, 0).value == WAIT_OBJECT_0) return true;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
-    return false;
-  }
-
-  /// Последняя непустая строка вывода, без метки порядка байтов UTF-8.
-  @visibleForTesting
-  static String lastLine(String text) => text
-      .replaceAll('﻿', '')
-      .trim()
-      .split('\n')
-      .map((line) => line.trim())
-      .lastWhere((line) => line.isNotEmpty, orElse: () => '');
 
   Future<bool> _installed(String version) async {
     await locate();

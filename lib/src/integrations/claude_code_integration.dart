@@ -281,6 +281,19 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   /// Сессию приложения открываем в Claude, остальное — окно лаунчера.
+  /// Лаунчер запустили нажатием на его уведомление, пока он был закрыт
+  /// (Windows): открываем то же, что и при нажатии на работающем лаунчере.
+  Future<void> openLaunchNotification() async {
+    try {
+      final payload = await notifier?.launchPayload();
+      if (payload != null) _onNotificationTap(payload);
+    } catch (error) {
+      debugPrint(
+        'Не удалось узнать, каким уведомлением запущен лаунчер: $error',
+      );
+    }
+  }
+
   void _onNotificationTap(String hostSessionId) {
     final link = CodeSession.linkFor(hostSessionId);
     final running = launcher.runningProfiles;
