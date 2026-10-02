@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../app_settings.dart';
+import '../claude/claude_host.dart';
 import '../launcher_controller.dart';
 import '../notifications.dart';
 import '../profile.dart';
@@ -13,6 +14,7 @@ import 'claude_code_events.dart';
 import 'claude_code_hooks.dart';
 import 'claude_code_sessions.dart';
 import 'code_notifications.dart';
+import 'code_profile_resolver.dart';
 import 'notification_handoff.dart';
 
 /// События Claude Code: подключение хуков, приём событий, сессии открытого
@@ -24,6 +26,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     required this.launcher,
     ClaudeCodeHooks? hooks,
     ValueListenable<bool>? windowVisible,
+    this.profileResolver = const CodeProfileResolver(),
     this.handoff,
     this.notifier,
     this.onOpenWindow,
@@ -38,6 +41,12 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   final AppSettings settings;
   final LauncherController launcher;
   final ClaudeCodeHooks hooks;
+  final CodeProfileResolver profileResolver;
+  Future<void> _handlingEvents = Future.value();
+  int _eventGeneration = 0;
+
+  @visibleForTesting
+  Future<void> get pendingEvents => _handlingEvents;
 
   /// Выключает уведомления самих Claude, пока их показывает лаунчер. Без него
   /// (или без [notifier]) лаунчер уведомлений не показывает и Claude не трогает.
@@ -194,6 +203,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   Future<void> _disconnect() async {
+    _eventGeneration++;
     await _server?.stop();
     _server = null;
     _ticker?.cancel();
@@ -209,25 +219,43 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     _notify();
   }
 
-  /// Обычный режим сохраняет историческую привязку к единственному профилю.
-  /// В параллельном режиме обновляем только ранее опознанные сессии.
-  /// Состояние (и точка на свёрнутой карточке) меняется сразу, а переписку
-  /// дочитываем, только если время и токены сейчас видны. Уведомляем и без
-  /// открытого профиля: сессия может идти в терминале.
-  Future<void> _onEvent(ClaudeCodeEvent event) async {
-    final running = launcher.runningProfiles;
-    final knownId = sessions.byId(event.sessionId)?.profileId;
-    final known = running.where((p) => p.id == knownId).firstOrNull;
-    // Уже известная сессия сохраняет профиль при открытии соседнего. Новое
-    // неоднозначное событие не присваиваем случайной карточке, даже если
-    // остался один экземпляр: событие может запоздать от закрытого соседа.
-    final profile =
-        known ??
-        (!launcher.parallelLaunch &&
-                launcher.instances.length == 1 &&
-                running.length == 1
-            ? running.single
-            : null);
+  /// Serialize asynchronous metadata reads so Stop cannot overtake a prompt.
+  Future<void> _onEvent(ClaudeCodeEvent event) {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          if (_disposed || generation != _eventGeneration) return;
+          await _handleEvent(event, generation);
+        })
+        .catchError((Object error) {
+          debugPrint(
+            'Не удалось обработать событие Claude Code: ${error.runtimeType}',
+          );
+        });
+  }
+
+  Future<void> _handleEvent(ClaudeCodeEvent event, int generation) async {
+    Profile? profile;
+    if (launcher.parallelLaunch) {
+      final id = await profileResolver.resolve(event, {
+        for (final candidate in launcher.profiles)
+          candidate.id: launcher.host.readableDataDirs(
+            ClaudeInstance(
+              pid: 0,
+              dataDir: candidate.usesDefaultFolder
+                  ? null
+                  : launcher.dataDirOf(candidate),
+            ),
+          ),
+      });
+      if (_disposed || generation != _eventGeneration) return;
+      profile = launcher.runningProfiles.where((p) => p.id == id).firstOrNull;
+    } else {
+      final running = launcher.runningProfiles;
+      profile = launcher.instances.length == 1 && running.length == 1
+          ? running.single
+          : null;
+    }
     final before = sessions.byId(event.sessionId)?.state;
     if (profile != null) {
       sessions.handle(event, profile.id);
@@ -271,7 +299,9 @@ class ClaudeCodeIntegration extends ChangeNotifier {
           (event.cwd.isEmpty ? 'Claude Code' : p.basename(event.cwd));
       await notifier.show(
         id: id,
-        title: title,
+        title: launcher.parallelLaunch && profile != null
+            ? '${profile.title} · $title'
+            : title,
         body: body,
         payload: event.hostSessionId.isEmpty || profile == null
             ? ''

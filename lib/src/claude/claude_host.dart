@@ -59,6 +59,9 @@ abstract class ClaudeHost {
   /// его вперёд.
   Future<void> openLink(ClaudeInstance instance, Uri link);
 
+  /// Доставка URL конкретному процессу, без выбора экземпляра системой.
+  bool get supportsTargetedLinks => false;
+
   /// Смотрит ли пользователь сейчас в окно [instance]: оно активно.
   Future<bool> isFrontmost(ClaudeInstance instance) async => false;
 

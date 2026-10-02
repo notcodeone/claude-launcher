@@ -14,6 +14,9 @@ class FakeHost extends ClaudeHost {
   /// Закрывается ли Claude по просьбе (на Windows он может уйти в трей).
   bool quitsOnRequest = true;
   int _nextPid = 100;
+  bool targetedLinks = false;
+  @override
+  bool get supportsTargetedLinks => targetedLinks;
 
   @override
   String get profilesBaseDir => '/support';
@@ -159,6 +162,20 @@ void main() {
 
   group('параллельный запуск', () {
     setUp(() => launcher.setParallelLaunch(true));
+
+    test(
+      'адресный хост открывает ссылку в выбранном из двух процессов',
+      () async {
+        host.targetedLinks = true;
+        final first = host.start(null);
+        final second = host.start(launcher.dataDirOf(personal));
+        final link = Uri.parse('claude://claude.ai/epitaxy/local_test');
+        await launcher.openLink(personal, link);
+        expect(host.calls, ['link ${second.pid} $link']);
+        expect(host.instances, [first, second]);
+        expect(launcher.lastError, isNull);
+      },
+    );
 
     test(
       'сохраняет открытый и неизвестный профили, запускает с защитой',

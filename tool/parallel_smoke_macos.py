@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import sys
 import subprocess
 import tempfile
 import time
@@ -72,6 +73,18 @@ def main():
             time.sleep(5)
             assert a != b and set(owned()) == {a, b}, 'Profiles did not coexist'
             assert all(d.exists() for d in dirs), 'Profile directories not created'
+            links_tested = '--links' in sys.argv
+            if links_tested:
+                repo = Path(__file__).resolve().parents[1]
+                sender = Path(root) / 'link-sender'
+                subprocess.run(['swiftc', str(repo / 'macos/Runner/ClaudeLinkDispatcher.swift'),
+                                str(repo / 'tool/link_dispatch_test/main.swift'),
+                                '-o', str(sender)], check=True)
+                for target in [a, b]:
+                    subprocess.run([str(sender), 'send', str(target),
+                                    'claude://claude.ai/epitaxy/local_launcher_smoke'], check=True)
+                assert set(owned()) == {a, b}, 'URL delivery launched another process'
+
             launch(dirs[0])
             time.sleep(5)
             deduplicated = set(owned()) == {a, b}
@@ -82,6 +95,7 @@ def main():
             assert b in owned(), 'Closing A also closed B'
             assert before.issubset(processes()), 'A pre-existing Claude exited'
             print(json.dumps({'result': 'PASS', 'two_profiles': True,
+                              'targeted_url_transport': links_tested,
                               'same_directory_deduplicated': deduplicated,
                               'independent_close': True,
                               'existing_processes_preserved': True}))

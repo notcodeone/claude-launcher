@@ -234,7 +234,7 @@ class LauncherController extends ChangeNotifier {
     try {
       await refresh();
       // Системный обработчик URL пока не адресует конкретный экземпляр.
-      if (instances.length > 1) {
+      if (instances.length > 1 && !host.supportsTargetedLinks) {
         throw StateError(
           'Переход к сессии пока недоступен при нескольких профилях. '
           'Покажите окно нужного профиля и выберите сессию в Claude.',

@@ -71,6 +71,15 @@ class FakeNotifier extends Notifier {
   Future<void> openSettings() async {}
 }
 
+class ProfileMetadataHost extends FakeHost {
+  ProfileMetadataHost(this.base);
+  final String base;
+  @override
+  String get profilesBaseDir => base;
+  @override
+  String get defaultDataDir => '$base/Claude';
+}
+
 void main() {
   group('разбор событий хуков', () {
     test('Stop — задача завершена, текст ответа не сохраняется', () {
@@ -194,150 +203,173 @@ void main() {
     });
   });
 
-  test(
-    'интеграция: включение, событие открытого профиля, выключение',
-    () async {
-      final dir = await Directory.systemTemp.createTemp('claude_launcher_int');
-      addTearDown(() => dir.delete(recursive: true));
-      final host = FakeHost();
-      final launcher = LauncherController(
-        host: host,
-        store: ProfileStore(File('${dir.path}/profiles.json')),
-      );
-      await launcher.init();
-      addTearDown(launcher.dispose);
-      final settings = AppSettings(File('${dir.path}/settings.json'));
-      await settings.load();
-      await settings.setEventsPort(0);
-      final hooks = ClaudeCodeHooks(File('${dir.path}/.claude/settings.json'));
-      final windowVisible = ValueNotifier(true);
-      final integration = ClaudeCodeIntegration(
-        settings: settings,
-        launcher: launcher,
-        hooks: hooks,
-        windowVisible: windowVisible,
-        tickInterval: const Duration(milliseconds: 20),
-      );
-      addTearDown(integration.dispose);
+  test('интеграция: включение, событие открытого профиля, выключение', () async {
+    final dir = await Directory.systemTemp.createTemp('claude_launcher_int');
+    addTearDown(() => dir.delete(recursive: true));
+    final host = ProfileMetadataHost(dir.path);
+    final launcher = LauncherController(
+      host: host,
+      store: ProfileStore(File('${dir.path}/profiles.json')),
+    );
+    await launcher.init();
+    addTearDown(launcher.dispose);
+    final settings = AppSettings(File('${dir.path}/settings.json'));
+    await settings.load();
+    await settings.setEventsPort(0);
+    final hooks = ClaudeCodeHooks(File('${dir.path}/.claude/settings.json'));
+    final windowVisible = ValueNotifier(true);
+    final integration = ClaudeCodeIntegration(
+      settings: settings,
+      launcher: launcher,
+      hooks: hooks,
+      windowVisible: windowVisible,
+      tickInterval: const Duration(milliseconds: 20),
+    );
+    addTearDown(integration.dispose);
 
-      await integration.setEnabled(true);
-      expect(integration.error, isNull);
-      expect(integration.connected, isTrue);
-      expect(settings.claudeCodeEvents, isTrue);
-      final port = settings.eventsPort;
-      expect(port, isNot(0));
-      expect(
-        await hooks.isInstalled(port: port, token: settings.eventsToken),
-        isTrue,
-      );
+    await integration.setEnabled(true);
+    expect(integration.error, isNull);
+    expect(integration.connected, isTrue);
+    expect(settings.claudeCodeEvents, isTrue);
+    final port = settings.eventsPort;
+    expect(port, isNot(0));
+    expect(
+      await hooks.isInstalled(port: port, token: settings.eventsToken),
+      isTrue,
+    );
 
-      host.start(null);
-      await launcher.refresh();
-      final profile = launcher.profiles.single;
-      Future<void> send(String event) => post(port, {
-        'hook_event_name': event,
-        'session_id': 's1',
-        'cwd': '/p/demo',
-      }, token: settings.eventsToken);
+    host.start(null);
+    await launcher.refresh();
+    final profile = launcher.profiles.single;
+    Future<void> send(String event) => post(
+      port,
+      {'hook_event_name': event, 'session_id': 's1', 'cwd': '/p/demo'},
+      token: settings.eventsToken,
+      hostSession: 'local_known',
+    ).then((_) => integration.pendingEvents);
 
-      await send('UserPromptSubmit');
-      final session = integration.sessions.of(profile.id).single;
-      expect(session.name, 'demo');
-      expect(session.state, CodeSessionState.working);
-      await send('Stop');
-      expect(session.state, CodeSessionState.done);
+    await send('UserPromptSubmit');
+    final session = integration.sessions.of(profile.id).single;
+    expect(session.name, 'demo');
+    expect(session.state, CodeSessionState.working);
+    await send('Stop');
+    expect(session.state, CodeSessionState.done);
 
-      launcher.setParallelLaunch(true);
-      final other = await launcher.addProfile(name: 'Другой');
-      final otherInstance = host.start(launcher.dataDirOf(other));
-      await launcher.refresh();
-      await send('UserPromptSubmit');
-      expect(
-        integration.sessions.of(profile.id).single.state,
-        CodeSessionState.working,
-      );
-      await post(
-        port,
-        {'hook_event_name': 'UserPromptSubmit', 'session_id': 'unknown'},
-        token: settings.eventsToken,
-        hostSession: 'local_unknown',
-      );
-      expect(integration.sessions.byId('unknown'), isNull);
-      expect(integration.sessions.of(other.id), isEmpty);
-      host.instances.remove(otherInstance);
-      await launcher.refresh();
-      await post(
-        port,
-        {'hook_event_name': 'UserPromptSubmit', 'session_id': 'late_unknown'},
-        token: settings.eventsToken,
-        hostSession: 'local_other_closed',
-      );
-      expect(integration.sessions.byId('late_unknown'), isNull);
-      launcher.setParallelLaunch(false);
+    final metadata = File(
+      '${host.defaultDataDir}/claude-code-sessions/account/org/local_known.json',
+    );
+    await metadata.parent.create(recursive: true);
+    await metadata.writeAsString(
+      jsonEncode({'sessionId': 'local_known', 'cliSessionId': 's1'}),
+    );
+    launcher.setParallelLaunch(true);
+    final other = await launcher.addProfile(name: 'Другой');
+    final otherInstance = host.start(launcher.dataDirOf(other));
+    await launcher.refresh();
+    await send('UserPromptSubmit');
+    expect(
+      integration.sessions.of(profile.id).single.state,
+      CodeSessionState.working,
+    );
+    await post(
+      port,
+      {'hook_event_name': 'UserPromptSubmit', 'session_id': 'unknown'},
+      token: settings.eventsToken,
+      hostSession: 'local_unknown',
+    );
+    await integration.pendingEvents;
+    expect(integration.sessions.byId('unknown'), isNull);
+    expect(integration.sessions.of(other.id), isEmpty);
+    final otherMetadata = File(
+      '${launcher.dataDirOf(other)}/claude-code-sessions/account/org/local_other.json',
+    );
+    await otherMetadata.parent.create(recursive: true);
+    await otherMetadata.writeAsString(
+      jsonEncode({'sessionId': 'local_other', 'cliSessionId': 's_other'}),
+    );
+    await post(
+      port,
+      {'hook_event_name': 'UserPromptSubmit', 'session_id': 's_other'},
+      token: settings.eventsToken,
+      hostSession: 'local_other',
+    );
+    await integration.pendingEvents;
+    expect(integration.sessions.of(other.id).single.id, 's_other');
+    host.instances.remove(otherInstance);
+    await launcher.refresh();
+    await post(
+      port,
+      {'hook_event_name': 'UserPromptSubmit', 'session_id': 'late_unknown'},
+      token: settings.eventsToken,
+      hostSession: 'local_other_closed',
+    );
+    await integration.pendingEvents;
+    expect(integration.sessions.byId('late_unknown'), isNull);
+    launcher.setParallelLaunch(false);
 
-      // Пока окно закрыто, переписку не читаем; открыли — сразу догоняем.
-      final transcript = File('${dir.path}/s2.jsonl')..writeAsStringSync('');
-      windowVisible.value = false;
-      await post(port, {
-        'hook_event_name': 'UserPromptSubmit',
-        'session_id': 's2',
-        'transcript_path': transcript.path,
-      }, token: settings.eventsToken);
-      transcript.writeAsStringSync(
-        '${jsonEncode({
-          'type': 'assistant',
-          'message': {
-            'content': [
-              {'type': 'text', 'text': 'я' * 40},
-            ],
-          },
-        })}\n',
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      final hidden = integration.sessions
-          .of(profile.id)
-          .firstWhere((session) => session.id == 's2');
-      expect(hidden.tokens, 0);
-      windowVisible.value = true;
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(hidden.tokens, 10);
+    // Пока окно закрыто, переписку не читаем; открыли — сразу догоняем.
+    final transcript = File('${dir.path}/s2.jsonl')..writeAsStringSync('');
+    windowVisible.value = false;
+    await post(port, {
+      'hook_event_name': 'UserPromptSubmit',
+      'session_id': 's2',
+      'transcript_path': transcript.path,
+    }, token: settings.eventsToken);
+    await integration.pendingEvents;
+    transcript.writeAsStringSync(
+      '${jsonEncode({
+        'type': 'assistant',
+        'message': {
+          'content': [
+            {'type': 'text', 'text': 'я' * 40},
+          ],
+        },
+      })}\n',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final hidden = integration.sessions
+        .of(profile.id)
+        .firstWhere((session) => session.id == 's2');
+    expect(hidden.tokens, 0);
+    windowVisible.value = true;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(hidden.tokens, 10);
 
-      // Свёрнутая карточка — тоже не читаем.
-      await launcher.updateProfile(profile.copyWith(sessionsCollapsed: true));
-      transcript.writeAsStringSync(
-        '${jsonEncode({
-          'type': 'assistant',
-          'message': {
-            'content': [
-              {'type': 'text', 'text': 'я' * 40},
-            ],
-          },
-        })}\n',
-        mode: FileMode.append,
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(hidden.tokens, 10);
-      await launcher.updateProfile(profile.copyWith(sessionsCollapsed: false));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(hidden.tokens, 20);
+    // Свёрнутая карточка — тоже не читаем.
+    await launcher.updateProfile(profile.copyWith(sessionsCollapsed: true));
+    transcript.writeAsStringSync(
+      '${jsonEncode({
+        'type': 'assistant',
+        'message': {
+          'content': [
+            {'type': 'text', 'text': 'я' * 40},
+          ],
+        },
+      })}\n',
+      mode: FileMode.append,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(hidden.tokens, 10);
+    await launcher.updateProfile(profile.copyWith(sessionsCollapsed: false));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(hidden.tokens, 20);
 
-      // Профиль закрыли — его сессии больше не показываем.
-      host.instances.clear();
-      await launcher.refresh();
-      expect(integration.sessions.of(profile.id), isEmpty);
+    // Профиль закрыли — его сессии больше не показываем.
+    host.instances.clear();
+    await launcher.refresh();
+    expect(integration.sessions.of(profile.id), isEmpty);
 
-      host.start(null);
-      await launcher.refresh();
-      await send('UserPromptSubmit');
-      await integration.setEnabled(false);
-      expect(integration.connected, isFalse);
-      expect(integration.sessions.isEmpty, isTrue);
-      expect(
-        await hooks.isInstalled(port: port, token: settings.eventsToken),
-        isFalse,
-      );
-    },
-  );
+    host.start(null);
+    await launcher.refresh();
+    await send('UserPromptSubmit');
+    await integration.setEnabled(false);
+    expect(integration.connected, isFalse);
+    expect(integration.sessions.isEmpty, isTrue);
+    expect(
+      await hooks.isInstalled(port: port, token: settings.eventsToken),
+      isFalse,
+    );
+  });
 
   test('уведомления: лаунчер забирает их у Claude и показывает сам', () async {
     final dir = await Directory.systemTemp.createTemp('claude_launcher_ntf');
@@ -398,7 +430,7 @@ void main() {
           },
           token: token,
           hostSession: 'local_abc',
-        );
+        ).then((_) => integration.pendingEvents);
 
     // Терминал без открытого Claude: сессию на карточке не показать,
     // а уведомить нужно.
@@ -409,6 +441,7 @@ void main() {
       'session_id': 't1',
       'cwd': '/p/cli',
     }, token: token);
+    await integration.pendingEvents;
     expect(notifier.log, ['show cli: Нужно разрешение: Bash []']);
 
     host.start(null);
