@@ -21,6 +21,17 @@ trap 'hdiutil detach "$work/mnt" -quiet 2>/dev/null || true; rm -rf "$work"' EXI
 
 echo "Скачиваю $(basename "$url")…"
 curl -fL --progress-bar "$url" -o "$work/ClaudeLauncher.dmg"
+
+# Сверяем с суммой из выпуска (SHA256SUMS.txt — с версии 1.5.10).
+if curl -fsSL "$(dirname "$url")/SHA256SUMS.txt" -o "$work/sums" 2>/dev/null; then
+  expected="$(awk -v f="$(basename "$url")" '$2 == f || $2 == "*" f { print $1 }' "$work/sums")"
+  actual="$(shasum -a 256 "$work/ClaudeLauncher.dmg" | awk '{ print $1 }')"
+  if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
+    echo "Контрольная сумма не совпала — файл повреждён при скачивании. Попробуйте ещё раз." >&2
+    exit 1
+  fi
+fi
+
 hdiutil attach "$work/ClaudeLauncher.dmg" -nobrowse -readonly -noautoopen \
   -mountpoint "$work/mnt" -quiet
 

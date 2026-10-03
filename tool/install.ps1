@@ -21,6 +21,26 @@
   $setup = Join-Path $env:TEMP $asset.name
   Write-Host "Скачиваю $($asset.name)…"
   Invoke-WebRequest $asset.browser_download_url -OutFile $setup
+
+  # Сверяем с суммой из выпуска (SHA256SUMS.txt — с версии 1.5.10).
+  $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
+  if ($sums) {
+    $pattern = "^([0-9a-fA-F]{64}) [ *]$([regex]::Escape($asset.name))\s*$"
+    # В файл: GitHub отдаёт его как двоичный, и текстом его вернёт не всякий PowerShell.
+    $sumsFile = "$setup.sha256"
+    Invoke-WebRequest $sums.browser_download_url -OutFile $sumsFile
+    $line = Get-Content $sumsFile | Where-Object { $_ -match $pattern } | Select-Object -First 1
+    Remove-Item $sumsFile -ErrorAction SilentlyContinue
+    if ($line -and $line -match $pattern) {
+      $expected = $Matches[1].ToLower()
+      $actual = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+      if ($expected -ne $actual) {
+        Remove-Item $setup -ErrorAction SilentlyContinue
+        throw 'Контрольная сумма не совпала — файл повреждён при скачивании. Попробуйте ещё раз.'
+      }
+    }
+  }
+
   # На случай, если пометка всё же есть.
   Unblock-File $setup
 

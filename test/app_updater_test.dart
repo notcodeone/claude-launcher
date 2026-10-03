@@ -63,4 +63,38 @@ void main() {
     );
     expect(AppRelease.fromJson('нет'), isNull);
   });
+
+  test('суммы файлов: от GitHub и из SHA256SUMS.txt', () {
+    const hex =
+        'E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855';
+    final release = AppRelease.fromJson({
+      'tag_name': 'v1.5.10',
+      'html_url': 'https://github.com/x/releases/v1.5.10',
+      'assets': [
+        {
+          'name': 'ClaudeLauncher-1.5.10.dmg',
+          'browser_download_url': 'https://github.com/x/a.dmg',
+          'digest': 'sha256:$hex',
+        },
+        {
+          'name': 'ClaudeLauncher-Setup-1.5.10.exe',
+          'browser_download_url': 'https://github.com/x/a.exe',
+          'digest': 'md5:abc',
+        },
+      ],
+    })!;
+    expect(release.digests, {'ClaudeLauncher-1.5.10.dmg': hex.toLowerCase()});
+
+    expect(
+      parseChecksums(
+        '$hex  ClaudeLauncher-1.5.10.dmg\n'
+        '${'a' * 64} *ClaudeLauncher-Setup-1.5.10.exe\r\n'
+        'мусор\n',
+      ),
+      {
+        'ClaudeLauncher-1.5.10.dmg': hex.toLowerCase(),
+        'ClaudeLauncher-Setup-1.5.10.exe': 'a' * 64,
+      },
+    );
+  });
 }

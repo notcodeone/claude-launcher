@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -63,22 +65,16 @@ class WindowsClaudeHost extends ClaudeHost {
   @override
   Duration get pollInterval => const Duration(seconds: 3);
 
+  /// Claude выходит за пару секунд после [requestQuit]; принудительно — только
+  /// по кнопке: оно обрывает сессии Code и Cowork.
   @override
-  Duration get manualQuitHintAfter => const Duration(seconds: 6);
-
-  /// При закрытии окна Claude уходит в трей, а попросить его выйти извне
-  /// нельзя. Поэтому, если за 5 секунд он не вышел сам (вдруг в настройках
-  /// Claude выключена работа в фоне), завершаем его принудительно. Запас — на
-  /// случай, когда Claude выходит сам, но не мгновенно: принудительное
-  /// завершение обрывает сессии Code и Cowork.
-  @override
-  Duration get autoForceQuitAfter => const Duration(seconds: 5);
+  Duration get manualQuitHintAfter => const Duration(seconds: 10);
 
   @override
   String get manualQuitHint =>
-      'Claude свернулся в трей и продолжает работать. Закройте его '
-      'принудительно или сами: значок Claude в трее (стрелка ▲ у часов) → '
-      'правая кнопка мыши → Quit. Лаунчер продолжит, как только Claude закроется.';
+      'Claude не закрылся сам. Закройте его принудительно или сами: значок '
+      'Claude в трее (стрелка ▲ у часов) → правая кнопка мыши → Quit. Лаунчер '
+      'продолжит, как только Claude закроется.';
 
   @override
   String dataDirOf(ClaudeInstance instance) {
@@ -564,34 +560,151 @@ class WindowsClaudeHost extends ClaudeHost {
     }
   }
 
-  /// Как нажатие на крестик: WM_CLOSE видимым окнам. Если Claude при этом
-  /// сворачивается в трей, контроллер попросит закрыть его вручную.
+  /// Сколько после старта Claude ждать конца его загрузки.
+  static const bootTimeout = Duration(seconds: 30);
+
+  /// Как выход из сеанса Windows: WM_QUERYENDSESSION, затем WM_ENDSESSION
+  /// всем окнам Claude. Крестик и `taskkill` лишь прячут Claude в трей, а на
+  /// эту пару он выходит сам, как по Quit в трее, и сохраняет сессии Code и
+  /// Cowork (в его журнале — «Windows session ending … quitting the app»).
+  ///
+  /// Сообщение посреди загрузки завершает Claude без его уборки, поэтому
+  /// сначала ждём в журнале этого запуска `boot: done` (см. [bootedSince]).
   @override
   Future<void> requestQuit(ClaudeInstance instance) async {
-    for (final window in _visibleWindowsOf(instance.pid)) {
-      PostMessage(window, WM_CLOSE, const WPARAM(0), const LPARAM(0));
+    await _waitForBoot(instance);
+    final pid = instance.pid;
+    // Окно отвечает на SendMessageTimeout до 3 с — не в потоке интерфейса.
+    await Isolate.run(() => _sendEndSession(pid));
+  }
+
+  Future<void> _waitForBoot(ClaudeInstance instance) async {
+    final started = _startTimeOf(instance.pid);
+    if (started == null) return;
+    final logs = [
+      for (final path in logFiles(
+        dataDirs: {
+          instance.dataDir ?? p.join(_appData, 'Claude'),
+          dataDirOf(instance),
+        },
+        appData: _appData,
+        localAppData: _localAppData,
+        packageFamily: _installation?.familyName,
+      ))
+        File(path),
+    ];
+    // Давно запущенный Claude не ждём, даже если журнал не нашёлся.
+    final deadline = started.add(bootTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      for (final log in logs) {
+        final text = await _tail(log);
+        if (text != null && bootedSince(text, started)) return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
   }
 
-  List<HWND> _visibleWindowsOf(int pid) {
-    final windows = <HWND>[];
-    final ownerPid = calloc<Uint32>();
-    final callback = NativeCallable<WNDENUMPROC>.isolateLocal((
-      Pointer handle,
-      int _,
-    ) {
-      final window = HWND(handle);
-      GetWindowThreadProcessId(window, ownerPid);
-      if (ownerPid.value == pid && IsWindowVisible(window)) windows.add(window);
-      return TRUE;
-    }, exceptionalReturn: FALSE);
-    try {
-      EnumWindows(callback.nativeFunction, const LPARAM(0));
-    } finally {
-      callback.close();
-      calloc.free(ownerPid);
+  /// Где может лежать `main.log` экземпляра. У папки в %APPDATA% журнал — по
+  /// тому же пути в %LOCALAPPDATA% (`Roaming\Claude-Work` →
+  /// `Local\Claude-Work\logs`), у пакета MSIX — в его виртуальной копии
+  /// %LOCALAPPDATA%; у остальных — в самой папке.
+  @visibleForTesting
+  static List<String> logFiles({
+    required Set<String> dataDirs,
+    required String appData,
+    required String localAppData,
+    String? packageFamily,
+  }) => [
+    for (final dir in dataDirs) ...[
+      if (p.isWithin(appData, dir)) ...[
+        p.join(
+          localAppData,
+          p.relative(dir, from: appData),
+          'logs',
+          'main.log',
+        ),
+        if (packageFamily != null)
+          p.join(
+            localAppData,
+            'Packages',
+            packageFamily,
+            'LocalCache',
+            'Local',
+            p.relative(dir, from: appData),
+            'logs',
+            'main.log',
+          ),
+      ],
+      p.join(dir, 'logs', 'main.log'),
+    ],
+  ];
+
+  /// Есть ли в журнале строка `boot: done` этого запуска — не раньше [started].
+  /// Строки журнала начинаются с местного времени `ГГГГ-ММ-ДД чч:мм:сс`.
+  @visibleForTesting
+  static bool bootedSince(String log, DateTime started) {
+    final since = started.subtract(
+      Duration(
+        microseconds: started.microsecond,
+        milliseconds: started.millisecond,
+      ),
+    );
+    for (final line in const LineSplitter().convert(log)) {
+      if (!line.contains('boot: done')) continue;
+      final time = _logTime.firstMatch(line);
+      if (time == null) continue;
+      final at = DateTime.tryParse('${time[1]}T${time[2]}');
+      if (at != null && !at.isBefore(since)) return true;
     }
-    return windows;
+    return false;
+  }
+
+  static final _logTime = RegExp(r'^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})');
+
+  /// Конец журнала: он растёт неделями, а нужна только свежая загрузка.
+  static Future<String?> _tail(File log) async {
+    const size = 256 * 1024;
+    try {
+      final file = await log.open();
+      try {
+        final length = await file.length();
+        await file.setPosition(length > size ? length - size : 0);
+        return utf8.decode(await file.read(size), allowMalformed: true);
+      } finally {
+        await file.close();
+      }
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  DateTime? _startTimeOf(int pid) {
+    final handle = OpenProcess(
+      PROCESS_QUERY_LIMITED_INFORMATION,
+      false,
+      pid,
+    ).value;
+    if (handle.address == 0) return null;
+    final times = calloc<FILETIME>(4);
+    try {
+      if (!GetProcessTimes(
+        handle,
+        times,
+        times + 1,
+        times + 2,
+        times + 3,
+      ).value) {
+        return null;
+      }
+      // Сотни наносекунд с 1601 года, UTC.
+      final ticks = (times.ref.dwHighDateTime << 32) | times.ref.dwLowDateTime;
+      return DateTime.utc(
+        1601,
+      ).add(Duration(microseconds: ticks ~/ 10)).toLocal();
+    } finally {
+      calloc.free(times);
+      CloseHandle(handle);
+    }
   }
 
   // ------------------------------------------------------------ значок в трее
@@ -691,4 +804,52 @@ int _compareVersionDirs(String a, String b) {
       .map((part) => int.tryParse(part) ?? 0)
       .toList();
   return compareVersions(parts(a), parts(b));
+}
+
+/// WM_QUERYENDSESSION и WM_ENDSESSION(TRUE) всем окнам верхнего уровня процесса
+/// [pid], и скрытым: у Claude, свёрнутого в трей, видимых окон нет. Зависшее
+/// окно не ждём дольше 3 с. Выполняется в отдельном изоляте.
+void _sendEndSession(int pid) {
+  final result = calloc<IntPtr>();
+  try {
+    for (final window in _windowsOf(pid)) {
+      for (final (message, wParam) in [
+        (WM_QUERYENDSESSION, 0),
+        (WM_ENDSESSION, 1),
+      ]) {
+        SendMessageTimeout(
+          window,
+          message,
+          WPARAM(wParam),
+          const LPARAM(0),
+          SMTO_ABORTIFHUNG,
+          3000,
+          result,
+        );
+      }
+    }
+  } finally {
+    calloc.free(result);
+  }
+}
+
+List<HWND> _windowsOf(int pid) {
+  final windows = <HWND>[];
+  final ownerPid = calloc<Uint32>();
+  final callback = NativeCallable<WNDENUMPROC>.isolateLocal((
+    Pointer handle,
+    int _,
+  ) {
+    final window = HWND(handle);
+    GetWindowThreadProcessId(window, ownerPid);
+    if (ownerPid.value == pid) windows.add(window);
+    return TRUE;
+  }, exceptionalReturn: FALSE);
+  try {
+    EnumWindows(callback.nativeFunction, const LPARAM(0));
+  } finally {
+    callback.close();
+    calloc.free(ownerPid);
+  }
+  return windows;
 }

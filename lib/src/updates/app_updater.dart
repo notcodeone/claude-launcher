@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
@@ -14,6 +15,7 @@ class AppRelease {
     required this.version,
     required this.page,
     required this.assets,
+    this.digests = const {},
   });
 
   final String version;
@@ -21,6 +23,12 @@ class AppRelease {
 
   /// Имя файла → ссылка на скачивание.
   final Map<String, Uri> assets;
+
+  /// Имя файла → SHA-256 (hex), который GitHub посчитал при загрузке файла.
+  final Map<String, String> digests;
+
+  /// Файл с суммами всех файлов выпуска (с 1.5.10): строки `<sha256>  <имя>`.
+  static const checksumsName = 'SHA256SUMS.txt';
 
   /// Ответ `GET /repos/<repo>/releases/latest`. Тег — `vX.Y.Z`.
   static AppRelease? fromJson(Object? json) {
@@ -44,6 +52,14 @@ class AppRelease {
             if (Uri.tryParse(url) case final uri? when uri.scheme == 'https')
               name: uri,
       },
+      digests: {
+        for (final asset in json['assets'] as List? ?? const [])
+          if (asset case {
+            'name': final String name,
+            'digest': final String digest,
+          } when digest.startsWith('sha256:'))
+            name: digest.substring('sha256:'.length).toLowerCase(),
+      },
     );
   }
 
@@ -54,6 +70,16 @@ class AppRelease {
       ? assets['ClaudeLauncher-Setup-$version.exe']
       : null;
 }
+
+/// `SHA256SUMS.txt` → имя файла → сумма. Формат `sha256sum`: `<hex>  <имя>`,
+/// перед именем двоичного файла бывает `*`.
+@visibleForTesting
+Map<String, String> parseChecksums(String text) => {
+  for (final line in const LineSplitter().convert(text))
+    if (RegExp(r'^([0-9a-fA-F]{64}) [ *](.+)$').firstMatch(line.trim())
+        case final match?)
+      match[2]!: match[1]!.toLowerCase(),
+};
 
 /// «1.2.10» → [1, 2, 10]; null — не номер версии.
 List<int>? parseVersion(String version) {
@@ -274,6 +300,7 @@ class AppUpdater extends ChangeNotifier {
       temp = await Directory.systemTemp.createTemp('claude-launcher-update');
       final file = File(p.join(temp.path, p.basename(installer.path)));
       await _download(installer, file);
+      await _verify(release, file);
       phase = UpdatePhase.installing;
       notifyListeners();
       if (Platform.isMacOS) {
@@ -292,7 +319,33 @@ class AppUpdater extends ChangeNotifier {
     }
   }
 
-  Future<void> _download(Uri url, File file) async {
+  /// Сверяет скачанный установщик с суммой из выпуска: сначала — посчитанной
+  /// GitHub, иначе — из [AppRelease.checksumsName]. У старых выпусков сумм нет —
+  /// тогда ставим как раньше.
+  Future<void> _verify(AppRelease release, File file) async {
+    final name = p.basename(file.path);
+    var expected = release.digests[name];
+    final sums = release.assets[AppRelease.checksumsName];
+    if (expected == null && sums != null) {
+      final list = File('${file.path}.sha256');
+      await _download(sums, list, reportProgress: false);
+      expected = parseChecksums(await list.readAsString())[name];
+    }
+    if (expected == null) return;
+    final actual = '${await sha256.bind(file.openRead()).first}';
+    if (actual != expected) {
+      throw StateError(
+        'контрольная сумма $name не совпала — файл повреждён при скачивании, '
+        'обновление не установлено',
+      );
+    }
+  }
+
+  Future<void> _download(
+    Uri url,
+    File file, {
+    bool reportProgress = true,
+  }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     try {
@@ -314,6 +367,7 @@ class AppUpdater extends ChangeNotifier {
           received += chunk.length;
           final next = total > 0 ? received / total : null;
           // Обновляем подпись не чаще, чем на процент.
+          if (!reportProgress) continue;
           if (next == null || progress == null || next - progress! >= 0.01) {
             progress = next;
             notifyListeners();
