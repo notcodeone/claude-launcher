@@ -22,6 +22,7 @@ import 'kill_switch_status.dart';
 import 'profile_dialog.dart';
 import 'profile_page.dart';
 import 'profile_usage_menu.dart';
+import 'sessions_page.dart';
 import 'settings_pages.dart';
 import 'snackbar.dart';
 import 'theme.dart';
@@ -34,6 +35,7 @@ abstract final class AppPages {
   static const home = '/';
   static const settings = '/settings';
   static const newProfile = '/profiles/new';
+  static const sessions = '/sessions';
 
   /// Правка профиля [id].
   static String editProfile(String id) => '/profiles/edit/$id';
@@ -223,6 +225,12 @@ class HomePage extends StatelessWidget {
           onDone: AppPages.back,
         );
       }
+    }
+    if (route == AppPages.sessions) {
+      return _withScrim(
+        context,
+        SessionsPage(launcher: launcher, padding: padding),
+      );
     }
     if (route == AppPages.settings) {
       return _withScrim(
@@ -538,6 +546,14 @@ class HomePage extends StatelessWidget {
           detail: _firstSentence(error).$2,
           onClose: launcher.clearError,
         ),
+      for (final profile in launcher.profiles)
+        if (launcher.unexpectedAccount(profile) case final actual?)
+          NoticeRow(
+            icon: AppIcons.hand,
+            tone: NoticeTone.attention,
+            title: '«${profile.name}» открыт под другим аккаунтом',
+            detail: 'Вошли как $actual, а в профиле указан ${profile.email}.',
+          ),
       for (final instance in launcher.unknownInstances)
         NoticeRow(
           icon: AppIcons.unknown,
@@ -995,6 +1011,8 @@ class _HeaderBar extends StatelessWidget {
         ? busy
         : page.startsWith(AppPages.settings)
         ? const HeaderStatus('settings', 'Настройки', plain: true)
+        : page == AppPages.sessions
+        ? const HeaderStatus('sessions', 'Сессии', plain: true)
         : const HeaderStatus('profiles', 'Профили', plain: true);
     const duration = Duration(milliseconds: 280);
     return Builder(
@@ -1080,6 +1098,15 @@ class _HeaderBar extends StatelessWidget {
                                   }
                                 },
                               ),
+                            },
+                          ),
+                          CircleIconButton(
+                            icon: AppIcons.sessions,
+                            tooltip: interactive ? 'Сессии' : null,
+                            onPressed: () {
+                              if (interactive) {
+                                AppPages.open(AppPages.sessions);
+                              }
                             },
                           ),
                           CircleIconButton(
@@ -1535,10 +1562,14 @@ class _ProfileCard extends StatelessWidget {
                   ],
                 ],
               ),
-              if (profile.email.isNotEmpty) ...[
+              // Не указали почту — показываем ту, под которой вошли.
+              if ((profile.email.isNotEmpty
+                      ? profile.email
+                      : launcher.identities[profile.id]?.email ?? '')
+                  case final email when email.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
-                  profile.email,
+                  email,
                   style: theme.textTheme.bodyMedium,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

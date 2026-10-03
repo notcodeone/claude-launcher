@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import 'claude/claude_host.dart';
 import 'integrations/profile_claude_code.dart';
+import 'integrations/profile_identity.dart';
 import 'profile.dart';
 import 'profile_store.dart';
 
@@ -238,7 +240,60 @@ class LauncherController extends ChangeNotifier {
       if (strict) rethrow;
       debugPrint('Не удалось получить список процессов Claude: $error');
     }
+    // Войти в аккаунт можно только в открытом Claude — перечитываем, кто
+    // вошёл, когда профиль открыли или закрыли.
+    final key = [for (final instance in instances) instance.pid].join(',');
+    if (key != _identitiesKey) {
+      _identitiesKey = key;
+      unawaited(refreshIdentities());
+    }
     _notify();
+  }
+
+  // --------------------------------------------------------------- аккаунты
+
+  /// Кто вошёл в профили, по id профиля (см. [ProfileIdentity]).
+  Map<String, ProfileIdentity> identities = const {};
+  String? _identitiesKey;
+
+  /// `.claude.json` Claude Code профиля, где может быть `oauthAccount`: своя
+  /// папка — свой файл, у остальных — общий.
+  List<String> claudeCodeConfigsOf(Profile profile) {
+    if (claudeConfigDirOf(profile) case final own?) {
+      return [p.join(own, '.claude.json')];
+    }
+    final shared = ProfileClaudeCode.sharedDir(Platform.environment);
+    return [
+      p.join(p.dirname(shared), '.claude.json'),
+      p.join(shared, '.claude.json'),
+    ];
+  }
+
+  Future<void> refreshIdentities() async {
+    final next = <String, ProfileIdentity>{
+      for (final profile in profiles)
+        profile.id: await ProfileIdentity.read(
+          dataDirs: readableDataDirsOf(profile),
+          claudeCodeConfigs: claudeCodeConfigsOf(profile),
+        ),
+    };
+    if (_disposed) return;
+    String fingerprint(Map<String, ProfileIdentity> all) => [
+      for (final MapEntry(:key, :value) in all.entries)
+        '$key ${value.accountUuid} ${value.orgUuid} ${value.email}',
+    ].join('\n');
+    if (fingerprint(next) == fingerprint(identities)) return;
+    identities = next;
+    _notify();
+  }
+
+  /// Почта аккаунта, под которым вошли в профиль, если она известна и не та,
+  /// что указана в профиле; `null` — всё сходится или сравнить не с чем.
+  String? unexpectedAccount(Profile profile) {
+    final actual = identities[profile.id]?.email;
+    final expected = profile.email.trim();
+    if (actual == null || expected.isEmpty) return null;
+    return actual.toLowerCase() == expected.toLowerCase() ? null : actual;
   }
 
   // ------------------------------------------------------------ переключение

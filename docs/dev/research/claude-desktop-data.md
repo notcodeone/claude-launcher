@@ -89,6 +89,18 @@ Windows — по claude-switcher `%LOCALAPPDATA%\<имя папки профил
 
 Правило для лаунчера: сверять несколько источников; если не сходятся — «не определено».
 
+Проверено 2026-10-03 на трёх профилях автора (Claude 2.19675.0, macOS):
+`lastKnownAccountUuid` и `ownerAccountId` совпадают; организация из
+`extensions-blocklist.json` совпадает с ключом `dxt:allowlistLastUpdated:<org>` и с папкой
+карточек. В основном профиле лежит и папка карточек **прежнего** аккаунта — выбирать
+папку «по наличию» нельзя. Почты в файлах Desktop нет (в карточках Cowork — только если
+им пользовались); надёжный источник — `oauthAccount` в `.claude.json` Claude Code
+(`accountUuid`, `emailAddress`, `organizationUuid`, `organizationName`, без токенов): у
+профиля со своей памятью — `<папка профиля>/claude-config/.claude.json`, у остальных —
+общий `~/.claude.json`, и тогда он верен, только если `accountUuid` совпал.
+
+`buddy-tokens.json`: `{"tokens-today": {"date": "ГГГГ-ММ-ДД", "tokens": <int>}}` (проверено).
+
 ## Правила переноса сессии
 
 Собрано из ошибок конкурентов (подробности — competitors.md):

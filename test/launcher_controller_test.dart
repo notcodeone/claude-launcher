@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:claude_launcher/src/claude/claude_host.dart';
+import 'package:claude_launcher/src/integrations/profile_identity.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/profile.dart';
 import 'package:claude_launcher/src/profile_store.dart';
@@ -794,6 +795,24 @@ void main() {
         old.copyWith(ownClaudeCode: true).toJson(),
       ).ownClaudeCode,
       isTrue,
+    );
+  });
+
+  test('вошли под другим аккаунтом — видно по почте', () async {
+    final named = personal.copyWith(email: 'Anna@Example.com');
+    await launcher.updateProfile(named);
+    launcher.identities = {
+      named.id: const ProfileIdentity(email: 'anna@example.com'),
+    };
+    expect(launcher.unexpectedAccount(named), isNull, reason: 'регистр');
+    launcher.identities = {
+      named.id: const ProfileIdentity(email: 'other@example.com'),
+    };
+    expect(launcher.unexpectedAccount(named), 'other@example.com');
+    expect(
+      launcher.unexpectedAccount(work),
+      isNull,
+      reason: 'почта не указана',
     );
   });
 }

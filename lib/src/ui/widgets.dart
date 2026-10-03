@@ -929,6 +929,7 @@ abstract final class AppIcons {
   static const themeLight = LucideIcons.sun;
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
+  static const sessions = LucideIcons.messagesSquare;
   static const back = LucideIcons.arrowLeft;
   static const chevron = LucideIcons.chevronRight;
   static const general = LucideIcons.slidersHorizontal;
