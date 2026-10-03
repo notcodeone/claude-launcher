@@ -284,10 +284,16 @@ class MacClaudeHost extends ClaudeHost {
 
   @override
   Future<void> openLink(ClaudeInstance instance, Uri link) async {
-    final delivered = await _channel.invokeMethod<bool>('openLink', {
-      'pid': instance.pid,
-      'link': '$link',
-    });
+    final bool? delivered;
+    try {
+      delivered = await _channel.invokeMethod<bool>('openLink', {
+        'pid': instance.pid,
+        'link': '$link',
+      });
+    } on PlatformException catch (error) {
+      // Текст уже для пользователя (например, как разрешить «Автоматизацию»).
+      throw StateError(error.message ?? 'macOS не передала ссылку Claude.');
+    }
     if (delivered != true) {
       throw StateError('Выбранный процесс Claude уже закрыт.');
     }

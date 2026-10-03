@@ -44,6 +44,22 @@ class LaunchBlocked implements Exception {
   String toString() => message ?? 'Запуск профиля запрещён';
 }
 
+/// Итог операции с профилем. Вызывающий код смотрит сюда, а не на
+/// [LauncherController.lastError]: та видна пользователю и может смениться.
+class ProfileOperation {
+  const ProfileOperation.done() : error = null;
+  const ProfileOperation.failed(String this.error);
+
+  static const busy = ProfileOperation.failed(
+    'Дождитесь завершения операции с Claude',
+  );
+  static const cancelled = ProfileOperation.failed('Закрытие Claude отменено');
+
+  /// `null` — профиль в нужном состоянии (открыт или закрыт).
+  final String? error;
+  bool get succeeded => error == null;
+}
+
 /// Capability valid only within [LauncherController.withMaintenance].
 class LauncherMaintenance {
   LauncherMaintenance._(this._launcher, this.label);
@@ -58,16 +74,18 @@ class LauncherMaintenance {
     }
   }
 
-  Future<void> close(Profile profile) {
+  Future<ProfileOperation> close(Profile profile) {
     _check();
     return _launcher._close(profile, maintenance: this);
   }
 
-  Future<void> reopen(Profile profile, {bool strict = false}) {
+  Future<ProfileOperation> reopen(Profile profile, {bool strict = false}) {
     _check();
     if (interrupted) {
-      throw const LaunchBlocked(
-        'Восстановление отменено аварийным закрытием Claude',
+      return Future.value(
+        const ProfileOperation.failed(
+          'Восстановление отменено аварийным закрытием Claude',
+        ),
       );
     }
     return _launcher._switchTo(
@@ -81,10 +99,17 @@ class LauncherMaintenance {
 
 /// Профили, состояние запущенных экземпляров Claude и переключение между ними.
 class LauncherController extends ChangeNotifier {
-  LauncherController({required this.host, required this.store});
+  LauncherController({
+    required this.host,
+    required this.store,
+    this.launchTimeout = const Duration(seconds: 20),
+  });
 
   final ClaudeHost host;
   final ProfileStore store;
+
+  /// Сколько ждать появления процесса после запуска профиля.
+  final Duration launchTimeout;
 
   List<Profile> profiles = [];
   List<ClaudeInstance> instances = [];
@@ -213,6 +238,7 @@ class LauncherController extends ChangeNotifier {
   Future<void> refresh({bool strict = false}) async {
     try {
       instances = await host.running();
+      _clearLateLaunchError();
     } catch (error) {
       if (strict) rethrow;
       debugPrint('Не удалось получить список процессов Claude: $error');
@@ -220,24 +246,42 @@ class LauncherController extends ChangeNotifier {
     _notify();
   }
 
+  /// Папка профиля, который не появился за время ожидания запуска.
+  String? _lateLaunchDir;
+
+  /// Claude бывает медленнее ожидания (первый запуск, MSIX): когда профиль
+  /// всё же открылся, сообщение о таймауте больше не нужно.
+  void _clearLateLaunchError() {
+    final dir = _lateLaunchDir;
+    if (dir == null) return;
+    if (!instances.any((i) => host.samePath(host.dataDirOf(i), dir))) return;
+    _lateLaunchDir = null;
+    if (lastError == _launchTimeout) lastError = null;
+  }
+
+  String get _launchTimeout =>
+      'Claude не открыл выбранный профиль за ${launchTimeout.inSeconds} с. '
+      'Если окно появится позже, сообщение исчезнет само.';
+
   // ------------------------------------------------------------ переключение
 
   /// Закрывает все остальные экземпляры Claude и открывает [target].
   /// В тестовом parallelLaunch остальные экземпляры остаются открытыми.
   /// Обычный режим сохраняет последовательное переключение.
   /// [strict] — см. [launchGuard].
-  Future<void> switchTo(Profile target, {bool strict = false}) =>
+  Future<ProfileOperation> switchTo(Profile target, {bool strict = false}) =>
       _switchTo(target, strict: strict);
 
-  Future<void> _switchTo(
+  Future<ProfileOperation> _switchTo(
     Profile target, {
     bool strict = false,
     LauncherMaintenance? maintenance,
     bool? preserveOthers,
   }) async {
-    if (!_allowed(maintenance)) return;
+    if (!_allowed(maintenance)) return ProfileOperation.busy;
     _operating = true;
     lastError = null;
+    _lateLaunchDir = null;
     _cancelRequested = false;
 
     try {
@@ -268,7 +312,7 @@ class LauncherController extends ChangeNotifier {
 
       if (!(preserveOthers ?? parallelLaunch) && others.isNotEmpty) {
         final closed = await _closeAll(target, others);
-        if (!closed) return;
+        if (!closed) return ProfileOperation.cancelled;
       }
 
       if (maintenance?.interrupted ?? false) {
@@ -278,7 +322,7 @@ class LauncherController extends ChangeNotifier {
       }
       if (targetInstance != null) {
         await host.activate(targetInstance);
-        return;
+        return const ProfileOperation.done();
       }
 
       _setStatus(SwitchStatus(target, SwitchPhase.launching));
@@ -297,13 +341,20 @@ class LauncherController extends ChangeNotifier {
         );
       }
       await _replace(target.copyWith(lastLaunchedAt: DateTime.now()));
-      await _waitForLaunch(targetDir);
+      if (await _waitForLaunch(targetDir)) return const ProfileOperation.done();
+      if (_disposed) return ProfileOperation.cancelled;
+      _lateLaunchDir = targetDir;
+      lastError = _launchTimeout;
+      onNeedsAttention?.call();
+      return ProfileOperation.failed(_launchTimeout);
     } on LaunchBlocked catch (blocked) {
       lastError = blocked.message;
       onNeedsAttention?.call();
+      return ProfileOperation.failed('$blocked');
     } catch (error) {
       lastError = '$error';
       onNeedsAttention?.call();
+      return ProfileOperation.failed('$error');
     } finally {
       _operating = false;
       switchStatus = null;
@@ -379,12 +430,8 @@ class LauncherController extends ChangeNotifier {
           if (operation.interrupted || !parallelLaunch) break;
           final profile = profiles.where((p) => p.id == id).firstOrNull;
           if (profile == null) continue;
-          await operation.reopen(profile, strict: true);
-          if (operation.interrupted ||
-              !isRunning(profile) ||
-              lastError != null) {
-            break;
-          }
+          final result = await operation.reopen(profile, strict: true);
+          if (!result.succeeded || operation.interrupted) break;
           opened++;
         }
         return opened;
@@ -421,26 +468,30 @@ class LauncherController extends ChangeNotifier {
   }
 
   /// Завершает работу открытого профиля так же, как обычный выход из Claude.
-  Future<void> close(Profile profile) => _close(profile);
+  Future<ProfileOperation> close(Profile profile) => _close(profile);
 
-  Future<void> _close(
+  Future<ProfileOperation> _close(
     Profile profile, {
     LauncherMaintenance? maintenance,
   }) async {
-    if (!_allowed(maintenance)) return;
+    if (!_allowed(maintenance)) return ProfileOperation.busy;
     _operating = true;
     lastError = null;
     _cancelRequested = false;
     try {
-      await refresh();
+      await refresh(strict: maintenance != null);
       final targets = [
         for (final instance in instances)
           if (profileOf(instance)?.id == profile.id) instance,
       ];
-      if (targets.isNotEmpty) await _closeAll(null, targets);
+      if (targets.isNotEmpty && !await _closeAll(null, targets)) {
+        return ProfileOperation.cancelled;
+      }
+      return const ProfileOperation.done();
     } catch (error) {
       lastError = '$error';
       onNeedsAttention?.call();
+      return ProfileOperation.failed('$error');
     } finally {
       _operating = false;
       switchStatus = null;
@@ -504,22 +555,20 @@ class LauncherController extends ChangeNotifier {
     }
   }
 
-  Future<void> _waitForLaunch(String targetDir) async {
-    for (var i = 0; i < 40 && !_disposed; i++) {
+  /// true — процесс профиля появился. Иначе вызывающий сообщает о таймауте,
+  /// а [refresh] уберёт сообщение, если Claude откроется позже.
+  Future<bool> _waitForLaunch(String targetDir) async {
+    final deadline = DateTime.now().add(launchTimeout);
+    while (!_disposed && DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       await refresh();
       if (instances.any(
         (instance) => host.samePath(host.dataDirOf(instance), targetDir),
       )) {
-        return;
+        return true;
       }
     }
-    if (!_disposed) {
-      throw StateError(
-        'Claude не открыл выбранный профиль за 20 секунд. '
-        'Проверьте окно Claude и попробуйте снова.',
-      );
-    }
+    return false;
   }
 
   void _setStatus(SwitchStatus status) {

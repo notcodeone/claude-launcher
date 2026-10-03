@@ -61,10 +61,13 @@ class FakeHost extends ClaudeHost {
     return instance;
   }
 
+  /// false — Claude запускается дольше, чем ждёт лаунчер.
+  bool startsOnLaunch = true;
+
   @override
   Future<void> launch(String? dataDir) async {
     calls.add('launch ${dataDir ?? 'default'}');
-    start(dataDir);
+    if (startsOnLaunch) start(dataDir);
   }
 
   @override
@@ -121,6 +124,7 @@ void main() {
     launcher = LauncherController(
       host: host,
       store: ProfileStore(File('${dir.path}/profiles.json')),
+      launchTimeout: const Duration(seconds: 1),
     );
     await launcher.init();
     work = launcher.profiles.single; // стандартный профиль создаётся сам
@@ -373,6 +377,66 @@ void main() {
         expect(host.instances, hasLength(1));
       },
     );
+  });
+
+  group('итог операции', () {
+    test('занятый контроллер отвечает отказом, а не молчанием', () async {
+      final release = Completer<void>();
+      final maintenance = launcher.withMaintenance((_) => release.future);
+      final result = await launcher.switchTo(personal);
+      expect(result.succeeded, isFalse);
+      expect(result.error, ProfileOperation.busy.error);
+      expect(host.calls, isEmpty);
+      release.complete();
+      await maintenance;
+    });
+
+    test(
+      'медленный запуск: ошибка, которая исчезает, когда Claude открылся',
+      () async {
+        host.startsOnLaunch = false;
+        final result = await launcher.switchTo(personal);
+        expect(result.succeeded, isFalse);
+        expect(launcher.lastError, result.error);
+
+        host.start(launcher.dataDirOf(personal));
+        await launcher.refresh();
+        expect(launcher.lastError, isNull);
+        expect(launcher.isRunning(personal), isTrue);
+      },
+    );
+
+    test('чужая ошибка после таймаута не стирается', () async {
+      host.startsOnLaunch = false;
+      await launcher.switchTo(personal);
+      launcher.lastError = 'другая ошибка';
+      host.start(launcher.dataDirOf(personal));
+      await launcher.refresh();
+      expect(launcher.lastError, 'другая ошибка');
+    });
+
+    test('отменённое закрытие возвращает отказ', () async {
+      host.quitsOnRequest = false;
+      host.start(launcher.dataDirOf(personal));
+      await launcher.refresh();
+      final closing = launcher.close(personal);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      launcher.cancelSwitch();
+      final result = await closing;
+      expect(result.error, ProfileOperation.cancelled.error);
+      expect(launcher.isRunning(personal), isTrue);
+    });
+
+    test('автозапуск набора останавливается на таймауте', () async {
+      launcher.setParallelLaunch(true);
+      host.startsOnLaunch = false;
+      final opened = await launcher.openOnStartupProfiles([
+        personal.id,
+        work.id,
+      ]);
+      expect(opened, 0);
+      expect(host.calls, ['launch ${launcher.dataDirOf(personal)}']);
+    });
   });
 
   test('если Claude не запущен, профиль просто запускается', () async {

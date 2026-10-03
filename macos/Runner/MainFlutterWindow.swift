@@ -97,7 +97,11 @@ class MainFlutterWindow: NSWindow {
           result(true)
         } catch {
           // Do not include the URL: it may contain an authorization callback.
-          result(FlutterError(code: "link_delivery_failed", message: "macOS не передала ссылку выбранному процессу Claude (код \((error as NSError).code)).", details: nil))
+          let code = (error as NSError).code
+          let message = code == Int(errAEEventNotPermitted)
+            ? "macOS не разрешила лаунчеру управлять Claude. Разрешите это в Системных настройках → Конфиденциальность и безопасность → Автоматизация."
+            : "macOS не передала ссылку выбранному процессу Claude (код \(code))."
+          result(FlutterError(code: "link_delivery_failed", message: message, details: nil))
         }
       case "isFrontmost":
         result(NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier)
