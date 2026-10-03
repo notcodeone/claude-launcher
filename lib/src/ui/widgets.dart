@@ -972,9 +972,12 @@ abstract final class AppIcons {
   static const error = LucideIcons.circleAlert;
   static const unknown = LucideIcons.circleHelp;
   static const sync = LucideIcons.refreshCw;
+  static const waiting = LucideIcons.clock;
   static const download = LucideIcons.download;
   static const hand = LucideIcons.hand;
   static const check = LucideIcons.check;
+  static const checked = LucideIcons.circleCheck;
+  static const unchecked = LucideIcons.circle;
   static const themeSystem = LucideIcons.sunMoon;
   static const themeLight = LucideIcons.sun;
   static const themeDark = LucideIcons.moon;

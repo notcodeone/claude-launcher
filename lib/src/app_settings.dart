@@ -59,6 +59,16 @@ class AppSettings extends ChangeNotifier {
   /// Тестовый режим: запуск профиля сохраняет остальные экземпляры.
   bool parallelLaunch = false;
 
+  /// Синхронизация сессий Code между профилями [syncProfiles] (см.
+  /// `SessionSync`).
+  bool sessionSync = false;
+
+  /// Профили в группе синхронизации — от двух.
+  List<String> syncProfiles = [];
+
+  /// Только сессии этих папок проектов; `null` — всех.
+  List<String>? syncProjects;
+
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
@@ -106,6 +116,13 @@ class AppSettings extends ChangeNotifier {
             json['experimentalFeatures'] as bool? ??
             false;
         parallelLaunch = json['parallelLaunch'] as bool? ?? false;
+        sessionSync = json['sessionSync'] as bool? ?? false;
+        syncProfiles = [
+          ...?(json['syncProfiles'] as List?)?.whereType<String>(),
+        ];
+        syncProjects = (json['syncProjects'] as List?)
+            ?.whereType<String>()
+            .toList();
         checkUpdates = json['checkUpdates'] as bool? ?? true;
         dockIcon = json['dockIcon'] as bool? ?? false;
         eventsPort = json['eventsPort'] as int? ?? eventsPort;
@@ -165,6 +182,20 @@ class AppSettings extends ChangeNotifier {
   Future<void> setUsageLimits(bool enabled) =>
       _update(() => usageLimits = enabled);
 
+  Future<void> setSessionSync(bool enabled) =>
+      _update(() => sessionSync = enabled);
+
+  /// Добавляет профиль [id] в группу синхронизации или убирает из неё.
+  Future<void> toggleSyncProfile(String id) => _update(
+    () => syncProfiles = syncProfiles.contains(id)
+        ? syncProfiles.where((value) => value != id).toList()
+        : [...syncProfiles, id],
+  );
+
+  /// `null` — все проекты.
+  Future<void> setSyncProjects(List<String>? projects) =>
+      _update(() => syncProjects = projects);
+
   Future<void> setParallelLaunch(bool enabled) =>
       _update(() => parallelLaunch = enabled);
 
@@ -205,6 +236,9 @@ class AppSettings extends ChangeNotifier {
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
         'parallelLaunch': parallelLaunch,
+        'sessionSync': sessionSync,
+        'syncProfiles': syncProfiles,
+        'syncProjects': syncProjects,
         'experimentsAccepted': experimentsAccepted,
         'killSwitch': killSwitch,
         'killSwitchStrict': killSwitchStrict,

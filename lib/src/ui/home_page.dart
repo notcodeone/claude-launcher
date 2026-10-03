@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
 import '../claude/claude_updates.dart';
+import '../integrations/session_sync_service.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
 import '../integrations/profile_usage.dart';
@@ -25,6 +26,7 @@ import 'profile_page.dart';
 import 'profile_usage_menu.dart';
 import 'session_drop.dart';
 import 'sessions_page.dart';
+import 'sync_page.dart';
 import 'settings_pages.dart';
 import 'snackbar.dart';
 import 'theme.dart';
@@ -39,6 +41,7 @@ abstract final class AppPages {
   static const newProfile = '/profiles/new';
   static const features = '/features';
   static const sessions = '/features/sessions';
+  static const sync = '/features/sync';
 
   /// Правка профиля [id].
   static String editProfile(String id) => '/profiles/edit/$id';
@@ -129,6 +132,7 @@ class HomePage extends StatelessWidget {
     this.killSwitch,
     this.claudeUpdates,
     this.coworkFirewall,
+    this.sessionSync,
     this.version = '',
   });
 
@@ -147,6 +151,7 @@ class HomePage extends StatelessWidget {
   final ClaudeUpdates? claudeUpdates;
 
   /// Windows: правило брандмауэра для службы Cowork.
+  final SessionSyncService? sessionSync;
   final CoworkFirewall? coworkFirewall;
 
   /// Версия приложения — в подвале.
@@ -236,8 +241,20 @@ class HomePage extends StatelessWidget {
           padding: padding,
           onOpen: (feature) => switch (feature) {
             'sessions' => AppPages.open(AppPages.sessions),
+            'sync' => AppPages.open(AppPages.sync),
             _ => null,
           },
+        ),
+      );
+    }
+    if (route == AppPages.sync && sessionSync != null) {
+      return _withScrim(
+        context,
+        SyncPage(
+          launcher: launcher,
+          settings: settings,
+          sync: sessionSync!,
+          padding: padding,
         ),
       );
     }

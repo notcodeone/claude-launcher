@@ -159,44 +159,13 @@ class SessionTransfer {
     final created = <String, String>{}; // путь → sha256
     final moved = <Map<String, String>>[];
     try {
-      // Переписка — в папку Claude Code цели, если она не та же.
-      if (!_samePath(source.claudeCodeDir, target.claudeCodeDir)) {
-        final transcript = await _findTranscript(
-          source.claudeCodeDir,
-          cliSessionId,
-        );
-        if (transcript != null) {
-          final relative = p.relative(
-            transcript.path,
-            from: source.claudeCodeDir,
-          );
-          await _copyTree(
-            transcript.path,
-            p.join(target.claudeCodeDir, relative),
-            created,
-          );
-          final sidecar = Directory(p.withoutExtension(transcript.path));
-          if (await sidecar.exists()) {
-            await _copyTree(
-              sidecar.path,
-              p.join(target.claudeCodeDir, p.withoutExtension(relative)),
-              created,
-            );
-          }
-        }
-      }
+      await _copyTranscript(cliSessionId, source, target, created);
 
       // Карточка — последней: пока её нет, Claude цели о сессии не знает.
-      final copy = {
-        for (final MapEntry(:key, :value) in json.entries)
-          if (!droppedFields.contains(key)) key: value,
-        for (final MapEntry(:key, :value) in resetFields.entries)
-          if (json.containsKey(key)) key: value,
-      };
       await targetDir.create(recursive: true);
       await _writeAtomic(
         targetCard,
-        utf8.encode(jsonEncode(copy)),
+        utf8.encode(jsonEncode(cardCopy(json))),
         modified: await card.lastModified(),
       );
       created[targetCard.path] = await _hash(targetCard);
@@ -225,6 +194,45 @@ class SessionTransfer {
     }
     await _prune();
     return op;
+  }
+
+  /// Карточка для другого профиля: без тяжёлых данных MCP и без
+  /// разрешений, выданных в исходном.
+  static Map<String, Object?> cardCopy(Map<String, Object?> json) => {
+    for (final MapEntry(:key, :value) in json.entries)
+      if (!droppedFields.contains(key)) key: value,
+    for (final MapEntry(:key, :value) in resetFields.entries)
+      if (json.containsKey(key)) key: value,
+  };
+
+  /// Переписка [cliSessionId] и папка подагентов рядом — в папку Claude Code
+  /// цели, если у профилей она разная. Уже существующее не перезаписывается.
+  static Future<void> _copyTranscript(
+    String cliSessionId,
+    TransferSide source,
+    TransferSide target,
+    Map<String, String> created,
+  ) async {
+    if (_samePath(source.claudeCodeDir, target.claudeCodeDir)) return;
+    final transcript = await _findTranscript(
+      source.claudeCodeDir,
+      cliSessionId,
+    );
+    if (transcript == null) return;
+    final relative = p.relative(transcript.path, from: source.claudeCodeDir);
+    await _copyTree(
+      transcript.path,
+      p.join(target.claudeCodeDir, relative),
+      created,
+    );
+    final sidecar = Directory(p.withoutExtension(transcript.path));
+    if (await sidecar.exists()) {
+      await _copyTree(
+        sidecar.path,
+        p.join(target.claudeCodeDir, p.withoutExtension(relative)),
+        created,
+      );
+    }
   }
 
   /// Отменяет перенос [record]: копии уходят в журнал, перенесённая карточка
@@ -394,4 +402,330 @@ class SessionTransfer {
 
   static bool _samePath(String a, String b) =>
       p.equals(p.normalize(a), p.normalize(b));
+}
+
+/// Профиль в группе синхронизации.
+class SyncMember {
+  const SyncMember({
+    required this.id,
+    required this.side,
+    required this.running,
+  });
+
+  /// id профиля — ключ группы в состоянии синхронизации.
+  final String id;
+  final TransferSide side;
+
+  /// Открыт — в него не пишем: Claude переписывает свою папку сессий сам и не
+  /// увидит новых сессий до перезапуска. Догоним, когда его закроют.
+  final bool running;
+}
+
+/// Итог синхронизации — для строки состояния на странице.
+class SyncResult {
+  SyncResult();
+
+  int copied = 0;
+  int updated = 0;
+  int removed = 0;
+
+  /// Удаления не выполнены: их слишком много сразу (см. [SessionSync]).
+  bool deletionsStopped = false;
+
+  /// Профили, которые не тронули: открыты или аккаунт не определён.
+  final skipped = <String>[];
+
+  bool get changed => copied + updated + removed > 0;
+}
+
+/// Синхронизация сессий Code внутри группы профилей — в обе стороны, по
+/// правилам переноса ([SessionTransfer]):
+///
+/// - сессии нет в профиле группы — копируется из профиля, где она свежее всех
+///   (`lastActivityAt`);
+/// - есть, но старее — карточка заменяется свежей (прежняя — в журнал);
+/// - сессию удалили в одном профиле (её нет, хотя после прошлой синхронизации
+///   она была у всех, или лежит `deleted_…`) — убирается и из остальных, в
+///   журнал, не насовсем;
+/// - удалений сразу больше 5 и больше 20 % сессий — их не выполняем: похоже на
+///   сбой, а не на решение человека;
+/// - пишем только в закрытые профили; открытые догоним при их закрытии.
+///
+/// Что было у всех после прошлого раза — в [stateFile].
+class SessionSync {
+  SessionSync({required this.transfer, required this.stateFile});
+
+  final SessionTransfer transfer;
+  final File stateFile;
+
+  static const _massDeletionCount = 5;
+  static const _massDeletionShare = 0.2;
+
+  /// [projects] — только сессии этих папок проектов; `null` — все.
+  Future<SyncResult> run(
+    List<SyncMember> members, {
+    Set<String>? projects,
+  }) async {
+    final result = SyncResult();
+    final key = ([for (final member in members) member.id]..sort()).join('+');
+    final state = await _readState();
+    final previous = {...?state[key]};
+
+    // Карточки каждого профиля.
+    final cards = <SyncMember, Map<String, _Card>>{};
+    final deleted = <SyncMember, Set<String>>{};
+    for (final member in members) {
+      final folder = member.side.identity.sessionsFolder;
+      if (folder == null) {
+        result.skipped.add(member.side.name);
+        continue;
+      }
+      final (found, markers) = await _read(member.side, folder, projects);
+      cards[member] = found;
+      deleted[member] = markers;
+    }
+    final known = cards.keys.toList();
+    if (known.length < 2) return result;
+
+    final all = {for (final found in cards.values) ...found.keys};
+    // Удалено где-то — было у всех после прошлого раза, а теперь нет; или
+    // лежит пометка Claude об удалении.
+    final removals = {
+      for (final id in all)
+        if (known.any(
+          (member) =>
+              (previous.contains(id) && !cards[member]!.containsKey(id)) ||
+              _markedDeleted(deleted[member]!, id, cards),
+        ))
+          id,
+      for (final id in previous)
+        if (!all.contains(id)) id,
+    };
+    final removeNow =
+        removals.length > _massDeletionCount &&
+            removals.length > all.length * _massDeletionShare
+        ? <String>{}
+        : removals;
+    result.deletionsStopped = removeNow.length != removals.length;
+
+    // Что у кого есть после этого запуска — чтобы знать, что стало общим.
+    final present = {
+      for (final member in known) member: {...cards[member]!.keys},
+    };
+    final op = await transfer._newOperation();
+    final created = <String, String>{};
+    final moved = <Map<String, String>>[];
+    try {
+      for (final member in known) {
+        if (member.running) {
+          result.skipped.add(member.side.name);
+          continue;
+        }
+        final folder = Directory(
+          p.join(
+            member.side.dataDirs.first,
+            member.side.identity.sessionsFolder!,
+          ),
+        );
+        for (final id in all) {
+          final own = cards[member]![id];
+          if (removeNow.contains(id)) {
+            if (own == null) continue;
+            final kept = File(
+              p.join(op.dir.path, 'removed', member.id, '$id.json'),
+            );
+            await kept.parent.create(recursive: true);
+            await SessionTransfer._move(own.file, kept);
+            moved.add({'from': own.file.path, 'to': kept.path});
+            present[member]!.remove(id);
+            result.removed++;
+            continue;
+          }
+          if (removals.contains(id)) continue; // остановлено защитой
+          if (deleted[member]!.contains(id)) continue;
+          final newest = _newest(cards, id);
+          if (newest == null || newest.$1 == member) continue;
+          final (from, card) = newest;
+          if (own != null && !own.lastActivity.isBefore(card.lastActivity)) {
+            continue;
+          }
+          final target = File(p.join(folder.path, '$id.json'));
+          if (own != null) {
+            // Прежняя карточка — в журнал: «свежая» могла оказаться не той.
+            final kept = File(
+              p.join(op.dir.path, 'replaced', member.id, '$id.json'),
+            );
+            await kept.parent.create(recursive: true);
+            await own.file.copy(kept.path);
+            moved.add({'from': target.path, 'to': kept.path, 'copy': '1'});
+          }
+          await SessionTransfer._copyTranscript(
+            card.cliSessionId,
+            from.side,
+            member.side,
+            created,
+          );
+          await folder.create(recursive: true);
+          await SessionTransfer._writeAtomic(
+            target,
+            utf8.encode(jsonEncode(SessionTransfer.cardCopy(card.json))),
+            modified: card.lastActivity,
+          );
+          if (own == null) {
+            created[target.path] = await SessionTransfer._hash(target);
+            present[member]!.add(id);
+            result.copied++;
+          } else {
+            result.updated++;
+          }
+        }
+      }
+    } finally {
+      await op.manifest.writeAsString(
+        jsonEncode({
+          'sync': key,
+          'created': created,
+          'moved': moved,
+          'copied': result.copied,
+          'updated': result.updated,
+          'removed': result.removed,
+        }),
+      );
+    }
+
+    // Общее теперь — то, что действительно есть у каждого: у открытого
+    // профиля недостающего нет, и это не удаление, а «ещё не догнали».
+    // Остановленные защитой удаления тоже остаются: иначе в следующий раз их
+    // разложили бы обратно — и туда, где их удалили.
+    final shared = {
+      for (final id in all)
+        if (known.every((member) => present[member]!.contains(id))) id,
+      for (final id in removals)
+        if (!removeNow.contains(id) && previous.contains(id)) id,
+    };
+    state[key] = shared;
+    await _writeState(state);
+    if (!result.changed) await op.dir.delete(recursive: true);
+    return result;
+  }
+
+  static bool _markedDeleted(
+    Set<String> markers,
+    String id,
+    Map<SyncMember, Map<String, _Card>> cards,
+  ) {
+    if (markers.contains(id)) return true;
+    for (final found in cards.values) {
+      final cli = found[id]?.cliSessionId;
+      if (cli != null && markers.contains(cli)) return true;
+    }
+    return false;
+  }
+
+  static (SyncMember, _Card)? _newest(
+    Map<SyncMember, Map<String, _Card>> cards,
+    String id,
+  ) {
+    (SyncMember, _Card)? best;
+    for (final MapEntry(key: member, value: found) in cards.entries) {
+      final card = found[id];
+      if (card == null) continue;
+      if (best == null || card.lastActivity.isAfter(best.$2.lastActivity)) {
+        best = (member, card);
+      }
+    }
+    return best;
+  }
+
+  static Future<(Map<String, _Card>, Set<String>)> _read(
+    TransferSide side,
+    String folder,
+    Set<String>? projects,
+  ) async {
+    final found = <String, _Card>{};
+    final markers = <String>{};
+    for (final dir in side.dataDirs) {
+      final root = Directory(p.join(dir, folder));
+      if (!await root.exists()) continue;
+      await for (final entity in root.list(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (name.startsWith('deleted_')) {
+          markers.add(name.substring('deleted_'.length));
+          continue;
+        }
+        if (!name.startsWith('local_') || p.extension(name) != '.json') {
+          continue;
+        }
+        try {
+          final json = jsonDecode(await entity.readAsString());
+          if (json is! Map<String, Object?> ||
+              !SessionTransfer.requiredFields.every(json.containsKey)) {
+            continue;
+          }
+          if (projects != null && !projects.contains(json['cwd'])) continue;
+          final id = p.basenameWithoutExtension(name);
+          found.putIfAbsent(
+            id,
+            () => _Card(
+              file: entity,
+              json: json,
+              cliSessionId: json['cliSessionId'] as String,
+              lastActivity: DateTime.fromMillisecondsSinceEpoch(
+                json['lastActivityAt'] as int,
+              ),
+            ),
+          );
+        } catch (_) {
+          // Claude как раз пишет карточку — в следующий раз.
+        }
+      }
+    }
+    return (found, markers);
+  }
+
+  Future<Map<String, Set<String>>> _readState() async {
+    try {
+      final json = jsonDecode(await stateFile.readAsString());
+      if (json is Map) {
+        return {
+          for (final MapEntry(:key, :value) in json.entries)
+            if (key is String && value is List)
+              key: {...value.whereType<String>()},
+        };
+      }
+    } on FileSystemException {
+      // Ещё не синхронизировали.
+    } on FormatException {
+      // Испорчен — начнём заново: без него удаления не распространяются.
+    }
+    return {};
+  }
+
+  Future<void> _writeState(Map<String, Set<String>> state) async {
+    await stateFile.parent.create(recursive: true);
+    await SessionTransfer._writeAtomic(
+      stateFile,
+      utf8.encode(
+        jsonEncode({
+          for (final MapEntry(:key, :value) in state.entries)
+            key: [...value]..sort(),
+        }),
+      ),
+    );
+  }
+}
+
+class _Card {
+  const _Card({
+    required this.file,
+    required this.json,
+    required this.cliSessionId,
+    required this.lastActivity,
+  });
+
+  final File file;
+  final Map<String, Object?> json;
+  final String cliSessionId;
+  final DateTime lastActivity;
 }

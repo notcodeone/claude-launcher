@@ -18,6 +18,7 @@ import 'src/integrations/code_session_registry.dart';
 import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/integrations/profile_claude_code.dart';
+import 'src/integrations/session_sync_service.dart';
 import 'src/launcher_controller.dart';
 import 'src/claude/claude_icon_keeper.dart';
 import 'src/claude/claude_updates.dart';
@@ -150,6 +151,11 @@ Future<void> main(List<String> args) async {
     killSwitch: killSwitch,
     settings: settings,
   );
+  final sessionSync = SessionSyncService(
+    launcher: launcher,
+    settings: settings,
+    supportDir: supportDir,
+  )..start();
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
@@ -274,6 +280,7 @@ Future<void> main(List<String> args) async {
       killSwitch: killSwitch,
       claudeUpdates: claudeUpdates,
       coworkFirewall: coworkFirewall,
+      sessionSync: sessionSync,
       version: version,
     ),
   );
@@ -786,6 +793,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.killSwitch,
     required this.claudeUpdates,
     this.coworkFirewall,
+    this.sessionSync,
     required this.version,
   });
 
@@ -797,6 +805,7 @@ class ClaudeLauncherApp extends StatelessWidget {
   final KillSwitch killSwitch;
   final ClaudeUpdates claudeUpdates;
   final CoworkFirewall? coworkFirewall;
+  final SessionSyncService? sessionSync;
   final String version;
 
   @override
@@ -819,6 +828,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           killSwitch: killSwitch,
           claudeUpdates: claudeUpdates,
           coworkFirewall: coworkFirewall,
+          sessionSync: sessionSync,
           version: version,
         ),
       ),

@@ -207,7 +207,6 @@ const appFeatures = <FeatureSection<String>>[
         icon: AppIcons.sync,
         title: 'Синхронизация сессий',
         text: 'Сессии Code сами появляются в других профилях',
-        soon: true,
       ),
     ],
   ),
