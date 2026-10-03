@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+
+import '../integrations/profile_claude_code.dart';
 
 import 'theme.dart';
 import 'widgets.dart';
@@ -66,6 +69,101 @@ Future<bool> showConfirmDialog(
     },
   );
   return confirmed ?? false;
+}
+
+/// Перенос профиля в свою папку Claude Code: переписка его сессий
+/// копируется сама, а память проектов — общая, её пользователь выбирает.
+/// Возвращает папки проектов, чью память взять; `null` — отменили.
+Future<Set<String>?> showClaudeCodeMigrationDialog(
+  BuildContext context, {
+  required String profileName,
+  required ClaudeCodeMigrationPlan plan,
+}) => showDialog<Set<String>>(
+  context: context,
+  builder: (context) => _MigrationDialog(profileName: profileName, plan: plan),
+);
+
+class _MigrationDialog extends StatefulWidget {
+  const _MigrationDialog({required this.profileName, required this.plan});
+
+  final String profileName;
+  final ClaudeCodeMigrationPlan plan;
+
+  @override
+  State<_MigrationDialog> createState() => _MigrationDialogState();
+}
+
+class _MigrationDialogState extends State<_MigrationDialog> {
+  late final _withMemory = [
+    for (final project in widget.plan.projects)
+      if (project.hasMemory) project,
+  ];
+  late final _chosen = {for (final project in _withMemory) project.folder};
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final count = widget.plan.transcripts.length;
+    return AppDialogFrame(
+      children: [
+        Text(
+          'Своя память для «${widget.profileName}»',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${count == 0 ? 'Переписки сессий этого профиля в общей папке нет.' : 'Переписка сессий профиля ($count) скопируется в его папку.'}'
+          '${_withMemory.isEmpty ? '' : ' Память проектов общая — отметьте, какую взять в профиль.'}'
+          ' В «Основном» всё останется как было.',
+          style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+        ),
+        if (_withMemory.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          for (final project in _withMemory)
+            CheckboxListTile(
+              value: _chosen.contains(project.folder),
+              onChanged: (value) => setState(
+                () => value == true
+                    ? _chosen.add(project.folder)
+                    : _chosen.remove(project.folder),
+              ),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(p.basename(project.cwd)),
+              subtitle: Text(
+                project.cwd,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            Expanded(
+              child: AppButton(
+                label: 'Отмена',
+                kind: AppButtonKind.secondary,
+                expand: true,
+                large: true,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: AppButton(
+                label: 'Перенести',
+                expand: true,
+                large: true,
+                onPressed: () => Navigator.of(context).pop({..._chosen}),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 /// Сетка вариантов выбора: 10 колонок на всю ширину. Ячейки 40×40 шире значков (24),

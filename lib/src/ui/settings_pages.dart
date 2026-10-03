@@ -559,7 +559,7 @@ class SettingsSectionPage extends StatelessWidget {
       _Card(
         rows: [
           SettingSwitchRow(
-            title: 'Параллельные профили — тест',
+            title: 'Параллельные профили',
             description:
                 'Открывает несколько профилей, сохраняя уже запущенные. '
                 'Для входа оставьте открытым только нужный профиль. '

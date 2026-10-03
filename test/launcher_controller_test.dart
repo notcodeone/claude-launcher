@@ -16,6 +16,7 @@ class FakeHost extends ClaudeHost {
   bool quitsOnRequest = true;
   int _nextPid = 100;
   bool targetedLinks = false;
+  Map<String, String> lastEnvironment = const {};
   bool scanFails = false;
   int scanCount = 0;
   int? failScanAt;
@@ -62,8 +63,12 @@ class FakeHost extends ClaudeHost {
   }
 
   @override
-  Future<void> launch(String? dataDir) async {
+  Future<void> launch(
+    String? dataDir, {
+    Map<String, String> environment = const {},
+  }) async {
     calls.add('launch ${dataDir ?? 'default'}');
+    lastEnvironment = environment;
     start(dataDir);
   }
 
@@ -757,5 +762,38 @@ void main() {
     expect(host.parallel, isTrue);
     launcher.setParallelLaunch(false);
     expect(host.parallel, isFalse);
+  });
+
+  test('своя папка Claude Code: переменная при запуске и подготовка', () async {
+    expect(personal.ownClaudeCode, isTrue, reason: 'новый профиль');
+    expect(launcher.claudeConfigDirOf(work), isNull, reason: '«Основной»');
+    final config = launcher.claudeConfigDirOf(personal)!;
+    expect(config, '/support/${personal.folderName}/claude-config');
+
+    final prepared = <String>[];
+    launcher.prepareClaudeCode = (profile, dir) async =>
+        prepared.add('${profile.id} $dir');
+    await launcher.switchTo(personal);
+    expect(prepared, ['${personal.id} $config']);
+    expect(host.lastEnvironment, {'CLAUDE_CONFIG_DIR': config});
+
+    await launcher.switchTo(work);
+    expect(host.lastEnvironment, isEmpty);
+  });
+
+  test('профиль до 1.6.0 — общая папка, пока её не разделят', () {
+    final old = Profile.fromJson({
+      'id': 'x',
+      'name': 'Старый',
+      'folderName': 'Claude-Old',
+    });
+    expect(old.ownClaudeCode, isFalse);
+    expect(launcher.claudeConfigDirOf(old), isNull);
+    expect(
+      Profile.fromJson(
+        old.copyWith(ownClaudeCode: true).toJson(),
+      ).ownClaudeCode,
+      isTrue,
+    );
   });
 }

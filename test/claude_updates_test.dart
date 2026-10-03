@@ -36,7 +36,10 @@ class UpdatableHost extends FakeHost {
   Future<bool> canLaunchAfterUpdateFailure() async => safeRecovery;
 
   @override
-  Future<void> launch(String? dataDir) async {
+  Future<void> launch(
+    String? dataDir, {
+    Map<String, String> environment = const {},
+  }) async {
     if (failLaunchDirs.contains(dataDir)) {
       throw StateError('test launch failed');
     }

@@ -473,11 +473,18 @@ class WindowsClaudeHost extends ClaudeHost {
   // ----------------------------------------------------------------- запуск
 
   @override
-  Future<void> launch(String? dataDir) => _start(dataDir);
+  Future<void> launch(
+    String? dataDir, {
+    Map<String, String> environment = const {},
+  }) => _start(dataDir, environment: environment);
 
   /// Стандартный профиль — из пакета MSIX, как из «Пуска»; ссылку ему передаёт
   /// протокол `claude:`, тоже от имени пакета. Остальные — напрямую с папкой.
-  Future<void> _start(String? dataDir, {Uri? link}) async {
+  Future<void> _start(
+    String? dataDir, {
+    Uri? link,
+    Map<String, String> environment = const {},
+  }) async {
     final installation = await locate().then((_) => _installation);
     if (installation == null) throw StateError('Claude не найден');
 
@@ -496,12 +503,18 @@ class WindowsClaudeHost extends ClaudeHost {
       await Process.start(
         installation.exe,
         arguments,
+        environment: environment,
         mode: ProcessStartMode.detached,
       );
     } on ProcessException catch (error) {
       // На части компьютеров Windows не даёт запускать программы из папки
       // пакета напрямую — «Отказано в доступе». Тогда запускаем через пакет.
       if (error.errorCode != ERROR_ACCESS_DENIED || aumid == null) rethrow;
+      // Через пакет Claude запускает Windows, а не лаунчер, — переменные
+      // окружения не передать: профиль откроется с общей папкой Claude Code.
+      if (environment.isNotEmpty) {
+        debugPrint('Claude запущен через пакет — без ${environment.keys}');
+      }
       _activatePackaged(aumid, arguments);
     }
   }

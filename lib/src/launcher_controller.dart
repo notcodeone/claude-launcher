@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import 'claude/claude_host.dart';
+import 'integrations/profile_claude_code.dart';
 import 'profile.dart';
 import 'profile_store.dart';
 
@@ -102,6 +103,10 @@ class LauncherController extends ChangeNotifier {
   /// Вызывается перед запуском Claude с папкой профиля — пока он ещё закрыт.
   Future<void> Function(String dataDir)? beforeLaunch;
 
+  /// Готовит свою папку Claude Code профиля перед запуском (см.
+  /// [claudeConfigDirOf]).
+  Future<void> Function(Profile profile, String configDir)? prepareClaudeCode;
+
   /// Проверка перед запуском профиля — до того, как закрыть открытый: бросает
   /// [LaunchBlocked], если запускать нельзя. [strict] — запуск при старте
   /// лаунчера, без участия пользователя.
@@ -187,6 +192,22 @@ class LauncherController extends ChangeNotifier {
     final folder? => p.join(host.profilesBaseDir, folder),
     null => host.defaultDataDir,
   };
+
+  /// Своя папка Claude Code профиля (`CLAUDE_CONFIG_DIR`); `null` — общая
+  /// `~/.claude`, как у «Основного».
+  String? claudeConfigDirOf(Profile profile) =>
+      profile.usesDefaultFolder || !profile.ownClaudeCode
+      ? null
+      : ProfileClaudeCode.dirOf(dataDirOf(profile));
+
+  /// Папки, где Claude профиля хранит данные (у пакета MSIX — ещё копия
+  /// в папке пакета).
+  List<String> readableDataDirsOf(Profile profile) => host.readableDataDirs(
+    ClaudeInstance(
+      pid: 0,
+      dataDir: profile.usesDefaultFolder ? null : dataDirOf(profile),
+    ),
+  );
 
   Profile? profileOf(ClaudeInstance instance) {
     final dir = host.dataDirOf(instance);
@@ -290,7 +311,12 @@ class LauncherController extends ChangeNotifier {
           'Восстановление отменено аварийным закрытием Claude',
         );
       }
-      await host.launch(target.usesDefaultFolder ? null : targetDir);
+      final config = claudeConfigDirOf(target);
+      if (config != null) await prepareClaudeCode?.call(target, config);
+      await host.launch(
+        target.usesDefaultFolder ? null : targetDir,
+        environment: {'CLAUDE_CONFIG_DIR': ?config},
+      );
       if (maintenance?.interrupted ?? false) {
         await host.killEverything();
         await refresh();
@@ -539,6 +565,7 @@ class LauncherController extends ChangeNotifier {
     String note = '',
     String marker = Profile.defaultMarker,
     String icon = Profile.defaultIcon,
+    bool ownClaudeCode = true,
   }) async {
     final profile = Profile(
       id: _newId(),
@@ -550,6 +577,7 @@ class LauncherController extends ChangeNotifier {
       folderName: folderNameFor(name, [
         for (final existing in profiles) ?existing.folderName,
       ]),
+      ownClaudeCode: ownClaudeCode,
     );
     profiles = [...profiles, profile];
     await store.save(profiles);

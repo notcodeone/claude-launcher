@@ -35,12 +35,14 @@ class ClaudeCodeEvent {
     this.message = '',
     this.notificationType = '',
     this.cwd = '',
+    this.profileId = '',
   });
 
   /// Разбор тела запроса хука; поля — по документации хуков Claude Code.
   static ClaudeCodeEvent? fromHookJson(
     Map<String, Object?> json, {
     String hostSessionId = '',
+    String profileId = '',
     DateTime? time,
   }) {
     final kind = switch ((json['hook_event_name'], json['notification_type'])) {
@@ -70,6 +72,7 @@ class ClaudeCodeEvent {
       message: json['message'] as String? ?? '',
       notificationType: json['notification_type'] as String? ?? '',
       cwd: json['cwd'] as String? ?? '',
+      profileId: profileId,
     );
   }
 
@@ -93,6 +96,10 @@ class ClaudeCodeEvent {
 
   /// Папка проекта сессии.
   final String cwd;
+
+  /// Профиль из адреса хука — у профилей со своей папкой Claude Code; пусто —
+  /// хук общей `~/.claude`.
+  final String profileId;
 }
 
 /// Локальный приёмник событий: слушает только 127.0.0.1 и принимает только
@@ -149,6 +156,8 @@ class ClaudeCodeEventServer {
           json,
           hostSessionId:
               request.headers.value(ClaudeCodeHooks.hostSessionHeader) ?? '',
+          profileId:
+              request.uri.queryParameters[ClaudeCodeHooks.profileQuery] ?? '',
         );
         if (event != null) onEvent(event);
       }

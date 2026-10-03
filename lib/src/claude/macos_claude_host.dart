@@ -242,15 +242,33 @@ class MacClaudeHost extends ClaudeHost {
   }
 
   @override
-  Future<void> launch(String? dataDir) async {
+  Future<void> launch(
+    String? dataDir, {
+    Map<String, String> environment = const {},
+  }) async {
     final appPath = _appPath ?? await locate();
     if (appPath == null) throw StateError('Claude не найден');
     final result = await Process.run('open', [
       '-n',
+      // `open` не передаёт своё окружение приложению — только через --env.
+      for (final MapEntry(:key, :value) in environment.entries) ...[
+        '--env',
+        '$key=$value',
+      ],
       '-a',
       appPath,
       if (dataDir != null) ...['--args', '--user-data-dir=$dataDir'],
     ]);
+    if (result.exitCode != 0 && environment.isNotEmpty) {
+      // Старый macOS без `open --env`: запускаем приложение напрямую.
+      await Process.start(
+        p.join(appPath, 'Contents', 'MacOS', 'Claude'),
+        [if (dataDir != null) '--user-data-dir=$dataDir'],
+        environment: environment,
+        mode: ProcessStartMode.detached,
+      );
+      return;
+    }
     if (result.exitCode != 0) {
       throw ProcessException(
         'open',

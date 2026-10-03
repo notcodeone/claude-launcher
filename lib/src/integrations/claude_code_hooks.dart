@@ -13,7 +13,7 @@ import 'package:path/path.dart' as p;
 ///
 /// Свои записи лаунчер узнаёт по [marker] в адресе и трогает только их.
 class ClaudeCodeHooks {
-  ClaudeCodeHooks(this.settingsFile);
+  ClaudeCodeHooks(this.settingsFile, {this.profileId});
 
   /// Файл настроек Claude Code: `~/.claude/settings.json`, а если задана
   /// переменная `CLAUDE_CONFIG_DIR` — в её папке, как у самого Claude Code.
@@ -34,6 +34,10 @@ class ClaudeCodeHooks {
 
   final File settingsFile;
 
+  /// Хуки в своей папке Claude Code профиля: его id — в адресе хука, и
+  /// событие сразу знает свой профиль. `null` — общая `~/.claude`.
+  final String? profileId;
+
   static const marker = '/claude-launcher/';
 
   /// Начало задачи, работа инструментов (запасной признак «работает»: в
@@ -50,7 +54,12 @@ class ClaudeCodeHooks {
   static const hostSessionHeader = 'X-Claude-Host-Session';
   static const tokenHeader = 'X-Claude-Launcher-Token';
 
-  static String endpoint(int port) => 'http://127.0.0.1:$port${marker}v1/event';
+  static String endpoint(int port, {String? profileId}) =>
+      'http://127.0.0.1:$port${marker}v1/event'
+      '${profileId == null ? '' : '?$profileQuery=${Uri.encodeQueryComponent(profileId)}'}';
+
+  /// Параметр адреса хука с id профиля.
+  static const profileQuery = 'profile';
 
   /// Исходный файл до первого изменения лаунчером.
   File get backup => File('${settingsFile.path}.claude-launcher-backup');
@@ -59,9 +68,10 @@ class ClaudeCodeHooks {
   static Map<String, Object?> hookFor({
     required int port,
     required String token,
+    String? profileId,
   }) => {
     'type': 'http',
-    'url': endpoint(port),
+    'url': endpoint(port, profileId: profileId),
     'timeout': 2,
     'headers': {
       tokenHeader: token,
@@ -79,7 +89,7 @@ class ClaudeCodeHooks {
       hooks[event] = [
         ...?hooks[event] as List?,
         {
-          'hooks': [hookFor(port: port, token: token)],
+          'hooks': [hookFor(port: port, token: token, profileId: profileId)],
         },
       ];
     }
@@ -106,7 +116,9 @@ class ClaudeCodeHooks {
   Future<bool> isInstalled({required int port, required String token}) async {
     if (!await settingsFile.exists()) return false;
     final hooks = _hooksOf(await _read());
-    final expected = jsonEncode(hookFor(port: port, token: token));
+    final expected = jsonEncode(
+      hookFor(port: port, token: token, profileId: profileId),
+    );
     return events.every(
       (event) => (hooks[event] as List? ?? const []).any(
         (group) => _ours(group).any((hook) => jsonEncode(hook) == expected),

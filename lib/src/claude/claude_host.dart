@@ -49,8 +49,12 @@ abstract class ClaudeHost {
 
   Future<List<ClaudeInstance>> running();
 
-  /// Запускает Claude с папкой [dataDir] (`null` — стандартная папка).
-  Future<void> launch(String? dataDir);
+  /// Запускает Claude с папкой [dataDir] (`null` — стандартная папка) и
+  /// дополнительными переменными [environment] (`CLAUDE_CONFIG_DIR`).
+  Future<void> launch(
+    String? dataDir, {
+    Map<String, String> environment = const {},
+  });
 
   /// Выводит уже запущенный экземпляр на передний план.
   Future<void> activate(ClaudeInstance instance);

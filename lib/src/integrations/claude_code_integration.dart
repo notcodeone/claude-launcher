@@ -210,6 +210,36 @@ class ClaudeCodeIntegration extends ChangeNotifier {
 
   /// Перед запуском Claude лаунчером: если уведомления показывает лаунчер,
   /// выключает их у этого Claude.
+  /// Хуки в своих папках Claude Code профилей: id профиля — в адресе хука.
+  List<ClaudeCodeHooks> _profileHooks() => [
+    for (final profile in launcher.profiles)
+      if (launcher.claudeConfigDirOf(profile) case final dir?)
+        ClaudeCodeHooks(
+          File(p.join(dir, 'settings.json')),
+          profileId: profile.id,
+        ),
+  ];
+
+  /// Перед запуском профиля со своей папкой Claude Code: ставит в неё хуки,
+  /// если события включены.
+  Future<void> prepareProfile(Profile profile, String configDir) async {
+    final port = _server?.port;
+    if (port == null) return;
+    final hooks = ClaudeCodeHooks(
+      File(p.join(configDir, 'settings.json')),
+      profileId: profile.id,
+    );
+    final token = settings.eventsToken;
+    try {
+      if (!await hooks.isInstalled(port: port, token: token)) {
+        await hooks.install(port: port, token: token);
+      }
+    } catch (e) {
+      error = 'Не удалось подключить события Claude Code: $e';
+      _notify();
+    }
+  }
+
   Future<void> beforeLaunch(String dataDir) async {
     final handoff = this.handoff;
     if (handoff == null || !_notifying) return;
@@ -268,8 +298,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       if (port != settings.eventsPort) await settings.setEventsPort(port);
       final token = settings.eventsToken;
       // Обновление лаунчера с новыми событиями тоже переустановит хуки.
-      if (!await hooks.isInstalled(port: port, token: token)) {
-        await hooks.install(port: port, token: token);
+      for (final target in [hooks, ..._profileHooks()]) {
+        if (!await target.isInstalled(port: port, token: token)) {
+          await target.install(port: port, token: token);
+        }
       }
       error = null;
       await _restoreRegistry();
@@ -292,7 +324,9 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     _shown.clear();
     await _saveRegistry();
     try {
-      await hooks.uninstall();
+      for (final target in [hooks, ..._profileHooks()]) {
+        await target.uninstall();
+      }
       error = null;
     } catch (e) {
       error = 'Не удалось убрать хуки из ~/.claude/settings.json: $e';
@@ -316,8 +350,16 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   Future<void> _handleEvent(ClaudeCodeEvent event, int generation) async {
+    // Только сессии приложения Claude: у Claude Code из терминала нет id
+    // сессии приложения, и лаунчер его не показывает.
+    if (CodeSession.linkFor(event.hostSessionId) == null) return;
     Profile? profile;
-    if (launcher.parallelLaunch) {
+    if (event.profileId.isNotEmpty) {
+      // Хук из своей папки Claude Code профиля — профиль известен точно.
+      profile = launcher.runningProfiles
+          .where((p) => p.id == event.profileId)
+          .firstOrNull;
+    } else if (launcher.parallelLaunch) {
       final id = await _resolveProfile(event);
       if (_disposed || generation != _eventGeneration) return;
       profile = launcher.runningProfiles.where((p) => p.id == id).firstOrNull;

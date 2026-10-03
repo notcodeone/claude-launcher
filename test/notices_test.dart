@@ -170,6 +170,7 @@ void main() {
       Snacks.claudeFailed(none),
       Snacks.profileCreated('Рабочий', none),
       Snacks.profileSaved('Рабочий'),
+      Snacks.claudeCodeMoveFailed(),
     ];
     // Окно 560 с полями по 24 — кнопка страницы скрыта, вся ширина.
     const width = 560.0 - 2 * 24;

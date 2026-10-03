@@ -143,4 +143,27 @@ void main() {
     );
     expect(file.readAsStringSync(), '{ не json');
   });
+
+  test('хуки профиля несут его id в адресе', () async {
+    final dir = await Directory.systemTemp.createTemp('hooks_profile');
+    addTearDown(() => dir.delete(recursive: true));
+    final hooks = ClaudeCodeHooks(
+      File('${dir.path}/settings.json'),
+      profileId: 'p 1',
+    );
+    await hooks.install(port: 4242, token: 't');
+    expect(await hooks.isInstalled(port: 4242, token: 't'), isTrue);
+    expect(
+      await ClaudeCodeHooks(
+        File('${dir.path}/settings.json'),
+      ).isInstalled(port: 4242, token: 't'),
+      isFalse,
+      reason: 'без id — другие хуки',
+    );
+    final url = ClaudeCodeHooks.endpoint(4242, profileId: 'p 1');
+    expect(Uri.parse(url).queryParameters['profile'], 'p 1');
+    expect(url, contains(ClaudeCodeHooks.marker));
+    await hooks.uninstall();
+    expect(await hooks.isInstalled(port: 4242, token: 't'), isFalse);
+  });
 }

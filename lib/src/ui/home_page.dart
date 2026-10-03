@@ -506,7 +506,7 @@ class HomePage extends StatelessWidget {
         const NoticeRow(
           icon: AppIcons.experiments,
           tone: NoticeTone.neutral,
-          title: 'Параллельные профили — тест',
+          title: 'Параллельные профили',
           detail:
               'Для входа оставьте один профиль. Сессии Code определяются '
               'по данным Claude. Одновременный Cowork ещё не проверен.',

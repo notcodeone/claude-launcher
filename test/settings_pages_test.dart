@@ -107,10 +107,7 @@ void main() {
     expect(settings.parallelLaunch, isFalse);
     await tester.tap(
       find.descendant(
-        of: find.widgetWithText(
-          SettingSwitchRow,
-          'Параллельные профили — тест',
-        ),
+        of: find.widgetWithText(SettingSwitchRow, 'Параллельные профили'),
         matching: find.byType(Switch),
       ),
     );

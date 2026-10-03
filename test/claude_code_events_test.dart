@@ -185,6 +185,17 @@ void main() {
       expect(events.single.hostSessionId, 'local_42');
     });
 
+    test('профиль — из адреса хука', () async {
+      final url = Uri.parse(ClaudeCodeHooks.endpoint(port, profileId: 'p1'));
+      await post(
+        port,
+        {'hook_event_name': 'Stop'},
+        token: 'secret',
+        path: '${url.path}?${url.query}',
+      );
+      expect(events.single.profileId, 'p1');
+    });
+
     test('без ключа, с чужим ключом или не тем запросом — 404', () async {
       expect((await post(port, {'hook_event_name': 'Stop'})).status, 404);
       expect(
@@ -404,11 +415,16 @@ void main() {
     // Пока окно закрыто, переписку не читаем; открыли — сразу догоняем.
     final transcript = File('${dir.path}/s2.jsonl')..writeAsStringSync('');
     windowVisible.value = false;
-    await post(port, {
-      'hook_event_name': 'UserPromptSubmit',
-      'session_id': 's2',
-      'transcript_path': transcript.path,
-    }, token: settings.eventsToken);
+    await post(
+      port,
+      {
+        'hook_event_name': 'UserPromptSubmit',
+        'session_id': 's2',
+        'transcript_path': transcript.path,
+      },
+      token: settings.eventsToken,
+      hostSession: 'local_s2',
+    );
     await integration.pendingEvents;
     transcript.writeAsStringSync(
       '${jsonEncode({
@@ -526,8 +542,8 @@ void main() {
           hostSession: 'local_abc',
         ).then((_) => integration.pendingEvents);
 
-    // Терминал без открытого Claude: сессию на карточке не показать,
-    // а уведомить нужно.
+    // Claude Code из терминала (без id сессии приложения) лаунчер не
+    // показывает и не уведомляет о нём: работаем только с приложением Claude.
     await post(settings.eventsPort, {
       'hook_event_name': 'Notification',
       'notification_type': 'permission_prompt',
@@ -536,7 +552,7 @@ void main() {
       'cwd': '/p/cli',
     }, token: token);
     await integration.pendingEvents;
-    expect(notifier.log, ['show cli: Нужно разрешение: Bash []']);
+    expect(notifier.log, isEmpty);
 
     host.start(null);
     await launcher.refresh();

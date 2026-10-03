@@ -10,6 +10,7 @@ class Profile {
     this.folderName,
     this.lastLaunchedAt,
     this.sessionsCollapsed = false,
+    this.ownClaudeCode = false,
   });
 
   /// Цветные метки: видны и в меню трея, и в строке меню macOS.
@@ -36,6 +37,12 @@ class Profile {
   /// Сессии Claude Code на карточке свёрнуты.
   final bool sessionsCollapsed;
 
+  /// Своя папка Claude Code: память, переписка и разрешения вкладки Code —
+  /// только этого профиля (см. `ProfileClaudeCode`). У новых профилей — да,
+  /// у созданных до 1.6.0 — общая с «Основным», пока её не разделят.
+  /// У «Основного» всегда `~/.claude`.
+  final bool ownClaudeCode;
+
   bool get usesDefaultFolder => folderName == null;
 
   String get title => '$marker $name';
@@ -48,6 +55,7 @@ class Profile {
     String? icon,
     DateTime? lastLaunchedAt,
     bool? sessionsCollapsed,
+    bool? ownClaudeCode,
   }) {
     return Profile(
       id: id,
@@ -59,6 +67,7 @@ class Profile {
       folderName: folderName,
       lastLaunchedAt: lastLaunchedAt ?? this.lastLaunchedAt,
       sessionsCollapsed: sessionsCollapsed ?? this.sessionsCollapsed,
+      ownClaudeCode: ownClaudeCode ?? this.ownClaudeCode,
     );
   }
 
@@ -72,6 +81,7 @@ class Profile {
     'folderName': folderName,
     'lastLaunchedAt': lastLaunchedAt?.toIso8601String(),
     'sessionsCollapsed': sessionsCollapsed,
+    'ownClaudeCode': ownClaudeCode,
   };
 
   factory Profile.fromJson(Map<String, Object?> json) {
@@ -88,6 +98,7 @@ class Profile {
           ? null
           : DateTime.parse(lastLaunched),
       sessionsCollapsed: json['sessionsCollapsed'] as bool? ?? false,
+      ownClaudeCode: json['ownClaudeCode'] as bool? ?? false,
     );
   }
 }

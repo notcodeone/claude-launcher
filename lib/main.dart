@@ -17,6 +17,7 @@ import 'src/integrations/claude_code_integration.dart';
 import 'src/integrations/code_session_registry.dart';
 import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
+import 'src/integrations/profile_claude_code.dart';
 import 'src/launcher_controller.dart';
 import 'src/claude/claude_icon_keeper.dart';
 import 'src/claude/claude_updates.dart';
@@ -126,6 +127,13 @@ Future<void> main(List<String> args) async {
   // switch — закрепить профиль за затвором (Claude читает это при запуске).
   // «Скрывать значок Claude» — настройкой самого Claude в папке профиля.
   final trayIcon = ClaudeTrayIcon(settings: settings, launcher: launcher);
+  launcher.prepareClaudeCode = (profile, dir) async {
+    await ProfileClaudeCode(
+      dir: dir,
+      shared: ProfileClaudeCode.sharedDir(Platform.environment),
+    ).prepare();
+    await claudeCode.prepareProfile(profile, dir);
+  };
   launcher.beforeLaunch = (dataDir) async {
     await claudeCode.beforeLaunch(dataDir);
     await trayIcon.beforeLaunch(dataDir);
@@ -703,6 +711,17 @@ Future<void> _cleanup(Directory supportDir) async {
   }
   try {
     await ClaudeCodeHooks.forCurrentUser().uninstall();
+    // И из своих папок Claude Code профилей.
+    final launcher = LauncherController(
+      host: host,
+      store: ProfileStore(File(p.join(supportDir.path, 'profiles.json'))),
+    );
+    await launcher.init();
+    for (final profile in launcher.profiles) {
+      if (launcher.claudeConfigDirOf(profile) case final dir?) {
+        await ClaudeCodeHooks(File(p.join(dir, 'settings.json'))).uninstall();
+      }
+    }
   } catch (error) {
     debugPrint('Не удалось убрать хуки Claude Code: $error');
   }

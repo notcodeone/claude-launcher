@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../integrations/profile_claude_code.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'profile_dialog.dart';
@@ -244,6 +246,7 @@ class _ProfilePageState extends State<ProfilePage> {
   late final _note = TextEditingController(text: widget.profile?.note);
   late String _marker = widget.profile?.marker ?? Profile.defaultMarker;
   late String _icon = widget.profile?.icon ?? Profile.defaultIcon;
+  late bool _ownClaudeCode = widget.profile?.ownClaudeCode ?? true;
   String? _nameError;
   bool _saving = false;
 
@@ -288,6 +291,12 @@ class _ProfilePageState extends State<ProfilePage> {
     final email = _email.text.trim();
     final note = _note.text.trim();
     if (widget.profile case final profile?) {
+      if (_ownClaudeCode && !profile.ownClaudeCode) {
+        if (!await _moveToOwnClaudeCode(profile)) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
+      }
       await widget.launcher.updateProfile(
         profile.copyWith(
           name: name,
@@ -295,6 +304,7 @@ class _ProfilePageState extends State<ProfilePage> {
           note: note,
           marker: _marker,
           icon: _icon,
+          ownClaudeCode: _ownClaudeCode,
         ),
       );
       if (!mounted) return;
@@ -308,6 +318,7 @@ class _ProfilePageState extends State<ProfilePage> {
       note: note,
       marker: _marker,
       icon: _icon,
+      ownClaudeCode: _ownClaudeCode,
     );
     if (!mounted) return;
     // Новый тег — до возврата: аватар улетит в карточку нового профиля.
@@ -317,6 +328,36 @@ class _ProfilePageState extends State<ProfilePage> {
     AppSnackbar.show(
       Snacks.profileCreated(name, () => launcher.switchTo(profile)),
     );
+  }
+
+  /// Профиль жил в общей `~/.claude`: копируем в его папку переписку его
+  /// сессий и память проектов, которые выберет пользователь. false — отменили.
+  Future<bool> _moveToOwnClaudeCode(Profile profile) async {
+    final launcher = widget.launcher;
+    final migration = ClaudeCodeMigration(
+      shared: ProfileClaudeCode.sharedDir(Platform.environment),
+      dir: ProfileClaudeCode.dirOf(launcher.dataDirOf(profile)),
+      dataDirs: launcher.readableDataDirsOf(profile),
+    );
+    try {
+      final plan = await migration.plan();
+      if (plan.isEmpty) return true;
+      if (!mounted) return false;
+      final memory = await showClaudeCodeMigrationDialog(
+        context,
+        profileName: profile.name,
+        plan: plan,
+      );
+      if (memory == null) return false;
+      await migration.apply(plan, memoryOf: memory);
+      return true;
+    } catch (error) {
+      if (mounted) {
+        AppSnackbar.show(Snacks.claudeCodeMoveFailed());
+      }
+      debugPrint('Не удалось перенести данные Claude Code: $error');
+      return false;
+    }
   }
 
   @override
@@ -464,6 +505,25 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
+              if (widget.profile?.usesDefaultFolder != true) ...[
+                const SizedBox(height: 16),
+                AppearIn(
+                  index: 3,
+                  child: SoftCard(
+                    child: SettingSwitchRow(
+                      title: 'Своя память Claude Code',
+                      description:
+                          'Память проектов, переписка и разрешения вкладки Code — '
+                          'только у этого профиля. CLAUDE.md, агенты, команды и '
+                          'навыки — общие с «Основным».'
+                          '${widget.profile != null && widget.launcher.isRunning(widget.profile!) ? ' Изменение вступит в силу при следующем открытии профиля.' : ''}',
+                      value: _ownClaudeCode,
+                      onChanged: (value) =>
+                          setState(() => _ownClaudeCode = value),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               AppearIn(
                 index: 3,

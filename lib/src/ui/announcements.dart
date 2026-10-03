@@ -87,6 +87,13 @@ abstract final class Snacks {
     icon: AppIcons.check,
     text: 'Профиль «$name» сохранён',
   );
+
+  static Snack claudeCodeMoveFailed() => const Snack(
+    id: 'claude-code-move',
+    icon: AppIcons.error,
+    text: 'Не удалось перенести данные Claude Code',
+    error: true,
+  );
 }
 
 /// Что лаунчер сообщает оповещением внизу окна ([AppSnackbar]): подсказку
