@@ -110,6 +110,79 @@ class EgressConfig {
     });
   }
 
+  /// Только выключает встроенное обновление Claude, без прокси: в параллельном
+  /// режиме один экземпляр иначе заменил бы приложение под работающим соседом
+  /// (Claude ставит скачанное обновление при выходе, в простое без окон и
+  /// принудительно через 72 часа). Запись Kill Switch с прокси не ослабляет.
+  /// false — папка занята чужой конфигурацией или недоступна.
+  Future<bool> holdUpdates(String dataDir) async {
+    final dir = _directory(dataDir);
+    return _serial(dir, () async {
+      try {
+        await _checkDirectories(dir);
+        if (await _foreign(dir)) return false;
+        final current = await _ownEntry(dir);
+        if (current != null &&
+            current['egressProxyUrl'] != null &&
+            current['disableAutoUpdates'] == true) {
+          return true;
+        }
+        return await _pinDir(dir, null);
+      } catch (error) {
+        debugPrint('Обновления Claude: конфигурация недоступна: $error');
+        return false;
+      }
+    });
+  }
+
+  /// Снимает [holdUpdates]. Запись с прокси (Kill Switch) остаётся.
+  Future<void> releaseUpdates(String dataDir) async {
+    final dir = _directory(dataDir);
+    await _serial(dir, () async {
+      try {
+        await _checkDirectories(dir);
+        final current = await _ownEntry(dir);
+        if (current == null || current['egressProxyUrl'] != null) return;
+        await _unpinDir(dir);
+      } catch (error) {
+        debugPrint('Обновления Claude: не удалось вернуть их Claude: $error');
+      }
+    });
+  }
+
+  /// Встроенное обновление Claude выключено записью лаунчера (с прокси или без).
+  Future<bool> holdsUpdates(String dataDir) async {
+    final dir = _directory(dataDir);
+    return _serial(dir, () async {
+      try {
+        await _checkDirectories(dir);
+        final entry = await _ownEntry(dir);
+        final desktop = await _readJson(
+          File(p.join(dir, 'claude_desktop_config.json')),
+        );
+        return entry?['disableAutoUpdates'] == true &&
+            desktop?['deploymentMode'] == '1p';
+      } catch (_) {
+        return false;
+      }
+    });
+  }
+
+  /// Своя запись, если именно она применена; иначе `null`.
+  static Future<Map<String, Object?>?> _ownEntry(String dir) async {
+    final library = p.join(dir, 'configLibrary');
+    final meta = await _readJson(File(p.join(library, '_meta.json')));
+    final entries = meta?['entries'];
+    if (meta?['appliedId'] != entryId ||
+        entries is! List ||
+        entries.length != 1 ||
+        entries.single is! Map ||
+        (entries.single as Map)['id'] != entryId) {
+      return null;
+    }
+    return _readJson(File(p.join(library, '$entryId.json')));
+  }
+
   /// В папке уже чужая конфигурация — её мог настроить администратор.
   Future<bool> _foreign(String dir) async {
     final meta = await _readJson(
@@ -127,7 +200,8 @@ class EgressConfig {
         desktop?['deploymentMode'] == '3p';
   }
 
-  Future<bool> _pinDir(String dir, int port) async {
+  /// [port] `null` — только удержание обновлений, без прокси.
+  Future<bool> _pinDir(String dir, int? port) async {
     final library = Directory(p.join(dir, 'configLibrary'));
     final metaFile = File(p.join(library.path, '_meta.json'));
     final config = File(p.join(dir, 'claude_desktop_config.json'));
@@ -138,7 +212,7 @@ class EgressConfig {
       await _readJson(entryFile);
       await library.create(recursive: true);
       await _writeJson(entryFile, {
-        'egressProxyUrl': 'http://127.0.0.1:$port',
+        if (port != null) 'egressProxyUrl': 'http://127.0.0.1:$port',
         // Обновления Claude качает системой в обход прокси (на macOS —
         // Squirrel), то есть прямо к Anthropic. Пока профиль закреплён, их
         // нет: Claude обновляет лаунчер (ClaudeUpdates).

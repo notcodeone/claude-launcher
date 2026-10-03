@@ -567,6 +567,7 @@ class SettingsSectionPage extends StatelessWidget {
                 'Сессии Code определяются по записям Claude; при неизвестном '
                 'владельце событие не появляется на карточке. '
                 'Одновременный Cowork ещё не проверен. '
+                '${deps.launcher.host.updateFeed != null ? 'Встроенное обновление Claude выключается у запускаемых профилей — Claude обновляет лаунчер (раздел «Обновления»). ' : ''}'
                 'После выключения следующий выбор профиля снова закроет остальные.',
             value: settings.parallelLaunch,
             onChanged: settings.setParallelLaunch,
@@ -751,17 +752,32 @@ class _ClaudeVersionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            updates.active
-                ? 'Пока включён Kill Switch, Claude обновляет лаунчер: '
-                      'встроенное обновление Claude ходит мимо прокси. Лаунчер '
-                      'качает только через проверенную сеть, проверяет архив и '
-                      'подпись, закрывает Claude, ставит новую версию и '
-                      'открывает Claude снова.'
-                : 'Claude обновляется сам. Лаунчер берёт это на себя, только '
-                      'пока включён Kill Switch.',
-            style: theme.textTheme.bodySmall,
-          ),
+          Text(switch ((updates.active, updates.settings.killSwitch)) {
+            (true, true) =>
+              'Пока включён Kill Switch, Claude обновляет лаунчер: '
+                  'встроенное обновление Claude ходит мимо прокси. Лаунчер '
+                  'качает только через проверенную сеть, проверяет архив и '
+                  'подпись, закрывает Claude, ставит новую версию и '
+                  'открывает Claude снова.',
+            (true, false) =>
+              'В параллельном режиме Claude обновляет лаунчер: иначе один '
+                  'профиль заменил бы приложение под работающими соседями. '
+                  'Лаунчер проверяет архив и подпись, закрывает все '
+                  'профили, ставит новую версию и открывает их снова.',
+            _ =>
+              'Claude обновляется сам. Лаунчер берёт это на себя, пока '
+                  'включён Kill Switch или параллельный режим.',
+          }, style: theme.textTheme.bodySmall),
+          if (updates.unheld.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Профилей, где встроенное обновление выключить не удалось '
+              '(в папке настроек Claude чужая конфигурация): '
+              '${updates.unheld.length}. Такой профиль может обновить '
+              'Claude под работающими соседями.',
+              style: theme.textTheme.bodySmall?.copyWith(color: p.danger),
+            ),
+          ],
           if (updates.active) ...[
             const SizedBox(height: 14),
             Wrap(

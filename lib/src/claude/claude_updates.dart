@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import '../app_settings.dart';
 import '../launcher_controller.dart';
+import '../location/egress_config.dart';
 import '../location/kill_switch.dart';
 import '../profile.dart';
 import 'claude_host.dart';
@@ -49,11 +50,13 @@ class ClaudeRelease {
 
 enum ClaudeUpdatePhase { idle, downloading, installing, failed }
 
-/// Обновление Claude, пока включён Kill Switch.
+/// Обновление Claude, пока включён Kill Switch или параллельный режим.
 ///
-/// Встроенное обновление Claude ходит к Anthropic мимо прокси-затвора, поэтому
-/// на это время лаунчер его выключает ([EgressConfig]) и обновляет Claude сам —
-/// только когда затвор открыт, то есть сеть проверена. Ленту спрашивает так
+/// Встроенное обновление Claude ходит к Anthropic мимо прокси-затвора, а при
+/// нескольких профилях один экземпляр заменил бы приложение под работающими
+/// соседями. На это время лаунчер его выключает ([EgressConfig]) и обновляет
+/// Claude сам: закрывает все профили, ставит и открывает их снова. С Kill
+/// Switch — только когда затвор открыт, то есть сеть проверена. Ленту спрашивает так
 /// же, как Claude, но со случайным `device_id` — без привязки к устройству.
 /// Скачанное обновление проверяет (контрольная сумма, подпись разработчика),
 /// закрывает Claude так же, как при переключении, ставит и открывает снова.
@@ -113,9 +116,50 @@ class ClaudeUpdates extends ChangeNotifier {
   /// Лента спрашивается прямо сейчас.
   bool get checking => _checking;
 
-  /// Лаунчер обновляет Claude сам: Kill Switch включён, а Claude — такой,
-  /// какой лаунчер умеет обновлять.
-  bool get active => settings.killSwitch && host.updateFeed != null;
+  /// Лаунчер обновляет Claude сам: включён Kill Switch или параллельный
+  /// режим, а Claude — такой, какой лаунчер умеет обновлять.
+  bool get active =>
+      (settings.killSwitch || settings.parallelLaunch) &&
+      host.updateFeed != null;
+
+  /// Обновления держит параллельный режим (а не только Kill Switch).
+  bool get holdsForParallel =>
+      settings.parallelLaunch && host.updateFeed != null;
+
+  /// Сеть можно использовать: с Kill Switch — только проверенную.
+  bool get _networkReady => !settings.killSwitch || killSwitch.open;
+
+  EgressConfig get _config => killSwitch.config;
+
+  /// Папки, где выключить встроенное обновление не удалось (чужая
+  /// конфигурация): такой профиль может заменить Claude под соседями.
+  final Set<String> unheld = {};
+
+  /// С true первая сверка в [start] снимает удержание, оставшееся от
+  /// прошлого запуска лаунчера, если параллельный режим уже выключен.
+  bool _wasHolding = true;
+
+  /// Перед запуском профиля в параллельном режиме: выключить встроенное
+  /// обновление этого экземпляра (Claude читает настройку при запуске).
+  /// Неудача запуск не останавливает — она видна в отчёте и настройках.
+  Future<void> beforeLaunch(String dataDir) async {
+    if (!holdsForParallel) return;
+    final held = await _config.holdUpdates(dataDir);
+    final changed = held ? unheld.remove(dataDir) : unheld.add(dataDir);
+    if (changed) notifyListeners();
+  }
+
+  /// Параллельный режим выключен: следующие запуски снова обновляются сами.
+  /// Запись Kill Switch с прокси остаётся (см. [EgressConfig.releaseUpdates]).
+  Future<void> _releaseHolds() async {
+    for (final profile in launcher.profiles) {
+      await _config.releaseUpdates(launcher.dataDirOf(profile));
+    }
+    if (unheld.isNotEmpty) {
+      unheld.clear();
+      notifyListeners();
+    }
+  }
 
   bool get busy =>
       phase == ClaudeUpdatePhase.downloading ||
@@ -148,6 +192,9 @@ class ClaudeUpdates extends ChangeNotifier {
   }
 
   void _maybeCheck() {
+    final holding = holdsForParallel;
+    if (_wasHolding && !holding) unawaited(_releaseHolds());
+    _wasHolding = holding;
     if (!active) {
       // Kill Switch выключен — Claude снова обновляется сам; скачанное
       // лаунчером больше не понадобится.
@@ -159,7 +206,7 @@ class ClaudeUpdates extends ChangeNotifier {
       return;
     }
     final checkedAt = _checkedAt;
-    if (killSwitch.open &&
+    if (_networkReady &&
         !_checking &&
         !busy &&
         (checkedAt == null ||
@@ -172,7 +219,7 @@ class ClaudeUpdates extends ChangeNotifier {
   /// сеть: пока затвор закрыт, не спрашивает.
   Future<void> check() async {
     final feed = host.updateFeed;
-    if (feed == null || !killSwitch.open || _checking || busy) return;
+    if (feed == null || !active || !_networkReady || _checking || busy) return;
     _checking = true;
     notifyListeners();
     try {

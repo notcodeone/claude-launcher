@@ -6,11 +6,13 @@ import 'package:claude_launcher/src/app_settings.dart';
 import 'package:claude_launcher/src/claude/claude_updates.dart';
 import 'package:claude_launcher/src/claude/claude_host.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
+import 'package:claude_launcher/src/location/egress_config.dart';
 import 'package:claude_launcher/src/location/kill_switch.dart';
 import 'package:claude_launcher/src/location/location_guard.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 import 'launcher_controller_test.dart' show FakeHost;
 
@@ -102,9 +104,15 @@ void main() {
     late List<int> archive;
     late String? sha;
     late int downloads;
+    late EgressConfig config;
+
+    /// Папка настроек Claude профиля — во временном каталоге теста.
+    String configDir(String dataDir) =>
+        p.join(dir.path, 'config', '${p.basename(dataDir)}-3p');
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('claude_updates');
+      config = EgressConfig(directoryForProfile: configDir);
       archive = List<int>.generate(100000, (i) => i % 251);
       sha = '${sha256.convert(archive)}';
       downloads = 0;
@@ -148,6 +156,7 @@ void main() {
         launcher: launcher,
         fingerprint: () async => 'en0=1',
         useGate: false,
+        config: config,
       )..start();
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
@@ -184,6 +193,83 @@ void main() {
       final u = updates();
       await u.check();
       expect(u.available, isNull);
+    });
+
+    group('параллельный режим', () {
+      setUp(() async {
+        await settings.setKillSwitch(false);
+        await settings.setParallelLaunch(true);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+
+      test('лаунчер обновляет Claude и без Kill Switch', () async {
+        final u = updates();
+        expect(u.active, isTrue);
+        await u.check();
+        expect(u.available?.version, '2.200.0');
+      });
+
+      test(
+        'перед запуском выключает встроенное обновление, без прокси',
+        () async {
+          final u = updates();
+          final dataDir = launcher.dataDirOf(launcher.profiles.first);
+          await u.beforeLaunch(dataDir);
+          expect(await config.holdsUpdates(dataDir), isTrue);
+          expect(await config.isPinned(dataDir), isFalse);
+          expect(u.unheld, isEmpty);
+        },
+      );
+
+      test('выключение режима возвращает обновления Claude', () async {
+        final u = updates()..start();
+        final dataDir = launcher.dataDirOf(launcher.profiles.first);
+        await u.beforeLaunch(dataDir);
+        await settings.setParallelLaunch(false);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(await config.holdsUpdates(dataDir), isFalse);
+        u.dispose();
+      });
+
+      test('удержание от прошлого запуска снимается при старте', () async {
+        final dataDir = launcher.dataDirOf(launcher.profiles.first);
+        expect(await config.holdUpdates(dataDir), isTrue);
+        await settings.setParallelLaunch(false);
+        final u = updates()..start();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(await config.holdsUpdates(dataDir), isFalse);
+        u.dispose();
+      });
+
+      test(
+        'чужая конфигурация: профиль отмечен, запуск не блокируется',
+        () async {
+          final u = updates();
+          final dataDir = launcher.dataDirOf(launcher.profiles.first);
+          final library = Directory(
+            p.join(configDir(dataDir), 'configLibrary'),
+          );
+          await library.create(recursive: true);
+          await File(p.join(library.path, '_meta.json')).writeAsString(
+            jsonEncode({
+              'appliedId': 'admin',
+              'entries': [
+                {'id': 'admin', 'name': 'Admin'},
+              ],
+            }),
+          );
+          await u.beforeLaunch(dataDir);
+          expect(u.unheld, {dataDir});
+        },
+      );
+
+      test('в обычном режиме перед запуском ничего не пишет', () async {
+        await settings.setParallelLaunch(false);
+        final u = updates();
+        final dataDir = launcher.dataDirOf(launcher.profiles.first);
+        await u.beforeLaunch(dataDir);
+        expect(await Directory(configDir(dataDir)).exists(), isFalse);
+      });
     });
 
     test('скачивает, сверяет сумму и ставит', () async {
