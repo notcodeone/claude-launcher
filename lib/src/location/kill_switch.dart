@@ -352,7 +352,9 @@ class KillSwitch extends ChangeNotifier {
       final dir = launcher.host.dataDirOf(instance);
       var pinned = false;
       try {
-        pinned = useGate && await config.isPinned(dir);
+        pinned =
+            useGate &&
+            await config.isPinned(dir, port: gate.port ?? settings.egressPort);
       } catch (_) {
         // Unreadable configuration is not evidence of protection.
       }
@@ -391,7 +393,10 @@ class KillSwitch extends ChangeNotifier {
         // открытый без него — только после перезапуска.
         var pinnedBefore = handover;
         for (final instance in List.of(launcher.instances)) {
-          if (await config.isPinned(launcher.host.dataDirOf(instance))) {
+          if (await config.isPinned(
+            launcher.host.dataDirOf(instance),
+            port: settings.egressPort,
+          )) {
             pinnedBefore = true;
           } else if (!handover || launcher.instances.length > 1) {
             // Конфигурация одного профиля не защищает соседние экземпляры.

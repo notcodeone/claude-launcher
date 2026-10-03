@@ -13,7 +13,7 @@ import 'launcher_controller_test.dart' show FakeHost;
 class MemoryEgressConfig extends EgressConfig {
   final pinned = <String>{};
   @override
-  Future<bool> isPinned(String dir) async => pinned.contains(dir);
+  Future<bool> isPinned(String dir, {int? port}) async => pinned.contains(dir);
   @override
   Future<bool> pin(String dir, int port) async {
     pinned.add(dir);
@@ -336,6 +336,46 @@ void main() {
     await launcher.refresh();
     await wait();
     expect(ks.needsRestart, isFalse);
+  });
+
+  test('новый сосед с записью другого порта требует перезапуска', () async {
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    await settings.setEgressPort(port);
+    final config = EgressConfig(
+      directoryForProfile: (data) => '${dir.path}/proxy-${data.hashCode}',
+    );
+    await config.pin(host.defaultDataDir, port);
+    await config.pin(
+      '/external-wrong-port',
+      port == 65535 ? port - 1 : port + 1,
+    );
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      useGate: true,
+    );
+    ks.start();
+    addTearDown(() => ks.shutdown(keepPinned: true));
+    await wait();
+    expect(ks.needsRestart, isFalse);
+    final neighbor = host.start('/external-wrong-port');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    // Updating files does not prove the running neighbor reread them.
+    await config.pin('/external-wrong-port', port);
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(neighbor);
+    await launcher.refresh();
+    expect(ks.needsRestart, isFalse);
+    expect(host.instances, hasLength(1));
   });
 
   test('один защищённый профиль не скрывает соседний без прокси', () async {
