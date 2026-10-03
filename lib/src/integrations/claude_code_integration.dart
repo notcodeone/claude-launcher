@@ -15,6 +15,7 @@ import 'claude_code_hooks.dart';
 import 'claude_code_sessions.dart';
 import 'code_notifications.dart';
 import 'code_profile_resolver.dart';
+import 'code_session_registry.dart';
 import 'notification_handoff.dart';
 import 'pending_code_events.dart';
 
@@ -28,6 +29,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     ClaudeCodeHooks? hooks,
     ValueListenable<bool>? windowVisible,
     this.profileResolver = const CodeProfileResolver(),
+    this.registry,
     this.handoff,
     this.notifier,
     this.onOpenWindow,
@@ -45,6 +47,61 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   final LauncherController launcher;
   final ClaudeCodeHooks hooks;
   final CodeProfileResolver profileResolver;
+  final CodeSessionRegistry? registry;
+  String? registryError;
+
+  Future<void> _saveRegistry() async {
+    final registry = this.registry;
+    if (registry == null) return;
+    try {
+      await registry.save(
+        launcher.parallelLaunch && connected ? sessions.all : [],
+      );
+      registryError = null;
+    } catch (_) {
+      registryError = 'Не удалось сохранить список сессий Code';
+    }
+    _notify();
+  }
+
+  Future<void> _restoreRegistry() {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          final registry = this.registry;
+          if (registry == null || !launcher.parallelLaunch || _disposed) return;
+          try {
+            final entries = await registry.load();
+            for (final entry in entries) {
+              if (generation != _eventGeneration || _disposed) return;
+              if (!launcher.parallelLaunch || !connected) return;
+              final owner = await _resolveProfile(entry.reference);
+              if (generation != _eventGeneration || _disposed) return;
+              if (owner != entry.profileId ||
+                  !launcher.runningProfiles.any((p) => p.id == owner)) {
+                continue;
+              }
+              sessions.restore(
+                id: entry.id,
+                hostSessionId: entry.hostId,
+                profileId: owner!,
+                startedAt: entry.startedAt,
+                updatedAt: entry.updatedAt,
+              );
+            }
+            registryError = null;
+            _notify();
+          } catch (_) {
+            registryError = 'Не удалось восстановить список сессий Code';
+            _notify();
+          }
+        })
+        .catchError((Object _) {
+          registryError = 'Не удалось восстановить список сессий Code';
+          _notify();
+        });
+  }
+
   Future<void> _handlingEvents = Future.value();
   int _eventGeneration = 0;
 
@@ -121,9 +178,16 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     await _syncNotifications();
   }
 
+  /// Flush the most recent verified references before an orderly exit.
+  Future<void> flushSessions() async {
+    await _handlingEvents;
+    await _saveRegistry();
+  }
+
   /// Выход из лаунчера: возвращает Claude их уведомления. Возвращает, есть ли
   /// открытые Claude, которым вернуть их можно только после закрытия.
   Future<bool> releaseOnQuit() async {
+    await flushSessions();
     final handoff = this.handoff;
     if (handoff == null) return false;
     _notifying = false;
@@ -201,6 +265,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
         await hooks.install(port: port, token: token);
       }
       error = null;
+      await _restoreRegistry();
     } catch (e) {
       await _server?.stop();
       _server = null;
@@ -218,6 +283,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     _ticker = null;
     sessions.clear();
     _shown.clear();
+    await _saveRegistry();
     try {
       await hooks.uninstall();
       error = null;
@@ -268,7 +334,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       _notify();
     }
     await _showNotification(event, before, profile);
-    if (profile != null) await _refresh();
+    if (profile != null) {
+      await _refresh();
+      await _saveRegistry();
+    }
   }
 
   Map<String, Set<int>> get _runningOwners => {
@@ -341,6 +410,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
             if (id != null) _replay(event, id);
           }
           await _refresh();
+          await _saveRegistry();
         })
         .catchError((Object error) {
           debugPrint('Не удалось повторить события Code: ${error.runtimeType}');
@@ -464,6 +534,9 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       _previousParallelMode = launcher.parallelLaunch;
       _eventGeneration++;
       _clearPending();
+      if (!launcher.parallelLaunch) {
+        unawaited(_saveRegistry());
+      }
     }
     _prune();
     _updateWatching();
@@ -527,7 +600,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       },
       now: DateTime.now(),
     );
-    if (changed) _notify();
+    if (changed) {
+      _notify();
+      unawaited(_saveRegistry());
+    }
   }
 
   void _notify() {

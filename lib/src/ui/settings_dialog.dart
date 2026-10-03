@@ -172,7 +172,7 @@ class ClaudeCodeEventsSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final error = claudeCode?.error;
+    final error = claudeCode?.error ?? claudeCode?.registryError;
     return SettingSwitchRow(
       title: 'События Claude Code',
       description:

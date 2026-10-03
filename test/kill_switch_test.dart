@@ -89,6 +89,7 @@ void main() {
 
   tearDown(() async {
     location.dispose();
+    launcher.dispose();
     await dir.delete(recursive: true);
   });
 
@@ -304,6 +305,38 @@ void main() {
       expect(await ks.gate.allow(), isTrue);
     },
   );
+
+  test('new external profile after arming is audited independently', () async {
+    final config = MemoryEgressConfig()..pinned.add(host.defaultDataDir);
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      useGate: true,
+    );
+    ks.start();
+    addTearDown(ks.dispose);
+    await wait();
+    expect(ks.needsRestart, isFalse);
+    final external = host.start('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    // Merely editing configuration after this process started cannot clear it.
+    config.pinned.add('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(external);
+    await launcher.refresh();
+    expect(ks.needsRestart, isFalse);
+    host.start('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isFalse);
+  });
 
   test('один защищённый профиль не скрывает соседний без прокси', () async {
     final other = await launcher.addProfile(name: 'Другой');

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../app_settings.dart';
+import '../claude/claude_host.dart';
 import '../launcher_controller.dart';
 import '../notifications.dart';
 import 'countries.dart';
@@ -152,6 +153,8 @@ class KillSwitch extends ChangeNotifier {
   /// перезапуска.
   bool needsRestart = false;
   final _restartPids = <int>{};
+  final _observedPids = <int>{};
+  int _processAuditGeneration = 0;
 
   /// Открытый Claude запущен через затвор, хотя конфигурации уже нет: её
   /// снял закрытый охранник (см. записку в main.dart). Затвор нужен этому
@@ -310,6 +313,15 @@ class KillSwitch extends ChangeNotifier {
       notifyListeners();
     }
     if (!armed) return;
+    final currentPids = launcher.instances.map((i) => i.pid).toSet();
+    _observedPids.retainAll(currentPids);
+    final appeared = [
+      for (final instance in launcher.instances)
+        if (_observedPids.add(instance.pid)) instance,
+    ];
+    if (appeared.isNotEmpty) {
+      unawaited(_auditAppeared(appeared, _processAuditGeneration));
+    }
     final running = _claudeRunning;
     if (_restartPids.isNotEmpty) {
       _restartPids.retainAll(launcher.instances.map((i) => i.pid));
@@ -330,7 +342,43 @@ class KillSwitch extends ChangeNotifier {
     }
   }
 
+  /// A profile opened outside the launcher after arming must not disappear
+  /// behind the status of an already protected neighbor.
+  Future<void> _auditAppeared(
+    List<ClaudeInstance> appeared,
+    int generation,
+  ) async {
+    for (final instance in appeared) {
+      final dir = launcher.host.dataDirOf(instance);
+      var pinned = false;
+      try {
+        pinned = useGate && await config.isPinned(dir);
+      } catch (_) {
+        // Unreadable configuration is not evidence of protection.
+      }
+      if (!armed || generation != _processAuditGeneration) return;
+      if (!launcher.instances.any(
+        (running) =>
+            running.pid == instance.pid &&
+            launcher.host.samePath(launcher.host.dataDirOf(running), dir),
+      )) {
+        continue;
+      }
+      if (!pinned) _restartPids.add(instance.pid);
+    }
+    if (!armed || generation != _processAuditGeneration) return;
+    final next = _restartPids.isNotEmpty;
+    if (needsRestart != next) {
+      needsRestart = next;
+      notifyListeners();
+    }
+  }
+
   Future<void> _arm() async {
+    _processAuditGeneration++;
+    _observedPids
+      ..clear()
+      ..addAll(launcher.instances.map((i) => i.pid));
     final ready = _ready = Completer<void>();
     _poll = Timer.periodic(pollEvery, (_) => _checkNetwork());
     _wasRunning = _claudeRunning;
@@ -451,6 +499,8 @@ class KillSwitch extends ChangeNotifier {
   }
 
   void _disarm({bool stopGate = true}) {
+    _processAuditGeneration++;
+    _observedPids.clear();
     _poll?.cancel();
     _recheck?.cancel();
     _retry?.cancel();
