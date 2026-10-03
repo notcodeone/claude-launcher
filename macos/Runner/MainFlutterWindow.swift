@@ -84,6 +84,13 @@ class MainFlutterWindow: NSWindow {
       case "activate":
         app.unhide()
         result(app.activate(options: [.activateAllWindows]))
+      case "reopen":
+        do {
+          try ClaudeLinkDispatcher.reopen(app.processIdentifier)
+          result(true)
+        } catch {
+          result(false)
+        }
       case "openLink":
         guard let link = args["link"] as? String,
               app.bundleIdentifier == "com.anthropic.claudefordesktop" else {

@@ -146,7 +146,9 @@ void main() {
         ),
         'other',
       );
-      expect(sessions.of('p'), hasLength(1));
+      // Восстановленная сессия на карточке не видна, но владелец прежний.
+      expect(sessions.of('p'), isEmpty);
+      expect(sessions.byId('s')?.profileId, 'p');
       sessions.handle(
         ClaudeCodeEvent(
           kind: ClaudeCodeEventKind.toolUsed,
@@ -159,4 +161,25 @@ void main() {
       expect(sessions.of('other'), hasLength(1));
     },
   );
+
+  test('восстановленная сессия не показывается до нового события', () {
+    final sessions = ClaudeCodeSessions();
+    sessions.restore(
+      id: 's',
+      hostSessionId: 'local_s',
+      profileId: 'p',
+      startedAt: now,
+      updatedAt: now,
+    );
+    expect(sessions.of('p'), isEmpty);
+    sessions.handle(
+      ClaudeCodeEvent(
+        kind: ClaudeCodeEventKind.promptSubmitted,
+        time: now,
+        sessionId: 's',
+      ),
+      'p',
+    );
+    expect(sessions.of('p').single.state, CodeSessionState.working);
+  });
 }

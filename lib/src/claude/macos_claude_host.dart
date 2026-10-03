@@ -292,9 +292,19 @@ class MacClaudeHost extends ClaudeHost {
     ]);
   }
 
+  /// Активировать мало: закрытое окно Claude только прячет, а показывает его
+  /// снова на «открыть ещё раз» — как при нажатии на значок в Dock. В обычном
+  /// режиме это `open -a` (открыт один Claude — он и получит); в эксперименте —
+  /// то же событие конкретному процессу.
   @override
   Future<void> activate(ClaudeInstance instance) async {
     await _channel.invokeMethod<bool>('activate', {'pid': instance.pid});
+    if (parallel) {
+      await _channel.invokeMethod<bool>('reopen', {'pid': instance.pid});
+      return;
+    }
+    final appPath = _appPath ?? await locate();
+    if (appPath != null) await Process.run('open', ['-a', appPath]);
   }
 
   @override

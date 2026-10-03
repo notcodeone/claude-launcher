@@ -108,10 +108,14 @@ class ClaudeCodeSessions {
 
   final Map<String, CodeSession> _sessions = {};
 
-  /// Сессии профиля, последние сверху.
+  /// Сессии профиля, последние сверху. Восстановленные после перезапуска
+  /// лаунчера ([restore]) не показываем: что с ними и как они называются,
+  /// неизвестно до следующего события, а строка «Неизвестно» — только шум.
   List<CodeSession> of(String profileId) => [
     for (final session in _sessions.values)
-      if (session.profileId == profileId) session,
+      if (session.profileId == profileId &&
+          session.state != CodeSessionState.unknown)
+        session,
   ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
   Iterable<CodeSession> get all => _sessions.values;

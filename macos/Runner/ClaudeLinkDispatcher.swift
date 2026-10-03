@@ -18,4 +18,16 @@ enum ClaudeLinkDispatcher {
     event.setParam(NSAppleEventDescriptor(string: link), forKeyword: keyDirectObject)
     _ = try event.sendEvent(options: [.noReply, .neverInteract], timeout: 5)
   }
+
+  /// «Открыть ещё раз» — как нажатие на значок в Dock: Claude показывает
+  /// спрятанное окно или создаёт новое, если его закрыли.
+  static func reopen(_ pid: pid_t) throws {
+    let event = NSAppleEventDescriptor(
+      eventClass: AEEventClass(kCoreEventClass),
+      eventID: AEEventID(kAEReopenApplication),
+      targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+      returnID: AEReturnID(kAutoGenerateReturnID),
+      transactionID: AETransactionID(kAnyTransactionID))
+    _ = try event.sendEvent(options: [.noReply], timeout: 5)
+  }
 }
