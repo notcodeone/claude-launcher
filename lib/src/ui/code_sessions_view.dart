@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -81,10 +82,15 @@ class CodeSessionsSection extends StatelessWidget {
     required this.sessions,
     required this.onOpen,
     required this.now,
+    this.draggable = false,
   });
 
   /// Последние сверху.
   final List<CodeSession> sessions;
+
+  /// Сессии приложения можно зажать и перетащить на карточку другого профиля
+  /// (см. `session_drop.dart`).
+  final bool draggable;
 
   /// Открывает сессию в Claude; null — сейчас нельзя (идёт переключение).
   final void Function(CodeSession session)? onOpen;
@@ -105,13 +111,100 @@ class CodeSessionsSection extends StatelessWidget {
           const SizedBox(height: 8),
           for (final session in sessions)
             // Ключ — чтобы при пересортировке счётчик не перескочил к другой сессии.
-            _SessionRow(
-              key: ValueKey(session.id),
-              session: session,
-              onOpen: onOpen,
-              now: now,
+            _draggable(
+              session,
+              _SessionRow(
+                key: ValueKey(session.id),
+                session: session,
+                onOpen: onOpen,
+                now: now,
+              ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+extension on CodeSessionsSection {
+  /// Зажать и потянуть — перенос в другой профиль; короткое нажатие по-прежнему
+  /// открывает сессию. Только сессии приложения: у них есть карточка в Claude.
+  Widget _draggable(CodeSession session, Widget row) {
+    if (!draggable || session.link == null) return row;
+    return LongPressDraggable<CodeSession>(
+      data: session,
+      delay: const Duration(milliseconds: 250),
+      feedback: _DragPill(session: session),
+      childWhenDragging: Opacity(opacity: 0.4, child: row),
+      onDragStarted: () => SessionDrag.current.value = session,
+      onDragEnd: (_) => SessionDrag.current.value = null,
+      child: row,
+    );
+  }
+}
+
+/// Какую сессию сейчас тащат — карточки профилей подсказывают, куда её можно
+/// бросить.
+abstract final class SessionDrag {
+  static final current = ValueNotifier<CodeSession?>(null);
+}
+
+/// Плашка под курсором, пока сессию тащат.
+class _DragPill extends StatelessWidget {
+  const _DragPill({required this.session});
+
+  final CodeSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    // Появляется из-под пальца: чуть растёт и проявляется.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, child) => Opacity(
+        opacity: t,
+        child: Transform.scale(scale: 0.92 + 0.08 * t, child: child),
+      ),
+      child: _pill(p),
+    );
+  }
+
+  Widget _pill(Palette p) {
+    return Material(
+      color: p.primary,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 6,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 280),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                session.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: p.onPrimary,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Скопировать · с ${Platform.isMacOS ? '⌥' : 'Alt'} — перенести',
+                style: TextStyle(
+                  color: p.onPrimary.withValues(alpha: 0.7),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

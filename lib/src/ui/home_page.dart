@@ -23,6 +23,7 @@ import 'feature_menu.dart';
 import 'profile_dialog.dart';
 import 'profile_page.dart';
 import 'profile_usage_menu.dart';
+import 'session_drop.dart';
 import 'sessions_page.dart';
 import 'settings_pages.dart';
 import 'snackbar.dart';
@@ -352,12 +353,16 @@ class HomePage extends StatelessWidget {
           ),
         for (final (index, profile) in launcher.profiles.indexed) ...[
           if (index > 0) const SizedBox(height: 12),
-          _ProfileCard(
+          _SessionDropTarget(
             launcher: launcher,
-            settings: settings,
-            claudeCode: claudeCode,
-            location: location,
             profile: profile,
+            child: _ProfileCard(
+              launcher: launcher,
+              settings: settings,
+              claudeCode: claudeCode,
+              location: location,
+              profile: profile,
+            ),
           ),
         ],
       ],
@@ -1492,6 +1497,159 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Карточка профиля принимает сессию другого профиля: её можно бросить сюда —
+/// скопировать или, с ⌥, перенести (`session_drop.dart`).
+///
+/// Анимация — спокойная, как везде в лаунчере: пока сессию тащат, карточки,
+/// куда её можно бросить, обведены бледным цветом своей метки; карточка под
+/// плашкой чуть приподнимается, рамка яркая, посередине — «Скопировать сюда»
+/// («Перенести сюда» с ⌥). Бросили — карточка коротко вспыхивает цветом метки.
+class _SessionDropTarget extends StatefulWidget {
+  const _SessionDropTarget({
+    required this.launcher,
+    required this.profile,
+    required this.child,
+  });
+
+  final LauncherController launcher;
+  final Profile profile;
+  final Widget child;
+
+  @override
+  State<_SessionDropTarget> createState() => _SessionDropTargetState();
+}
+
+class _SessionDropTargetState extends State<_SessionDropTarget>
+    with SingleTickerProviderStateMixin {
+  late final _flash = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 520),
+  );
+  bool _alt = HardwareKeyboard.instance.isAltPressed;
+
+  @override
+  void initState() {
+    super.initState();
+    SessionDrag.current.addListener(_onDrag);
+  }
+
+  @override
+  void dispose() {
+    SessionDrag.current.removeListener(_onDrag);
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _flash.dispose();
+    super.dispose();
+  }
+
+  void _onDrag() {
+    // Пока тащат — следим за ⌥: подпись «Скопировать» / «Перенести».
+    if (SessionDrag.current.value != null) {
+      HardwareKeyboard.instance.addHandler(_onKey);
+    } else {
+      HardwareKeyboard.instance.removeHandler(_onKey);
+    }
+    if (mounted) setState(() {});
+  }
+
+  bool _onKey(KeyEvent _) {
+    final alt = HardwareKeyboard.instance.isAltPressed;
+    if (alt != _alt && mounted) setState(() => _alt = alt);
+    return false;
+  }
+
+  bool _accepts(CodeSession? session) =>
+      session != null &&
+      session.profileId != widget.profile.id &&
+      !widget.launcher.busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final color = markerColor(widget.profile.marker);
+    final candidate = _accepts(SessionDrag.current.value);
+    return DragTarget<CodeSession>(
+      onWillAcceptWithDetails: (details) => _accepts(details.data),
+      onAcceptWithDetails: (details) {
+        _flash.forward(from: 0);
+        dropSession(
+          context,
+          launcher: widget.launcher,
+          session: details.data,
+          target: widget.profile,
+        );
+      },
+      builder: (context, candidates, _) {
+        final hovered = candidates.isNotEmpty;
+        const duration = Duration(milliseconds: 180);
+        return AnimatedScale(
+          scale: hovered ? 1.015 : 1,
+          duration: duration,
+          curve: Curves.easeOutCubic,
+          child: Stack(
+            children: [
+              widget.child,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedBuilder(
+                    animation: _flash,
+                    builder: (context, _) => AnimatedContainer(
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        // Вспышка после броска гаснет к нулю.
+                        color: color.withValues(
+                          alpha: _flash.isAnimating
+                              ? 0.16 * (1 - _flash.value)
+                              : hovered
+                              ? 0.06
+                              : 0,
+                        ),
+                        border: Border.all(
+                          width: 2,
+                          color: hovered
+                              ? color
+                              : candidate
+                              ? color.withValues(alpha: 0.4)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: AnimatedOpacity(
+                        opacity: hovered ? 1 : 0,
+                        duration: duration,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: p.card,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: p.softShadow,
+                          ),
+                          child: Text(
+                            _alt ? 'Перенести сюда' : 'Скопировать сюда',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: p.text,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _ProfileCard extends StatelessWidget {
   const _ProfileCard({
     required this.launcher,
@@ -1694,6 +1852,7 @@ class _ProfileCard extends StatelessWidget {
                             sessions: sessions,
                             onOpen: canShow ? _openSession : null,
                             now: DateTime.now(),
+                            draggable: interactive,
                           ),
                   ),
                 ],

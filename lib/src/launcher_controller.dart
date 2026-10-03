@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'claude/claude_host.dart';
 import 'integrations/profile_claude_code.dart';
 import 'integrations/profile_identity.dart';
+import 'integrations/session_transfer.dart';
 import 'profile.dart';
 import 'profile_store.dart';
 
@@ -286,6 +287,20 @@ class LauncherController extends ChangeNotifier {
     identities = next;
     _notify();
   }
+
+  /// Профиль как сторона переноса сессии: папки, папка Claude Code и аккаунт —
+  /// прочитанный заново, а не из [identities]: вход могли сменить только что.
+  Future<TransferSide> transferSideOf(Profile profile) async => TransferSide(
+    name: profile.name,
+    dataDirs: readableDataDirsOf(profile),
+    claudeCodeDir:
+        claudeConfigDirOf(profile) ??
+        ProfileClaudeCode.sharedDir(Platform.environment),
+    identity: await ProfileIdentity.read(
+      dataDirs: readableDataDirsOf(profile),
+      claudeCodeConfigs: claudeCodeConfigsOf(profile),
+    ),
+  );
 
   /// Почта аккаунта, под которым вошли в профиль, если она известна и не та,
   /// что указана в профиле; `null` — всё сходится или сравнить не с чем.
