@@ -44,6 +44,39 @@ class LaunchBlocked implements Exception {
   String toString() => message ?? 'Запуск профиля запрещён';
 }
 
+/// Capability valid only within [LauncherController.withMaintenance].
+class LauncherMaintenance {
+  LauncherMaintenance._(this._launcher);
+  final LauncherController _launcher;
+  bool _interrupted = false;
+  bool get interrupted => _interrupted;
+
+  void _check() {
+    if (_launcher._maintenance != this) {
+      throw StateError('Операция обслуживания уже завершена');
+    }
+  }
+
+  Future<void> close(Profile profile) {
+    _check();
+    return _launcher._close(profile, maintenance: this);
+  }
+
+  Future<void> reopen(Profile profile) {
+    _check();
+    if (interrupted) {
+      throw const LaunchBlocked(
+        'Восстановление отменено аварийным закрытием Claude',
+      );
+    }
+    return _launcher._switchTo(
+      profile,
+      maintenance: this,
+      preserveOthers: true,
+    );
+  }
+}
+
 /// Профили, состояние запущенных экземпляров Claude и переключение между ними.
 class LauncherController extends ChangeNotifier {
   LauncherController({required this.host, required this.store});
@@ -80,6 +113,29 @@ class LauncherController extends ChangeNotifier {
   bool _disposed = false;
   bool _operating = false;
   bool _parallelLaunch = false;
+  LauncherMaintenance? _maintenance;
+
+  bool get maintaining => _maintenance != null;
+  bool get busy => _operating || maintaining;
+
+  /// Reserve all profile operations before the first await. Emergency kill,
+  /// manual force-close and cancelling a quit wait remain available.
+  Future<T> withMaintenance<T>(
+    Future<T> Function(LauncherMaintenance operation) action,
+  ) async {
+    if (busy) throw StateError('Дождитесь завершения операции с Claude');
+    final operation = _maintenance = LauncherMaintenance._(this);
+    _notify();
+    try {
+      return await action(operation);
+    } finally {
+      _maintenance = null;
+      _notify();
+    }
+  }
+
+  bool _allowed(LauncherMaintenance? operation) =>
+      !_operating && (_maintenance == null || _maintenance == operation);
 
   bool get parallelLaunch => _parallelLaunch;
 
@@ -150,10 +206,11 @@ class LauncherController extends ChangeNotifier {
       if (isRunning(profile)) profile,
   ];
 
-  Future<void> refresh() async {
+  Future<void> refresh({bool strict = false}) async {
     try {
       instances = await host.running();
     } catch (error) {
+      if (strict) rethrow;
       debugPrint('Не удалось получить список процессов Claude: $error');
     }
     _notify();
@@ -165,8 +222,16 @@ class LauncherController extends ChangeNotifier {
   /// В тестовом parallelLaunch остальные экземпляры остаются открытыми.
   /// Обычный режим сохраняет последовательное переключение.
   /// [strict] — см. [launchGuard].
-  Future<void> switchTo(Profile target, {bool strict = false}) async {
-    if (_operating) return;
+  Future<void> switchTo(Profile target, {bool strict = false}) =>
+      _switchTo(target, strict: strict);
+
+  Future<void> _switchTo(
+    Profile target, {
+    bool strict = false,
+    LauncherMaintenance? maintenance,
+    bool? preserveOthers,
+  }) async {
+    if (!_allowed(maintenance)) return;
     _operating = true;
     lastError = null;
     _cancelRequested = false;
@@ -197,11 +262,16 @@ class LauncherController extends ChangeNotifier {
         await launchGuard!(strict: strict);
       }
 
-      if (!parallelLaunch && others.isNotEmpty) {
+      if (!(preserveOthers ?? parallelLaunch) && others.isNotEmpty) {
         final closed = await _closeAll(target, others);
         if (!closed) return;
       }
 
+      if (maintenance?.interrupted ?? false) {
+        throw const LaunchBlocked(
+          'Восстановление отменено аварийным закрытием Claude',
+        );
+      }
       if (targetInstance != null) {
         await host.activate(targetInstance);
         return;
@@ -209,7 +279,19 @@ class LauncherController extends ChangeNotifier {
 
       _setStatus(SwitchStatus(target, SwitchPhase.launching));
       await beforeLaunch?.call(targetDir);
+      if (maintenance?.interrupted ?? false) {
+        throw const LaunchBlocked(
+          'Восстановление отменено аварийным закрытием Claude',
+        );
+      }
       await host.launch(target.usesDefaultFolder ? null : targetDir);
+      if (maintenance?.interrupted ?? false) {
+        await host.killEverything();
+        await refresh();
+        throw const LaunchBlocked(
+          'Восстановление отменено аварийным закрытием Claude',
+        );
+      }
       await _replace(target.copyWith(lastLaunchedAt: DateTime.now()));
       await _waitForLaunch(targetDir);
     } on LaunchBlocked catch (blocked) {
@@ -228,7 +310,7 @@ class LauncherController extends ChangeNotifier {
   /// Открывает ссылку `claude://` (например, сессию Claude Code) в окне
   /// открытого профиля [profile].
   Future<void> openLink(Profile profile, Uri link) async {
-    if (_operating) return;
+    if (!_allowed(null)) return;
     _operating = true;
     lastError = null;
     try {
@@ -278,6 +360,7 @@ class LauncherController extends ChangeNotifier {
 
   /// Kill Switch: немедленно завершает Claude со всем, что он запустил.
   Future<void> killAll() async {
+    _maintenance?._interrupted = true;
     await host.killEverything();
     await refresh();
   }
@@ -292,8 +375,13 @@ class LauncherController extends ChangeNotifier {
   }
 
   /// Завершает работу открытого профиля так же, как обычный выход из Claude.
-  Future<void> close(Profile profile) async {
-    if (_operating) return;
+  Future<void> close(Profile profile) => _close(profile);
+
+  Future<void> _close(
+    Profile profile, {
+    LauncherMaintenance? maintenance,
+  }) async {
+    if (!_allowed(maintenance)) return;
     _operating = true;
     lastError = null;
     _cancelRequested = false;
@@ -345,7 +433,7 @@ class LauncherController extends ChangeNotifier {
     while (true) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (_cancelRequested || _disposed) return false;
-      await refresh();
+      await refresh(strict: maintaining);
       if (!instances.any((instance) => pids.contains(instance.pid))) {
         return true;
       }

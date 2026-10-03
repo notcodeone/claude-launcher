@@ -304,7 +304,7 @@ class HomePage extends StatelessWidget {
         Text(
           // По предложению на строку — без одинокого слова на второй.
           'Каждый профиль — отдельный вход в Claude.\n'
-          'Одновременно запущен только один.',
+          '${launcher.parallelLaunch ? 'Можно открыть несколько профилей.' : 'Одновременно запущен только один.'}',
           style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
         ),
         const SizedBox(height: 24),
@@ -495,6 +495,14 @@ class HomePage extends StatelessWidget {
   List<Widget> _banners(BuildContext context) {
     final status = launcher.switchStatus;
     return [
+      if (launcher.maintaining)
+        const NoticeRow(
+          icon: AppIcons.experiments,
+          tone: NoticeTone.neutral,
+          title: 'Обновление Claude',
+          detail:
+              'Профили будут доступны после установки и восстановления окон.',
+        ),
       if (settings.parallelLaunch)
         const NoticeRow(
           icon: AppIcons.experiments,
@@ -1468,7 +1476,7 @@ class _ProfileCard extends StatelessWidget {
     final theme = Theme.of(context);
     final palette = context.palette;
     final running = launcher.isRunning(profile);
-    final switching = launcher.switchStatus != null;
+    final switching = launcher.busy;
     final details = [
       if (profile.usesDefaultFolder)
         'Стандартная папка Claude'
@@ -1704,7 +1712,7 @@ class _ProfileCard extends StatelessWidget {
           value: 'quit',
           icon: AppIcons.quit,
           label: 'Завершить работу',
-          enabled: running && launcher.switchStatus == null,
+          enabled: running && !launcher.busy,
         ),
         MenuEntry(
           value: 'remove',

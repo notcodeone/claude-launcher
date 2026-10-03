@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:claude_launcher/src/claude/claude_host.dart';
@@ -119,6 +120,81 @@ void main() {
     work = launcher.profiles.single; // стандартный профиль создаётся сам
     personal = await launcher.addProfile(name: 'Личный', marker: '🔵');
   });
+
+  test(
+    'maintenance reserves operations and invalidates capability on exit',
+    () async {
+      host.targetedLinks = true;
+      final instance = host.start(null);
+      await launcher.refresh();
+      final ready = Completer<void>();
+      final release = Completer<void>();
+      late LauncherMaintenance saved;
+      final operation = launcher.withMaintenance((scope) async {
+        saved = scope;
+        ready.complete();
+        await release.future;
+        await scope.close(work);
+      });
+      await ready.future;
+      expect(launcher.busy, isTrue);
+      await launcher.switchTo(personal);
+      await launcher.close(work);
+      await launcher.openLink(work, Uri.parse('claude://claude.ai/test'));
+      expect(host.calls, isEmpty);
+      expect(host.instances, [instance]);
+      await expectLater(
+        launcher.withMaintenance((_) async {}),
+        throwsStateError,
+      );
+      release.complete();
+      await operation;
+      expect(launcher.busy, isFalse);
+      expect(host.instances, isEmpty);
+      expect(() => saved.reopen(work), throwsStateError);
+    },
+  );
+
+  test(
+    'maintenance cannot overlap an operation awaiting launch guard',
+    () async {
+      final ready = Completer<void>();
+      final release = Completer<void>();
+      launcher.launchGuard = ({required bool strict}) async {
+        ready.complete();
+        await release.future;
+      };
+      final launch = launcher.switchTo(work);
+      await ready.future;
+      await expectLater(
+        launcher.withMaintenance((_) async {}),
+        throwsStateError,
+      );
+      release.complete();
+      await launch;
+      expect(launcher.busy, isFalse);
+    },
+  );
+
+  test(
+    'emergency kill during recovery preparation prevents a later launch',
+    () async {
+      final ready = Completer<void>();
+      final release = Completer<void>();
+      launcher.beforeLaunch = (_) async {
+        ready.complete();
+        await release.future;
+      };
+      final operation = launcher.withMaintenance((scope) => scope.reopen(work));
+      await ready.future;
+      await launcher.killAll();
+      release.complete();
+      await operation;
+      expect(host.calls.where((c) => c.startsWith('launch ')), isEmpty);
+      expect(launcher.lastError, contains('аварийным'));
+      expect(launcher.busy, isFalse);
+    },
+  );
 
   tearDown(() async {
     launcher.dispose();

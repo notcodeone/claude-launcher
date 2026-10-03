@@ -95,6 +95,10 @@ abstract class ClaudeHost {
   Future<void> installUpdate(File package, String version) =>
       throw UnsupportedError('Обновлять Claude здесь лаунчер не умеет');
 
+  /// Verify that an application can be launched after a failed installation.
+  /// Unknown installation state must not trigger automatic recovery launches.
+  Future<bool> canLaunchAfterUpdateFailure() async => false;
+
   /// Журнал последней установки обновления Claude; `null` — его не ведём.
   String? get installLogPath => null;
 
