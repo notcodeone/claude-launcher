@@ -39,7 +39,16 @@ hdiutil attach "$work/ClaudeLauncher.dmg" -nobrowse -readonly -noautoopen \
 if pgrep -xq ClaudeLauncher; then
   echo "Закрываю запущенный ClaudeLauncher…"
   osascript -e 'quit app "ClaudeLauncher"' >/dev/null 2>&1 || true
-  for _ in $(seq 1 20); do pgrep -xq ClaudeLauncher || break; sleep 0.5; done
+  # С Kill Switch выход дольше: лаунчер передаёт затвор фоновому процессу.
+  # Подменять приложение раньше нельзя — Claude останется без сети.
+  for _ in $(seq 1 60); do
+    pgrep -f '/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher$' >/dev/null || break
+    sleep 0.5
+  done
+  if pgrep -f '/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher$' >/dev/null; then
+    echo "ClaudeLauncher не вышел за 30 секунд. Выйдите из него через меню и повторите." >&2
+    exit 1
+  fi
 fi
 
 rm -rf "$app"
