@@ -124,6 +124,11 @@ class _SessionsPageState extends State<SessionsPage> {
                 child: _project(context, project),
               ),
             ),
+        if (profiles != null) ...[
+          // У проектов отступ снизу уже есть.
+          if (projects.isEmpty) const SizedBox(height: 12),
+          AppearIn(index: 1, child: _cowork(context)),
+        ],
       ],
     );
   }
@@ -173,6 +178,48 @@ class _SessionsPageState extends State<SessionsPage> {
         ],
       ),
     );
+  }
+
+  /// Сессии Cowork хранятся не на диске, а у Anthropic — показать нечего,
+  /// но стоит объяснить, почему их здесь нет и что с одним аккаунтом.
+  Widget _cowork(BuildContext context) {
+    final theme = Theme.of(context);
+    final launcher = widget.launcher;
+    final shared = SessionOverview.sharedCoworkDevice(
+      launcher.profiles,
+      identities: launcher.identities,
+      isRunning: launcher.isRunning,
+    );
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const FieldLabel('Cowork'),
+          Text(
+            'Сессии Cowork хранятся в облаке Anthropic, а не на компьютере. '
+            'Они видны в каждом профиле с тем же аккаунтом, переносить их не '
+            'нужно; в профиль с другим аккаунтом — нельзя.',
+            style: theme.textTheme.bodySmall,
+          ),
+          for (final group in shared) ...[
+            const SizedBox(height: 12),
+            NoticeRow(
+              icon: AppIcons.info,
+              tone: NoticeTone.neutral,
+              title: '${_names(group)} — один аккаунт',
+              detail: 'Cowork на компьютере работает через открытый первым',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _names(List<Profile> group) {
+    final names = [for (final profile in group) '«${profile.name}»'];
+    return names.length == 2
+        ? names.join(' и ')
+        : '${names.sublist(0, names.length - 1).join(', ')} и ${names.last}';
   }
 
   List<Widget> _notices(List<ProfileSessions> profiles) => [

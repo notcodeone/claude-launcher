@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:claude_launcher/src/integrations/profile_identity.dart';
 import 'package:claude_launcher/src/integrations/session_overview.dart';
 import 'package:claude_launcher/src/profile.dart';
 import 'package:claude_launcher/src/ui/sessions_page.dart';
@@ -139,5 +140,25 @@ void main() {
     expect(size(271 * 1024 * 1024), '271 МБ');
     expect(size(1288490188), '1,2 ГБ');
     expect(await SessionOverview.diskUsage([data]), greaterThan(0));
+  });
+
+  test('Cowork: открытые профили под одним аккаунтом', () {
+    const main = Profile(id: 'm', name: 'Основной', folderName: 'Claude');
+    const test = Profile(id: 't', name: 'Тест', folderName: 'Claude-Test');
+    const own = Profile(id: 'o', name: 'Личный', folderName: 'Claude-Own');
+    const closed = Profile(id: 'c', name: 'Закрытый', folderName: 'Claude-C');
+    final groups = SessionOverview.sharedCoworkDevice(
+      [main, test, own, closed],
+      identities: {
+        'm': const ProfileIdentity(accountUuid: acc, orgUuid: org),
+        't': const ProfileIdentity(accountUuid: acc, orgUuid: org),
+        'o': const ProfileIdentity(accountUuid: 'other', orgUuid: org),
+        'c': const ProfileIdentity(accountUuid: acc, orgUuid: org),
+      },
+      isRunning: (profile) => profile.id != 'c',
+    );
+    expect(groups.map((group) => group.map((p) => p.id).toList()), [
+      ['m', 't'],
+    ]);
   });
 }

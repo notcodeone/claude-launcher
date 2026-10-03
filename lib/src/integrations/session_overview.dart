@@ -72,6 +72,27 @@ class SessionProject {
 
 /// Обзор сессий Code всех профилей — только чтение.
 abstract final class SessionOverview {
+  /// Открытые профили, вошедшие под одним аккаунтом, — группами по два и больше.
+  /// Cowork работает с компьютером через одно подключение на аккаунт: его
+  /// занимает тот экземпляр Claude, что открылся первым, и он же выполняет
+  /// локальные действия Cowork из всех профилей группы.
+  static List<List<Profile>> sharedCoworkDevice(
+    List<Profile> profiles, {
+    required Map<String, ProfileIdentity> identities,
+    required bool Function(Profile) isRunning,
+  }) {
+    final byAccount = <String, List<Profile>>{};
+    for (final profile in profiles) {
+      final account = identities[profile.id]?.accountUuid;
+      if (account == null || !isRunning(profile)) continue;
+      byAccount.putIfAbsent(account, () => []).add(profile);
+    }
+    return [
+      for (final group in byAccount.values)
+        if (group.length > 1) group,
+    ];
+  }
+
   /// Карточка больше этого — не карточка (самые большие ~1,4 МБ).
   static const _maxCard = 4 * 1024 * 1024;
 
