@@ -84,6 +84,21 @@ class MainFlutterWindow: NSWindow {
       case "activate":
         app.unhide()
         result(app.activate(options: [.activateAllWindows]))
+      case "openLink":
+        guard let link = args["link"] as? String,
+              app.bundleIdentifier == "com.anthropic.claudefordesktop" else {
+          result(FlutterError(code: "invalid_target", message: "Процесс Claude уже закрыт или изменился.", details: nil))
+          return
+        }
+        do {
+          try ClaudeLinkDispatcher.send(link, to: app.processIdentifier)
+          app.unhide()
+          _ = app.activate(options: [.activateAllWindows])
+          result(true)
+        } catch {
+          // Do not include the URL: it may contain an authorization callback.
+          result(FlutterError(code: "link_delivery_failed", message: "macOS не передала ссылку выбранному процессу Claude (код \((error as NSError).code)).", details: nil))
+        }
       case "isFrontmost":
         result(NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier)
       default:

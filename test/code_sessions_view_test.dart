@@ -21,6 +21,34 @@ void main() {
     ),
   );
 
+  testWidgets('restored reference shows unknown state without progress', (
+    tester,
+  ) async {
+    final session = CodeSession(id: 's', profileId: 'p', startedAt: start)
+      ..state = CodeSessionState.unknown;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            child: CodeSessionsSection(
+              sessions: [session],
+              onOpen: (_) {},
+              now: start,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining('Неизвестно', findRichText: true),
+      findsOneWidget,
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('токены сменяются затуханием, подпись не мигает', (tester) async {
     final session = CodeSession(id: 's', profileId: 'p', startedAt: start)
       ..tokens = 3142;

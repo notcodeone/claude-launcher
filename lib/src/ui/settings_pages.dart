@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_settings.dart';
+import '../diagnostics/parallel_report.dart';
+import 'parallel_report_dialog.dart';
 import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
@@ -553,6 +555,38 @@ class SettingsSectionPage extends StatelessWidget {
           '— свой переключатель.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
+      ),
+      _Card(
+        rows: [
+          SettingSwitchRow(
+            title: 'Параллельные профили — тест',
+            description:
+                'Открывает несколько профилей, сохраняя уже запущенные. '
+                'Для входа оставьте открытым только нужный профиль. '
+                '${deps.launcher.host.supportsTargetedLinks ? 'Ссылки из лаунчера направляются выбранному процессу. ' : 'Переходы к сессиям при нескольких профилях пока отключены. '}'
+                'Сессии Code определяются по записям Claude; при неизвестном '
+                'владельце событие не появляется на карточке. '
+                'Одновременный Cowork ещё не проверен. '
+                'После выключения следующий выбор профиля снова закроет остальные.',
+            value: settings.parallelLaunch,
+            onChanged: settings.setParallelLaunch,
+          ),
+          if (settings.parallelLaunch)
+            AppButton(
+              label: 'Отчёт параллельных профилей',
+              kind: AppButtonKind.secondary,
+              onPressed: () => showParallelReport(
+                context,
+                () => parallelReport(
+                  version: deps.version,
+                  launcher: deps.launcher,
+                  settings: settings,
+                  sessions: deps.claudeCode.sessions.all,
+                  killSwitch: deps.killSwitch,
+                ),
+              ),
+            ),
+        ],
       ),
       _Card(
         rows: [

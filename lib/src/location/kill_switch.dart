@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../app_settings.dart';
+import '../claude/claude_host.dart';
 import '../launcher_controller.dart';
 import '../notifications.dart';
 import 'countries.dart';
@@ -151,6 +152,9 @@ class KillSwitch extends ChangeNotifier {
   /// Claude был открыт до включения — закреплён за прокси только после
   /// перезапуска.
   bool needsRestart = false;
+  final _restartPids = <int>{};
+  final _observedPids = <int>{};
+  int _processAuditGeneration = 0;
 
   /// Открытый Claude запущен через затвор, хотя конфигурации уже нет: её
   /// снял закрытый охранник (см. записку в main.dart). Затвор нужен этому
@@ -309,7 +313,24 @@ class KillSwitch extends ChangeNotifier {
       notifyListeners();
     }
     if (!armed) return;
+    final currentPids = launcher.instances.map((i) => i.pid).toSet();
+    _observedPids.retainAll(currentPids);
+    final appeared = [
+      for (final instance in launcher.instances)
+        if (_observedPids.add(instance.pid)) instance,
+    ];
+    if (appeared.isNotEmpty) {
+      unawaited(_auditAppeared(appeared, _processAuditGeneration));
+    }
     final running = _claudeRunning;
+    if (_restartPids.isNotEmpty) {
+      _restartPids.retainAll(launcher.instances.map((i) => i.pid));
+      final stillNeedsRestart = _restartPids.isNotEmpty;
+      if (needsRestart != stillNeedsRestart) {
+        needsRestart = stillNeedsRestart;
+        notifyListeners();
+      }
+    }
     if (running != _wasRunning) {
       _wasRunning = running;
       if (!running) needsRestart = false;
@@ -321,7 +342,45 @@ class KillSwitch extends ChangeNotifier {
     }
   }
 
+  /// A profile opened outside the launcher after arming must not disappear
+  /// behind the status of an already protected neighbor.
+  Future<void> _auditAppeared(
+    List<ClaudeInstance> appeared,
+    int generation,
+  ) async {
+    for (final instance in appeared) {
+      final dir = launcher.host.dataDirOf(instance);
+      var pinned = false;
+      try {
+        pinned =
+            useGate &&
+            await config.isPinned(dir, port: gate.port ?? settings.egressPort);
+      } catch (_) {
+        // Unreadable configuration is not evidence of protection.
+      }
+      if (!armed || generation != _processAuditGeneration) return;
+      if (!launcher.instances.any(
+        (running) =>
+            running.pid == instance.pid &&
+            launcher.host.samePath(launcher.host.dataDirOf(running), dir),
+      )) {
+        continue;
+      }
+      if (!pinned) _restartPids.add(instance.pid);
+    }
+    if (!armed || generation != _processAuditGeneration) return;
+    final next = _restartPids.isNotEmpty;
+    if (needsRestart != next) {
+      needsRestart = next;
+      notifyListeners();
+    }
+  }
+
   Future<void> _arm() async {
+    _processAuditGeneration++;
+    _observedPids
+      ..clear()
+      ..addAll(launcher.instances.map((i) => i.pid));
     final ready = _ready = Completer<void>();
     _poll = Timer.periodic(pollEvery, (_) => _checkNetwork());
     _wasRunning = _claudeRunning;
@@ -333,12 +392,18 @@ class KillSwitch extends ChangeNotifier {
         // Claude, открытый через затвор (лаунчер перезапустили), защищён;
         // открытый без него — только после перезапуска.
         var pinnedBefore = handover;
-        for (final profile in launcher.runningProfiles) {
-          if (await config.isPinned(launcher.dataDirOf(profile))) {
+        for (final instance in List.of(launcher.instances)) {
+          if (await config.isPinned(
+            launcher.host.dataDirOf(instance),
+            port: settings.egressPort,
+          )) {
             pinnedBefore = true;
+          } else if (!handover || launcher.instances.length > 1) {
+            // Конфигурация одного профиля не защищает соседние экземпляры.
+            _restartPids.add(instance.pid);
           }
         }
-        needsRestart = _wasRunning && !pinnedBefore;
+        needsRestart = _restartPids.isNotEmpty;
         // Открытый Claude уже ждёт затвор на своём порту — другой ему не
         // подойдёт.
         await _startGate(keepPort: pinnedBefore && _wasRunning);
@@ -350,7 +415,8 @@ class KillSwitch extends ChangeNotifier {
         }
         unprotected = !pinned;
       } else {
-        needsRestart = _wasRunning;
+        _restartPids.addAll(launcher.instances.map((i) => i.pid));
+        needsRestart = _restartPids.isNotEmpty;
       }
     } catch (error) {
       debugPrint('Kill Switch: не удалось поднять затвор: $error');
@@ -398,7 +464,10 @@ class KillSwitch extends ChangeNotifier {
       try {
         await gate.start(port);
         await settings.setEgressPort(port);
-        if (keepPort) needsRestart = true;
+        if (keepPort) {
+          _restartPids.addAll(launcher.instances.map((i) => i.pid));
+          needsRestart = _restartPids.isNotEmpty;
+        }
         return;
       } on SocketException {
         continue;
@@ -435,6 +504,8 @@ class KillSwitch extends ChangeNotifier {
   }
 
   void _disarm({bool stopGate = true}) {
+    _processAuditGeneration++;
+    _observedPids.clear();
     _poll?.cancel();
     _recheck?.cancel();
     _retry?.cancel();
@@ -447,6 +518,7 @@ class KillSwitch extends ChangeNotifier {
     _blockedAt = null;
     _verifying = false;
     needsRestart = false;
+    _restartPids.clear();
     unprotected = false;
     _ready = null;
   }

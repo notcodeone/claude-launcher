@@ -14,6 +14,7 @@ import 'src/app_window.dart';
 import 'src/claude/claude_host.dart';
 import 'src/integrations/claude_code_hooks.dart';
 import 'src/integrations/claude_code_integration.dart';
+import 'src/integrations/code_session_registry.dart';
 import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/launcher_controller.dart';
@@ -83,6 +84,10 @@ Future<void> main(List<String> args) async {
   );
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  launcher.setParallelLaunch(settings.parallelLaunch);
+  settings.addListener(
+    () => launcher.setParallelLaunch(settings.parallelLaunch),
+  );
   // Страну узнаём сразу, пока грузится остальное: к запуску профиля по
   // умолчанию ответ обычно уже готов.
   final location = LocationGuard(settings: settings);
@@ -93,6 +98,9 @@ Future<void> main(List<String> args) async {
     settings: settings,
     launcher: launcher,
     windowVisible: window.visible,
+    registry: CodeSessionRegistry(
+      File(p.join(supportDir.path, 'code-session-registry.json')),
+    ),
     handoff: _handoff(supportDir, host),
     notifier: notifier,
     onOpenWindow: window.show,
@@ -156,6 +164,7 @@ Future<void> main(List<String> args) async {
   // версия запустится сразу и заберёт их сама, а наблюдатель — тот же exe —
   // на Windows не дал бы установщику заменить файлы.
   Future<void> quit({bool updating = false}) async {
+    await claudeCode.flushSessions();
     try {
       if (!updating && await claudeCode.releaseOnQuit()) {
         await _startWatcher([
@@ -326,7 +335,11 @@ Future<void> main(List<String> args) async {
   // Перед запуском профиль ждёт проверку страны (LocationGuard.ensureCanLaunch),
   // а она идёт с самого начала запуска. Окно лаунчера остаётся над Claude.
   await window.keepInFrontDuring(
-    launcher.openOnStartup(settings.startupProfileId),
+    settings.parallelLaunch
+        ? launcher
+              .openOnStartupProfiles(settings.startupProfileIds)
+              .then((count) => count > 0)
+        : launcher.openOnStartup(settings.startupProfileId),
   );
 }
 
@@ -666,6 +679,9 @@ Future<void> _cleanup(Directory supportDir) async {
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
   final host = ClaudeHost.forCurrentPlatform();
+  await ClaudeHost.removeQuietly(
+    p.join(supportDir.path, 'code-session-registry.json'),
+  );
   // Windows: правило брандмауэра для Cowork — Windows спросит разрешение.
   if (Platform.isWindows) {
     final firewall = CoworkFirewall();

@@ -9,6 +9,7 @@ import 'widgets.dart';
 /// Цвет состояния сессии. Им же окрашена точка на кнопке «Показать окно»,
 /// когда сессии на карточке свёрнуты.
 Color sessionColor(Palette p, CodeSessionState state) => switch (state) {
+  CodeSessionState.unknown => p.muted,
   CodeSessionState.working => p.text,
   CodeSessionState.needsPermission => p.warning,
   CodeSessionState.needsAnswer => p.info,
@@ -16,6 +17,7 @@ Color sessionColor(Palette p, CodeSessionState state) => switch (state) {
 };
 
 String sessionLabel(CodeSessionState state) => switch (state) {
+  CodeSessionState.unknown => 'Неизвестно',
   CodeSessionState.working => 'Работает',
   CodeSessionState.needsPermission || CodeSessionState.needsAnswer => 'Ожидает',
   CodeSessionState.done => 'Готово',
@@ -158,7 +160,13 @@ class _SessionRow extends StatelessWidget {
       style: textStyle,
     );
     // «Ожидает» чего именно — пишет сам Claude Code в уведомлении.
-    if (session.message.isNotEmpty) {
+    if (session.state == CodeSessionState.unknown) {
+      label = Tooltip(
+        message:
+            'Нет свежих событий после перезапуска лаунчера. Откройте сессию в Claude, чтобы проверить задачу.',
+        child: label,
+      );
+    } else if (session.message.isNotEmpty) {
       label = Tooltip(message: session.message, child: label);
     }
 
@@ -276,6 +284,11 @@ class _StateIcon extends StatelessWidget {
     final p = context.palette;
     final color = sessionColor(p, state);
     final icon = switch (state) {
+      CodeSessionState.unknown => Icon(
+        AppIcons.unknown,
+        size: 14,
+        color: color,
+      ),
       CodeSessionState.working => SizedBox.square(
         dimension: 11,
         child: CircularProgressIndicator(strokeWidth: 1.8, color: color),

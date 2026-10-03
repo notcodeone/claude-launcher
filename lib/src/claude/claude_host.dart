@@ -59,6 +59,15 @@ abstract class ClaudeHost {
   /// его вперёд.
   Future<void> openLink(ClaudeInstance instance, Uri link);
 
+  /// Доставка URL конкретному процессу, без выбора экземпляра системой.
+  bool get supportsTargetedLinks => false;
+
+  /// Включён эксперимент «Параллельные профили» (ставит контроллер). Новые
+  /// способы показа окна, передачи ссылки и строгого опроса процессов пока
+  /// проверены не на всех системах — без эксперимента хост работает так же,
+  /// как в 1.5.x.
+  bool parallel = false;
+
   /// Смотрит ли пользователь сейчас в окно [instance]: оно активно.
   Future<bool> isFrontmost(ClaudeInstance instance) async => false;
 
@@ -91,6 +100,10 @@ abstract class ClaudeHost {
   /// Ставит скачанное обновление [package] версии [version]. Claude закрыт.
   Future<void> installUpdate(File package, String version) =>
       throw UnsupportedError('Обновлять Claude здесь лаунчер не умеет');
+
+  /// Verify that an application can be launched after a failed installation.
+  /// Unknown installation state must not trigger automatic recovery launches.
+  Future<bool> canLaunchAfterUpdateFailure() async => false;
 
   /// Журнал последней установки обновления Claude; `null` — его не ведём.
   String? get installLogPath => null;

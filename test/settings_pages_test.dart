@@ -104,7 +104,24 @@ void main() {
     expect(find.text('Лимиты профиля'), findsOneWidget);
     expect(settings.usageLimits, isFalse);
     expect(find.text('Kill Switch'), findsOneWidget);
-    await tester.tap(find.byType(Switch).first);
+    expect(settings.parallelLaunch, isFalse);
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(
+          SettingSwitchRow,
+          'Параллельные профили — тест',
+        ),
+        matching: find.byType(Switch),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(settings.parallelLaunch, isTrue);
+    final usageSwitch = find.descendant(
+      of: find.widgetWithText(SettingSwitchRow, 'Лимиты профиля'),
+      matching: find.byType(Switch),
+    );
+    await tester.ensureVisible(usageSwitch);
+    await tester.tap(usageSwitch);
     await tester.pumpAndSettle();
     expect(settings.usageLimits, isTrue);
 

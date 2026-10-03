@@ -7,6 +7,9 @@ import 'package:path/path.dart' as p;
 import 'claude_code_events.dart';
 
 enum CodeSessionState {
+  /// Restored reference; no hook has confirmed the current task state yet.
+  unknown,
+
   /// Claude выполняет задачу.
   working,
 
@@ -69,7 +72,7 @@ class CodeSession {
       ? Uri.parse('claude://claude.ai/epitaxy/$hostSessionId')
       : null;
 
-  static final _hostIdPattern = RegExp(r'^local_[A-Za-z0-9-]+$');
+  static final _hostIdPattern = RegExp(r'^local_[A-Za-z0-9_-]{1,160}$');
 
   /// Название из боковой панели Claude, иначе — папка проекта.
   String get name =>
@@ -123,12 +126,37 @@ class ClaudeCodeSessions {
 
   void clear() => _sessions.clear();
 
+  /// Restore only a verified reference. No transcript reads or notifications;
+  /// a new hook is required before claiming that the task works or waits.
+  void restore({
+    required String id,
+    required String hostSessionId,
+    required String profileId,
+    required DateTime startedAt,
+    required DateTime updatedAt,
+  }) {
+    _sessions.putIfAbsent(
+      id,
+      () => CodeSession(id: id, profileId: profileId, startedAt: startedAt)
+        ..hostSessionId = hostSessionId
+        ..updatedAt = updatedAt
+        ..state = CodeSessionState.unknown,
+    );
+  }
+
   /// Применяет событие к сессии открытого профиля [profileId].
   void handle(ClaudeCodeEvent event, String profileId) {
     if (event.sessionId.isEmpty) return;
     if (event.kind == ClaudeCodeEventKind.sessionEnded) {
-      _sessions.remove(event.sessionId);
+      if (_sessions[event.sessionId]?.profileId == profileId) {
+        _sessions.remove(event.sessionId);
+      }
       return;
+    }
+    // Never mutate a row belonging to another profile after ownership changes.
+    final prior = _sessions[event.sessionId];
+    if (prior != null && prior.profileId != profileId) {
+      _sessions.remove(event.sessionId);
     }
     final isNew = !_sessions.containsKey(event.sessionId);
     final session = _sessions.putIfAbsent(
@@ -152,7 +180,7 @@ class ClaudeCodeSessions {
     }
     // С сессией знакомимся посреди работы (например, лаунчер перезапустили):
     // пока считаем с этого места, а начало задачи найдём в переписке.
-    if (isNew) {
+    if (isNew || session.state == CodeSessionState.unknown) {
       session
         .._offset = _lengthOf(session.transcriptPath)
         .._findTaskStart = event.kind != ClaudeCodeEventKind.promptSubmitted;
@@ -234,7 +262,8 @@ class ClaudeCodeSessions {
     _sessions.removeWhere(
       (_, session) =>
           !runningProfileIds.contains(session.profileId) ||
-          (session.state == CodeSessionState.done &&
+          ((session.state == CodeSessionState.done ||
+                  session.state == CodeSessionState.unknown) &&
               now.difference(session.updatedAt) > doneLifetime),
     );
     return _sessions.length != before;

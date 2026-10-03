@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import 'bundle_replacement.dart';
 import 'claude_host.dart';
 import 'command_line.dart';
 
@@ -84,10 +85,22 @@ class MacClaudeHost extends ClaudeHost {
     final appPath = _appPath ?? await locate();
     if (appPath == null) throw StateError('Claude не найден');
     final work = Directory(p.join(ClaudeHost.workDir.path, 'claude-install'));
+    final recovery = Directory(p.join(work.path, 'Claude-old.app'));
+    // Копия от удачной установки, которую не удалось убрать, — не помеха:
+    // Claude на месте. Отказываем, только если самого Claude нет.
+    if (await recovery.exists() && await _bundleVersion(appPath) != null) {
+      await ClaudeHost.removeQuietly(recovery.path);
+    }
+    if (await recovery.exists()) {
+      throw StateError(
+        'Сохранена резервная копия Claude после сбоя. Восстановите её перед повторной установкой: ${recovery.path}',
+      );
+    }
     await ClaudeHost.removeQuietly(work.path);
     // Остаток прежних версий лаунчера, которые оставляли копию рядом.
     await ClaudeHost.removeQuietly('$appPath.old');
     await work.create(recursive: true);
+    BundleReplacement? replacement;
     try {
       await _run('ditto', ['-x', '-k', package.path, work.path]);
       final fresh = p.join(work.path, 'Claude.app');
@@ -102,17 +115,30 @@ class MacClaudeHost extends ClaudeHost {
       if (team == null || team != await _teamId(appPath)) {
         throw StateError('Обновление подписано не тем же разработчиком');
       }
-      final old = p.join(work.path, 'Claude-old.app');
-      await _run('mv', [appPath, old]);
-      try {
-        await _run('mv', [fresh, appPath]);
-      } catch (_) {
-        await _run('mv', [old, appPath]);
-        rethrow;
-      }
+      replacement = BundleReplacement(
+        current: appPath,
+        fresh: fresh,
+        backup: recovery.path,
+        move: (from, to) => _run('mv', [from, to]),
+      );
+      await replacement.replace();
       _icon = null;
     } finally {
-      await ClaudeHost.removeQuietly(work.path);
+      if (!(replacement?.backupPending ?? false)) {
+        await ClaudeHost.removeQuietly(work.path);
+      }
+    }
+  }
+
+  @override
+  Future<bool> canLaunchAfterUpdateFailure() async {
+    final appPath = _appPath ?? await locate();
+    if (appPath == null || await _bundleVersion(appPath) == null) return false;
+    try {
+      await _run('codesign', ['--verify', '--deep', '--strict', appPath]);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -258,22 +284,36 @@ class MacClaudeHost extends ClaudeHost {
       await _channel.invokeMethod<bool>('isFrontmost', {'pid': instance.pid}) ??
       false;
 
-  /// Без `-n` ссылку получает уже запущенный Claude — лаунчер держит открытым
-  /// один профиль, так что это [instance].
+  @override
+  bool get supportsTargetedLinks => true;
+
+  /// В обычном режиме — `open -a`: открыт один профиль, ссылку получает он, а
+  /// разрешение macOS «Автоматизация» не нужно. В эксперименте — Apple Event
+  /// конкретному процессу.
   @override
   Future<void> openLink(ClaudeInstance instance, Uri link) async {
-    final appPath = _appPath ?? await locate();
-    if (appPath == null) throw StateError('Claude не найден');
-    final result = await Process.run('open', ['-a', appPath, '$link']);
-    if (result.exitCode != 0) {
-      throw ProcessException(
-        'open',
-        const [],
-        '${result.stderr}',
-        result.exitCode,
-      );
+    if (!parallel) {
+      final appPath = _appPath ?? await locate();
+      if (appPath == null) throw StateError('Claude не найден');
+      final result = await Process.run('open', ['-a', appPath, '$link']);
+      if (result.exitCode != 0) {
+        throw ProcessException(
+          'open',
+          const [],
+          '${result.stderr}',
+          result.exitCode,
+        );
+      }
+      await activate(instance);
+      return;
     }
-    await activate(instance);
+    final delivered = await _channel.invokeMethod<bool>('openLink', {
+      'pid': instance.pid,
+      'link': '$link',
+    });
+    if (delivered != true) {
+      throw StateError('Выбранный процесс Claude уже закрыт.');
+    }
   }
 
   /// Настройка AppKit «значок строки меню скрыт». Публичного способа скрыть

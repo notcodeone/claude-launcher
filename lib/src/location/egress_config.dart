@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,9 +7,9 @@ import 'package:path/path.dart' as p;
 
 /// Закрепляет трафик Claude за прокси-затвором лаунчера ([EgressGate]) —
 /// официальной настройкой самого Claude `egressProxyUrl`. С ней через прокси
-/// идут приложение, движок Claude Code (он получает `HTTPS_PROXY`) и, на macOS
-/// и Windows, машина Cowork. Если прокси недоступен, Claude не идёт в обход, а
-/// остаётся без сети. Встроенное обновление Claude прокси не слушает, поэтому
+/// должен идти поддержанный трафик Claude и его локальных сред исполнения.
+/// Проверка файлов ниже не подтверждает принятие настройки процессом и не
+/// является аудитом всех сетевых путей приложения, Code, MCP и Cowork VM. Встроенное обновление Claude прокси не слушает, поэтому
 /// на это время оно выключено (`disableAutoUpdates`).
 ///
 /// Настройка читается при запуске Claude из «локальной конфигурации» —
@@ -22,7 +23,43 @@ import 'package:path/path.dart' as p;
 /// Лаунчер пишет только свою запись и не трогает папку, где уже есть чужая
 /// конфигурация: её мог настроить администратор.
 class EgressConfig {
-  const EgressConfig();
+  const EgressConfig({this.directoryForProfile});
+
+  /// Also permits testing the shared Windows store without modifying LOCALAPPDATA.
+  final String Function(String)? directoryForProfile;
+  String _directory(String dataDir) =>
+      directoryForProfile?.call(dataDir) ?? configDir(dataDir);
+
+  // Separate objects (UI, guard, cleanup) can access the same Windows store.
+  static final _pending = <String, Future<void>>{};
+  static Future<T> _serial<T>(String dir, Future<T> Function() action) async {
+    final key = Platform.isWindows
+        ? p.normalize(dir).toLowerCase()
+        : p.normalize(dir);
+    final previous = _pending[key];
+    final complete = Completer<void>();
+    final current = _pending[key] = complete.future;
+    try {
+      await previous;
+      return await action();
+    } finally {
+      complete.complete();
+      if (identical(_pending[key], current)) _pending.remove(key);
+    }
+  }
+
+  static Future<void> _checkDirectories(String dir) async {
+    for (final path in [dir, p.join(dir, 'configLibrary')]) {
+      final type = await FileSystemEntity.type(path, followLinks: false);
+      if (type != FileSystemEntityType.notFound &&
+          type != FileSystemEntityType.directory) {
+        throw FileSystemException(
+          'Configuration directory is not a regular directory',
+          path,
+        );
+      }
+    }
+  }
 
   /// Своя запись в библиотеке — по ней лаунчер узнаёт, что убирать.
   static const entryId = '6c4e1f8a-2b3d-4c5e-9f70-a1b2c3d4e5f6';
@@ -59,9 +96,18 @@ class EgressConfig {
   /// Закрепляет профиль за прокси на [port]. false — папка занята чужой
   /// конфигурацией, профиль не защищён.
   Future<bool> pin(String dataDir, int port) async {
-    final dir = configDir(dataDir);
-    if (await _foreign(dir)) return false;
-    return _pinDir(dir, port);
+    if (port < 1 || port > 65535) return false;
+    final dir = _directory(dataDir);
+    return _serial(dir, () async {
+      try {
+        await _checkDirectories(dir);
+        if (await _foreign(dir)) return false;
+        return await _pinDir(dir, port);
+      } catch (error) {
+        debugPrint('Kill Switch: конфигурация недоступна: $error');
+        return false;
+      }
+    });
   }
 
   /// В папке уже чужая конфигурация — её мог настроить администратор.
@@ -73,8 +119,11 @@ class EgressConfig {
     final desktop = await _readJson(
       File(p.join(dir, 'claude_desktop_config.json')),
     );
-    return (entries is List &&
-            entries.any((e) => e is Map && e['id'] != entryId)) ||
+    return (meta != null &&
+            (entries is! List ||
+                (meta['appliedId'] != null && meta['appliedId'] != entryId))) ||
+        (entries is List &&
+            entries.any((e) => e is! Map || e['id'] != entryId)) ||
         desktop?['deploymentMode'] == '3p';
   }
 
@@ -84,8 +133,11 @@ class EgressConfig {
     final config = File(p.join(dir, 'claude_desktop_config.json'));
     try {
       final desktop = await _readJson(config) ?? <String, Object?>{};
+      final entryFile = File(p.join(library.path, '$entryId.json'));
+      // An existing malformed file or symlink is not an empty owned record.
+      await _readJson(entryFile);
       await library.create(recursive: true);
-      await _writeJson(File(p.join(library.path, '$entryId.json')), {
+      await _writeJson(entryFile, {
         'egressProxyUrl': 'http://127.0.0.1:$port',
         // Обновления Claude качает системой в обход прокси (на macOS —
         // Squirrel), то есть прямо к Anthropic. Пока профиль закреплён, их
@@ -108,8 +160,8 @@ class EgressConfig {
 
   /// Убирает свою запись — и копии от прежних версий лаунчера.
   Future<void> unpin(String dataDir) async {
-    for (final dir in [configDir(dataDir), ..._legacyMirrors()]) {
-      await _unpinDir(dir);
+    for (final dir in {_directory(dataDir), ..._legacyMirrors()}) {
+      await _serial(dir, () => _unpinDir(dir));
     }
   }
 
@@ -117,9 +169,11 @@ class EgressConfig {
     final library = Directory(p.join(dir, 'configLibrary'));
     final metaFile = File(p.join(library.path, '_meta.json'));
     try {
+      await _checkDirectories(dir);
       final meta = await _readJson(metaFile);
       final entries = meta?['entries'];
       final ours =
+          meta?['appliedId'] == entryId &&
           entries is List &&
           entries.length == 1 &&
           entries.single is Map &&
@@ -135,31 +189,85 @@ class EgressConfig {
     }
   }
 
-  /// Закреплён ли профиль за прокси лаунчера.
-  Future<bool> isPinned(String dataDir) async {
-    final meta = await _readJson(
-      File(p.join(configDir(dataDir), 'configLibrary', '_meta.json')),
-    );
-    return meta?['appliedId'] == entryId;
+  /// Verify the entire launcher-owned configuration, optionally for this gate's
+  /// port. This verifies files, not whether an already running process adopted them.
+  Future<bool> isPinned(String dataDir, {int? port}) async {
+    final dir = _directory(dataDir);
+    return _serial(dir, () async {
+      try {
+        await _checkDirectories(dir);
+        final library = p.join(dir, 'configLibrary');
+        final meta = await _readJson(File(p.join(library, '_meta.json')));
+        final entries = meta?['entries'];
+        if (meta?['appliedId'] != entryId ||
+            entries is! List ||
+            entries.length != 1 ||
+            entries.single is! Map ||
+            (entries.single as Map)['id'] != entryId) {
+          return false;
+        }
+        final entry = await _readJson(File(p.join(library, '$entryId.json')));
+        final desktop = await _readJson(
+          File(p.join(dir, 'claude_desktop_config.json')),
+        );
+        final url = entry?['egressProxyUrl'];
+        if (url is! String ||
+            entry?['disableAutoUpdates'] != true ||
+            desktop?['deploymentMode'] != '1p') {
+          return false;
+        }
+        final uri = Uri.tryParse(url);
+        if (uri == null ||
+            uri.scheme != 'http' ||
+            uri.host != '127.0.0.1' ||
+            !uri.hasPort ||
+            uri.port < 1 ||
+            uri.port > 65535 ||
+            uri.userInfo.isNotEmpty ||
+            uri.path.isNotEmpty ||
+            uri.hasQuery ||
+            uri.hasFragment) {
+          return false;
+        }
+        return port == null || uri.port == port;
+      } catch (_) {
+        return false;
+      }
+    });
   }
 
   static Future<Map<String, Object?>?> _readJson(File file) async {
-    try {
-      final json = jsonDecode(await file.readAsString());
-      return json is Map<String, Object?> ? json : null;
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
+    final type = await FileSystemEntity.type(file.path, followLinks: false);
+    if (type == FileSystemEntityType.notFound) return null;
+    if (type != FileSystemEntityType.file) {
+      throw FileSystemException(
+        'Configuration is not a regular file',
+        file.path,
+      );
     }
+    if (await file.length() > 1024 * 1024) {
+      throw const FormatException('Configuration too large');
+    }
+    final json = jsonDecode(await file.readAsString());
+    if (json is! Map<String, Object?>) {
+      throw const FormatException('Configuration must be an object');
+    }
+    return json;
   }
 
   static Future<void> _writeJson(File file, Map<String, Object?> json) async {
-    final tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(json),
-      flush: true,
-    );
-    await tmp.rename(file.path);
+    final work = await Directory(
+      file.parent.path,
+    ).createTemp('.launcher-config-');
+    try {
+      final tmp = File(p.join(work.path, 'record.json'));
+      await tmp.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(json),
+        flush: true,
+      );
+      await tmp.rename(file.path);
+    } finally {
+      await work.delete(recursive: true);
+    }
   }
 }

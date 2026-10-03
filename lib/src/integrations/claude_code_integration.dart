@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../app_settings.dart';
+import '../claude/claude_host.dart';
 import '../launcher_controller.dart';
 import '../notifications.dart';
 import '../profile.dart';
@@ -12,7 +14,10 @@ import 'claude_code_events.dart';
 import 'claude_code_hooks.dart';
 import 'claude_code_sessions.dart';
 import 'code_notifications.dart';
+import 'code_profile_resolver.dart';
+import 'code_session_registry.dart';
 import 'notification_handoff.dart';
+import 'pending_code_events.dart';
 
 /// События Claude Code: подключение хуков, приём событий, сессии открытого
 /// профиля (показываются на его карточке) и уведомления о них вместо самих
@@ -23,12 +28,16 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     required this.launcher,
     ClaudeCodeHooks? hooks,
     ValueListenable<bool>? windowVisible,
+    this.profileResolver = const CodeProfileResolver(),
+    this.registry,
     this.handoff,
     this.notifier,
     this.onOpenWindow,
     this.tickInterval = const Duration(seconds: 1),
+    this.metadataRetryInterval = const Duration(seconds: 2),
   }) : hooks = hooks ?? ClaudeCodeHooks.forCurrentUser(),
        windowVisible = windowVisible ?? ValueNotifier(true) {
+    _previousParallelMode = launcher.parallelLaunch;
     launcher.addListener(_onLauncherChanged);
     this.windowVisible.addListener(_updateWatching);
     notifier?.onTap = _onNotificationTap;
@@ -37,6 +46,70 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   final AppSettings settings;
   final LauncherController launcher;
   final ClaudeCodeHooks hooks;
+  final CodeProfileResolver profileResolver;
+  final CodeSessionRegistry? registry;
+  String? registryError;
+
+  /// Реестр нужен только эксперименту «Параллельные профили»; в обычном
+  /// режиме его не пишем, а при выключении эксперимента один раз очищаем
+  /// ([clearing]).
+  Future<void> _saveRegistry({bool clearing = false}) async {
+    final registry = this.registry;
+    if (registry == null || (!launcher.parallelLaunch && !clearing)) return;
+    try {
+      await registry.save(
+        launcher.parallelLaunch && connected ? sessions.all : [],
+      );
+      registryError = null;
+    } catch (_) {
+      registryError = 'Не удалось сохранить список сессий Code';
+    }
+    _notify();
+  }
+
+  Future<void> _restoreRegistry() {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          final registry = this.registry;
+          if (registry == null || !launcher.parallelLaunch || _disposed) return;
+          try {
+            final entries = await registry.load();
+            for (final entry in entries) {
+              if (generation != _eventGeneration || _disposed) return;
+              if (!launcher.parallelLaunch || !connected) return;
+              final owner = await _resolveProfile(entry.reference);
+              if (generation != _eventGeneration || _disposed) return;
+              if (owner != entry.profileId ||
+                  !launcher.runningProfiles.any((p) => p.id == owner)) {
+                continue;
+              }
+              sessions.restore(
+                id: entry.id,
+                hostSessionId: entry.hostId,
+                profileId: owner!,
+                startedAt: entry.startedAt,
+                updatedAt: entry.updatedAt,
+              );
+            }
+            registryError = null;
+            _notify();
+          } catch (_) {
+            registryError = 'Не удалось восстановить список сессий Code';
+            _notify();
+          }
+        })
+        .catchError((Object _) {
+          registryError = 'Не удалось восстановить список сессий Code';
+          _notify();
+        });
+  }
+
+  Future<void> _handlingEvents = Future.value();
+  int _eventGeneration = 0;
+
+  @visibleForTesting
+  Future<void> get pendingEvents => _handlingEvents;
 
   /// Выключает уведомления самих Claude, пока их показывает лаунчер. Без него
   /// (или без [notifier]) лаунчер уведомлений не показывает и Claude не трогает.
@@ -51,6 +124,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
 
   /// Как часто обновлять время и токены работающих сессий.
   final Duration tickInterval;
+  final Duration metadataRetryInterval;
+  final _pending = PendingCodeEvents();
+  Timer? _metadataRetry;
+  bool? _previousParallelMode;
 
   ClaudeCodeEventServer? _server;
   Timer? _ticker;
@@ -102,6 +179,17 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   Future<void> setNotificationsEnabled(bool enabled) async {
     await settings.setLauncherNotifications(enabled);
     await _syncNotifications();
+  }
+
+  /// Flush the most recent verified references before an orderly exit.
+  /// Зависшее событие не держит выход лаунчера дольше 3 секунд.
+  Future<void> flushSessions() async {
+    try {
+      await _handlingEvents.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      debugPrint('События Claude Code не обработаны до выхода');
+    }
+    await _saveRegistry();
   }
 
   /// Выход из лаунчера: возвращает Claude их уведомления. Возвращает, есть ли
@@ -184,6 +272,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
         await hooks.install(port: port, token: token);
       }
       error = null;
+      await _restoreRegistry();
     } catch (e) {
       await _server?.stop();
       _server = null;
@@ -193,12 +282,15 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   Future<void> _disconnect() async {
+    _eventGeneration++;
+    _clearPending();
     await _server?.stop();
     _server = null;
     _ticker?.cancel();
     _ticker = null;
     sessions.clear();
     _shown.clear();
+    await _saveRegistry();
     try {
       await hooks.uninstall();
       error = null;
@@ -208,20 +300,126 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     _notify();
   }
 
-  /// Одновременно открыт один профиль — событие относится к нему.
-  /// Состояние (и точка на свёрнутой карточке) меняется сразу, а переписку
-  /// дочитываем, только если время и токены сейчас видны. Уведомляем и без
-  /// открытого профиля: сессия может идти в терминале.
-  Future<void> _onEvent(ClaudeCodeEvent event) async {
-    final running = launcher.runningProfiles;
-    final profile = running.length == 1 ? running.single : null;
+  /// Serialize asynchronous metadata reads so Stop cannot overtake a prompt.
+  Future<void> _onEvent(ClaudeCodeEvent event) {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          if (_disposed || generation != _eventGeneration) return;
+          await _handleEvent(event, generation);
+        })
+        .catchError((Object error) {
+          debugPrint(
+            'Не удалось обработать событие Claude Code: ${error.runtimeType}',
+          );
+        });
+  }
+
+  Future<void> _handleEvent(ClaudeCodeEvent event, int generation) async {
+    Profile? profile;
+    if (launcher.parallelLaunch) {
+      final id = await _resolveProfile(event);
+      if (_disposed || generation != _eventGeneration) return;
+      profile = launcher.runningProfiles.where((p) => p.id == id).firstOrNull;
+    } else {
+      final running = launcher.runningProfiles;
+      profile = running.length == 1 ? running.single : null;
+    }
+    if (launcher.parallelLaunch) {
+      if (profile == null) {
+        _pending.add(event, _runningOwners, DateTime.now());
+        _scheduleMetadataRetry();
+      } else {
+        _replay(event, profile.id);
+      }
+    }
     final before = sessions.byId(event.sessionId)?.state;
     if (profile != null) {
       sessions.handle(event, profile.id);
       _notify();
     }
     await _showNotification(event, before, profile);
-    if (profile != null) await _refresh();
+    if (profile != null) {
+      await _refresh();
+      await _saveRegistry();
+    }
+  }
+
+  Map<String, Set<int>> get _runningOwners => {
+    for (final profile in launcher.runningProfiles)
+      profile.id: {
+        for (final instance in launcher.instances)
+          if (launcher.profileOf(instance)?.id == profile.id) instance.pid,
+      },
+  };
+
+  Future<String?> _resolveProfile(ClaudeCodeEvent event) =>
+      profileResolver.resolve(event, {
+        for (final candidate in launcher.profiles)
+          candidate.id: launcher.host.readableDataDirs(
+            ClaudeInstance(
+              pid: 0,
+              dataDir: candidate.usesDefaultFolder
+                  ? null
+                  : launcher.dataDirOf(candidate),
+            ),
+          ),
+      });
+
+  void _replay(ClaudeCodeEvent event, String profileId) {
+    _pending.expire(DateTime.now());
+    final pids = _runningOwners[profileId] ?? <int>{};
+    for (final entry in _pending.take(event.sessionId, event.hostSessionId)) {
+      if (entry.accepts(profileId, pids)) {
+        sessions.handle(entry.event, profileId);
+      }
+    }
+  }
+
+  void _clearPending() {
+    _pending.clear();
+    _metadataRetry?.cancel();
+    _metadataRetry = null;
+  }
+
+  void _scheduleMetadataRetry() {
+    if (_disposed || !connected || _pending.isEmpty || _metadataRetry != null) {
+      return;
+    }
+    _metadataRetry = Timer(metadataRetryInterval, () {
+      retryPendingMetadata().whenComplete(() {
+        _metadataRetry = null;
+        _scheduleMetadataRetry();
+      });
+    });
+  }
+
+  /// Serialized with incoming hooks; replay changes cards, never notifications.
+  @visibleForTesting
+  Future<void> retryPendingMetadata() {
+    final generation = _eventGeneration;
+    return _handlingEvents = _handlingEvents
+        .then((_) async {
+          if (_disposed || generation != _eventGeneration) return;
+          if (!launcher.parallelLaunch) {
+            _clearPending();
+            return;
+          }
+          _pending.expire(DateTime.now());
+          final visited = <(String, String)>{};
+          for (final entry in _pending.entries) {
+            final event = entry.event;
+            if (!visited.add((event.sessionId, event.hostSessionId))) continue;
+            final id = await _resolveProfile(event);
+            if (_disposed || generation != _eventGeneration) return;
+            if (id != null) _replay(event, id);
+          }
+          await _refresh();
+          await _saveRegistry();
+        })
+        .catchError((Object error) {
+          debugPrint('Не удалось повторить события Code: ${error.runtimeType}');
+        });
   }
 
   Future<void> _showNotification(
@@ -258,9 +456,16 @@ class ClaudeCodeIntegration extends ChangeNotifier {
           (event.cwd.isEmpty ? 'Claude Code' : p.basename(event.cwd));
       await notifier.show(
         id: id,
-        title: title,
+        title: launcher.parallelLaunch && profile != null
+            ? '${profile.title} · $title'
+            : title,
         body: body,
-        payload: event.hostSessionId,
+        payload: event.hostSessionId.isEmpty || profile == null
+            ? ''
+            : jsonEncode({
+                'profileId': profile.id,
+                'hostSessionId': event.hostSessionId,
+              }),
       );
       _shown.add(event.sessionId);
     } catch (e) {
@@ -294,14 +499,29 @@ class ClaudeCodeIntegration extends ChangeNotifier {
     }
   }
 
-  void _onNotificationTap(String hostSessionId) {
-    final link = CodeSession.linkFor(hostSessionId);
-    final running = launcher.runningProfiles;
-    if (link != null && running.length == 1) {
-      launcher.openLink(running.single, link);
-    } else {
-      onOpenWindow?.call();
+  void _onNotificationTap(String payload) {
+    // Профиль фиксируется в момент уведомления. После закрытия профиля,
+    // перезапуска лаунчера или смены активного аккаунта не открываем чужой.
+    try {
+      final target = jsonDecode(payload);
+      if (target is Map<String, dynamic>) {
+        final id = target['profileId'];
+        final sessionId = target['hostSessionId'];
+        final profile = launcher.runningProfiles
+            .where((p) => p.id == id)
+            .firstOrNull;
+        final link = sessionId is String
+            ? CodeSession.linkFor(sessionId)
+            : null;
+        if (profile != null && link != null) {
+          launcher.openLink(profile, link);
+          return;
+        }
+      }
+    } on FormatException {
+      // Старое уведомление без профиля: безопасно открыть список профилей.
     }
+    onOpenWindow?.call();
   }
 
   /// Время и токены видны, только когда окно открыто, а карточка профиля
@@ -315,6 +535,14 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   }
 
   void _onLauncherChanged() {
+    if (_previousParallelMode != launcher.parallelLaunch) {
+      _previousParallelMode = launcher.parallelLaunch;
+      _eventGeneration++;
+      _clearPending();
+      if (!launcher.parallelLaunch) {
+        unawaited(_saveRegistry(clearing: true));
+      }
+    }
     _prune();
     _updateWatching();
     // Claude открыли или закрыли, профиль добавили или убрали — сверяем,
@@ -377,7 +605,10 @@ class ClaudeCodeIntegration extends ChangeNotifier {
       },
       now: DateTime.now(),
     );
-    if (changed) _notify();
+    if (changed) {
+      _notify();
+      unawaited(_saveRegistry());
+    }
   }
 
   void _notify() {
@@ -387,6 +618,7 @@ class ClaudeCodeIntegration extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _clearPending();
     launcher.removeListener(_onLauncherChanged);
     windowVisible.removeListener(_updateWatching);
     _ticker?.cancel();

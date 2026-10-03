@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:claude_launcher/src/app_settings.dart';
 import 'package:claude_launcher/src/claude/claude_updates.dart';
+import 'package:claude_launcher/src/claude/claude_host.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/location/kill_switch.dart';
 import 'package:claude_launcher/src/location/location_guard.dart';
@@ -19,6 +21,27 @@ class UpdatableHost extends FakeHost {
 
   /// Сколько раз установка ещё сорвётся.
   int failures = 0;
+  bool safeRecovery = true;
+  Future<void> Function()? onInstall;
+  final failLaunchDirs = <String?>{};
+  bool failProcessScan = false;
+
+  @override
+  Future<List<ClaudeInstance>> running() async {
+    if (failProcessScan) throw StateError('test process scan failure');
+    return super.running();
+  }
+
+  @override
+  Future<bool> canLaunchAfterUpdateFailure() async => safeRecovery;
+
+  @override
+  Future<void> launch(String? dataDir) async {
+    if (failLaunchDirs.contains(dataDir)) {
+      throw StateError('test launch failed');
+    }
+    await super.launch(dataDir);
+  }
 
   @override
   String get updateFeed => 'darwin/universal/squirrel';
@@ -28,6 +51,7 @@ class UpdatableHost extends FakeHost {
 
   @override
   Future<void> installUpdate(File package, String version) async {
+    await onInstall?.call();
     if (failures > 0) {
       failures--;
       throw const FileSystemException('Directory not empty');
@@ -131,6 +155,7 @@ void main() {
     tearDown(() async {
       killSwitch.dispose();
       location.dispose();
+      launcher.dispose();
       await server.close(force: true);
       await dir.delete(recursive: true);
     });
@@ -171,6 +196,183 @@ void main() {
       expect(host.version, '2.200.0');
       expect(u.available, isNull);
     });
+
+    test('после обновления восстанавливает все параллельные профили', () async {
+      launcher.setParallelLaunch(true);
+      final personal = await launcher.addProfile(name: 'Личный');
+      host.start(null);
+      host.start(launcher.dataDirOf(personal));
+      await launcher.refresh();
+      final u = updates();
+      await u.check();
+      await u.install();
+      expect(u.error, isNull);
+      expect(launcher.runningProfiles, hasLength(2));
+      expect(host.calls.where((c) => c.startsWith('launch ')), hasLength(2));
+    });
+
+    test(
+      'installation excludes launches, links and close, retaining mode snapshot',
+      () async {
+        launcher.setParallelLaunch(true);
+        final second = await launcher.addProfile(name: 'Second');
+        final third = await launcher.addProfile(name: 'Third');
+        host.start(null);
+        host.start(launcher.dataDirOf(second));
+        await launcher.refresh();
+        final ready = Completer<void>();
+        final release = Completer<void>();
+        host.onInstall = () async {
+          ready.complete();
+          await release.future;
+        };
+        final u = updates();
+        await u.check();
+        final installing = u.install();
+        await ready.future;
+        expect(launcher.maintaining, isTrue);
+        expect(u.busy, isTrue);
+        final calls = List.of(host.calls);
+        await launcher.switchTo(third);
+        await launcher.openLink(second, Uri.parse('claude://claude.ai/test'));
+        await launcher.close(second);
+        await u.install();
+        expect(host.calls, calls);
+        launcher.setParallelLaunch(false);
+        release.complete();
+        await installing;
+        expect(u.error, isNull);
+        expect(launcher.runningProfiles, hasLength(2));
+        expect(launcher.isRunning(third), isFalse);
+        expect(launcher.maintaining, isFalse);
+      },
+    );
+
+    test(
+      'failed install restores every profile only after host verification',
+      () async {
+        launcher.setParallelLaunch(true);
+        final second = await launcher.addProfile(name: 'Second');
+        host.start(null);
+        host.start(launcher.dataDirOf(second));
+        await launcher.refresh();
+        host.failures = 1;
+        final u = updates();
+        await u.check();
+        await u.install();
+        expect(u.phase, ClaudeUpdatePhase.failed);
+        expect(u.error, contains('Directory not empty'));
+        expect(launcher.runningProfiles, hasLength(2));
+        expect(launcher.maintaining, isFalse);
+        expect(u.available, isNotNull);
+      },
+    );
+
+    test(
+      'unsafe failed install leaves profiles closed and reservation released',
+      () async {
+        host.start(null);
+        await launcher.refresh();
+        host.failures = 1;
+        host.safeRecovery = false;
+        final u = updates();
+        await u.check();
+        await u.install();
+        expect(u.phase, ClaudeUpdatePhase.failed);
+        expect(host.calls.where((c) => c.startsWith('launch ')), isEmpty);
+        expect(launcher.maintaining, isFalse);
+      },
+    );
+
+    test('failure to restore one profile does not skip the next', () async {
+      launcher.setParallelLaunch(true);
+      final first = launcher.profiles.single;
+      final second = await launcher.addProfile(name: 'Second');
+      host.start(null);
+      host.start(launcher.dataDirOf(second));
+      await launcher.refresh();
+      host.failLaunchDirs.add(null);
+      final u = updates();
+      await u.check();
+      await u.install();
+      expect(u.phase, ClaudeUpdatePhase.failed);
+      expect(u.error, contains(first.name));
+      expect(launcher.isRunning(second), isTrue);
+      expect(u.available, isNull);
+    });
+
+    test(
+      'unknown process prevents closing known profiles or installing',
+      () async {
+        host.start(null);
+        host.start('/unlisted');
+        await launcher.refresh();
+        final u = updates();
+        await u.check();
+        await u.install();
+        expect(u.error, contains('вне списка'));
+        expect(host.calls, isEmpty);
+        expect(host.installedBytes, isNull);
+        expect(launcher.instances, hasLength(2));
+      },
+    );
+
+    test('emergency kill during install prevents automatic recovery', () async {
+      host.start(null);
+      await launcher.refresh();
+      final ready = Completer<void>();
+      final release = Completer<void>();
+      host.onInstall = () async {
+        ready.complete();
+        await release.future;
+      };
+      final u = updates();
+      await u.check();
+      final installing = u.install();
+      await ready.future;
+      await launcher.killAll();
+      release.complete();
+      await installing;
+      expect(u.error, contains('аварийным'));
+      expect(host.calls.where((c) => c.startsWith('launch ')), isEmpty);
+      expect(launcher.maintaining, isFalse);
+    });
+
+    test(
+      'failed process scan blocks installation without relying on stale list',
+      () async {
+        final u = updates();
+        await u.check();
+        host.failProcessScan = true;
+        await u.install();
+        expect(u.phase, ClaudeUpdatePhase.failed);
+        expect(u.error, contains('process scan failure'));
+        expect(host.installedBytes, isNull);
+        expect(launcher.maintaining, isFalse);
+      },
+    );
+
+    test(
+      'cancelled close aborts install and retains running profile',
+      () async {
+        host.start(null);
+        host.quitsOnRequest = false;
+        await launcher.refresh();
+        final u = updates();
+        await u.check();
+        launcher.addListener(() {
+          if (launcher.switchStatus?.phase == SwitchPhase.waitingForUser) {
+            launcher.cancelSwitch();
+          }
+        });
+        await u.install();
+        expect(u.phase, ClaudeUpdatePhase.failed);
+        expect(u.error, contains('отменено'));
+        expect(host.installedBytes, isNull);
+        expect(launcher.runningProfiles, hasLength(1));
+        expect(launcher.maintaining, isFalse);
+      },
+    );
 
     test('сумма не сошлась — не ставит', () async {
       final u = updates();

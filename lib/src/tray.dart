@@ -116,6 +116,7 @@ class TrayController with TrayListener {
   }
 
   String _statusText() {
+    if (launcher.maintaining) return '${launcher.maintenanceLabel}…';
     final status = launcher.switchStatus;
     if (status != null) {
       return switch (status.target) {
@@ -136,7 +137,7 @@ class TrayController with TrayListener {
   }
 
   Menu _buildMenu() {
-    final switching = launcher.switchStatus != null;
+    final switching = launcher.busy;
     final status = _statusText();
     return Menu(
       items: [

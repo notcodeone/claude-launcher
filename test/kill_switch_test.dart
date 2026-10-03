@@ -3,11 +3,26 @@ import 'dart:io';
 import 'package:claude_launcher/src/app_settings.dart';
 import 'package:claude_launcher/src/launcher_controller.dart';
 import 'package:claude_launcher/src/location/kill_switch.dart';
+import 'package:claude_launcher/src/location/egress_config.dart';
 import 'package:claude_launcher/src/location/location_guard.dart';
 import 'package:claude_launcher/src/profile_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'launcher_controller_test.dart' show FakeHost;
+
+class MemoryEgressConfig extends EgressConfig {
+  final pinned = <String>{};
+  @override
+  Future<bool> isPinned(String dir, {int? port}) async => pinned.contains(dir);
+  @override
+  Future<bool> pin(String dir, int port) async {
+    pinned.add(dir);
+    return true;
+  }
+
+  @override
+  Future<void> unpin(String dir) async => pinned.remove(dir);
+}
 
 void main() {
   late Directory dir;
@@ -74,6 +89,7 @@ void main() {
 
   tearDown(() async {
     location.dispose();
+    launcher.dispose();
     await dir.delete(recursive: true);
   });
 
@@ -289,6 +305,101 @@ void main() {
       expect(await ks.gate.allow(), isTrue);
     },
   );
+
+  test('new external profile after arming is audited independently', () async {
+    final config = MemoryEgressConfig()..pinned.add(host.defaultDataDir);
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      useGate: true,
+    );
+    ks.start();
+    addTearDown(ks.dispose);
+    await wait();
+    expect(ks.needsRestart, isFalse);
+    final external = host.start('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    // Merely editing configuration after this process started cannot clear it.
+    config.pinned.add('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(external);
+    await launcher.refresh();
+    expect(ks.needsRestart, isFalse);
+    host.start('/external-unpinned');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isFalse);
+  });
+
+  test('новый сосед с записью другого порта требует перезапуска', () async {
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    await settings.setEgressPort(port);
+    final config = EgressConfig(
+      directoryForProfile: (data) => '${dir.path}/proxy-${data.hashCode}',
+    );
+    await config.pin(host.defaultDataDir, port);
+    await config.pin(
+      '/external-wrong-port',
+      port == 65535 ? port - 1 : port + 1,
+    );
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      useGate: true,
+    );
+    ks.start();
+    addTearDown(() => ks.shutdown(keepPinned: true));
+    await wait();
+    expect(ks.needsRestart, isFalse);
+    final neighbor = host.start('/external-wrong-port');
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    // Updating files does not prove the running neighbor reread them.
+    await config.pin('/external-wrong-port', port);
+    await launcher.refresh();
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(neighbor);
+    await launcher.refresh();
+    expect(ks.needsRestart, isFalse);
+    expect(host.instances, hasLength(1));
+  });
+
+  test('один защищённый профиль не скрывает соседний без прокси', () async {
+    final other = await launcher.addProfile(name: 'Другой');
+    final unpinned = host.start(launcher.dataDirOf(other));
+    await launcher.refresh();
+    final config = MemoryEgressConfig()..pinned.add(host.defaultDataDir);
+    final ks = KillSwitch(
+      settings: settings,
+      location: location,
+      launcher: launcher,
+      config: config,
+      fingerprint: () async => network,
+      pollEvery: const Duration(hours: 1),
+    );
+    ks.start();
+    addTearDown(() => ks.shutdown(keepPinned: false));
+    await wait();
+    expect(ks.needsRestart, isTrue);
+    host.instances.remove(unpinned);
+    await launcher.refresh();
+    expect(host.instances, isNotEmpty);
+    expect(ks.needsRestart, isFalse);
+  });
 
   test('записка, а Claude уже закрыт, — затвор не нужен', () async {
     await settings.setKillSwitch(false);

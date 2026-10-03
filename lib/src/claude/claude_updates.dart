@@ -172,7 +172,7 @@ class ClaudeUpdates extends ChangeNotifier {
   /// сеть: пока затвор закрыт, не спрашивает.
   Future<void> check() async {
     final feed = host.updateFeed;
-    if (feed == null || !killSwitch.open || _checking) return;
+    if (feed == null || !killSwitch.open || _checking || busy) return;
     _checking = true;
     notifyListeners();
     try {
@@ -227,41 +227,129 @@ class ClaudeUpdates extends ChangeNotifier {
       phase = ClaudeUpdatePhase.installing;
       progress = null;
       notifyListeners();
-      await launcher.refresh();
-      final reopen = <Profile>[...launcher.runningProfiles];
-      for (final profile in reopen) {
-        await launcher.close(profile);
-      }
-      await launcher.refresh();
-      if (launcher.instances.isNotEmpty) {
-        throw StateError(
-          'Claude не закрылся — закройте его и попробуйте снова',
-        );
-      }
-      await host.installUpdate(package, release.version);
-      // Поставили — загрузка больше не нужна.
-      await ClaudeHost.removeQuietly(cacheDir.path);
-      installed = release.version;
-      iconPath = await host.iconPath();
-      available = null;
+      await launcher.withMaintenance((operation) async {
+        await launcher.refresh(strict: true);
+        if (launcher.unknownInstances.isNotEmpty) {
+          throw StateError(
+            'Закройте Claude, открытый вне списка профилей, перед обновлением',
+          );
+        }
+        final reopen = <Profile>[...launcher.runningProfiles];
+        final restore = launcher.parallelLaunch
+            ? reopen
+            : reopen.take(1).toList();
+        var installing = false;
+        try {
+          for (final profile in reopen) {
+            await operation.close(profile);
+            if (launcher.lastError != null || launcher.isRunning(profile)) {
+              throw StateError(
+                launcher.lastError ?? 'Закрытие Claude отменено',
+              );
+            }
+          }
+          await launcher.refresh(strict: true);
+          if (operation.interrupted) {
+            throw StateError('Обновление отменено аварийным закрытием Claude');
+          }
+          if (launcher.instances.isNotEmpty) {
+            throw StateError(
+              'Claude снова открыт — закройте его и попробуйте снова',
+            );
+          }
+          installing = true;
+          await host.installUpdate(package, release.version);
+        } catch (installationError) {
+          // Before installation the old app is unchanged. Afterwards the host
+          // must verify that a usable app survived or was rolled back.
+          var safe = !installing;
+          if (!safe) {
+            try {
+              safe = await host.canLaunchAfterUpdateFailure();
+            } catch (_) {
+              safe = false;
+            }
+          }
+          final recoveryErrors = safe && !operation.interrupted
+              ? await _restoreProfiles(operation, restore)
+              : <String>[];
+          if (recoveryErrors.isNotEmpty) {
+            throw StateError(
+              '${_errorMessage(installationError)}. '
+              'Не восстановлены профили: ${recoveryErrors.join('; ')}',
+            );
+          }
+          rethrow;
+        }
+        // Keep the installation reservation until every profile is restored.
+        installed = release.version;
+        available = null;
+        await ClaudeHost.removeQuietly(cacheDir.path);
+        try {
+          iconPath = await host.iconPath();
+        } catch (_) {
+          iconPath = null;
+        }
+        final recoveryErrors = operation.interrupted
+            ? ['восстановление отменено аварийным закрытием Claude']
+            : await _restoreProfiles(operation, restore);
+        if (operation.interrupted && recoveryErrors.isEmpty) {
+          recoveryErrors.add(
+            'восстановление отменено аварийным закрытием Claude',
+          );
+        }
+        if (recoveryErrors.isNotEmpty) {
+          throw StateError(
+            'Claude обновлён. Не восстановлены профили: ${recoveryErrors.join('; ')}',
+          );
+        }
+      });
       phase = ClaudeUpdatePhase.idle;
       notifyListeners();
-      if (reopen.isNotEmpty) await launcher.switchTo(reopen.first);
     } catch (e) {
       // Без имени класса исключения: «Claude не закрылся — …», а не
       // «Bad state: …».
-      error = switch (e) {
-        StateError(:final message) => message,
-        FileSystemException(:final message, :final path?) => '$message: $path',
-        ProcessException(:final message) when message.isNotEmpty => message,
-        _ => '$e',
-      };
+      error = _errorMessage(e);
       phase = ClaudeUpdatePhase.failed;
       notifyListeners();
     } finally {
       progress = null;
     }
   }
+
+  Future<List<String>> _restoreProfiles(
+    LauncherMaintenance operation,
+    List<Profile> profiles,
+  ) async {
+    final failures = <String>[];
+    for (final profile in profiles) {
+      if (operation.interrupted) break;
+      // The profile may have been removed while the installer was running.
+      final current = launcher.profiles
+          .where((p) => p.id == profile.id)
+          .firstOrNull;
+      if (current == null) continue;
+      try {
+        await operation.reopen(current);
+        if (launcher.lastError != null || !launcher.isRunning(current)) {
+          failures.add(
+            '«${current.name}»: ${launcher.lastError ?? 'не запущен'}',
+          );
+        }
+      } catch (error) {
+        failures.add('«${current.name}»: ${_errorMessage(error)}');
+      }
+    }
+    return failures;
+  }
+
+  static String _errorMessage(Object error) => switch (error) {
+    StateError(:final message) => message,
+    LaunchBlocked(:final message) => message ?? 'Запуск профиля запрещён',
+    FileSystemException(:final message, :final path?) => '$message: $path',
+    ProcessException(:final message) when message.isNotEmpty => message,
+    _ => '$error',
+  };
 
   /// Папка загрузки: в ней не больше одного архива — той версии, что
   /// ставим. После ошибки архив остаётся, и повторная попытка не качает его
