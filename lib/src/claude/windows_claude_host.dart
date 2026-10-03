@@ -11,6 +11,7 @@ import 'claude_host.dart';
 import 'command_line.dart';
 import 'windows_package.dart';
 import 'windows_powershell.dart';
+import 'windows_window_activation.dart';
 
 /// Windows: Claude ставится пакетом MSIX, путь к `Claude.exe` меняется с каждым
 /// обновлением, поэтому ищем его заново перед запуском.
@@ -328,15 +329,26 @@ class WindowsClaudeHost extends ClaudeHost {
   // -------------------------------------------------------------- процессы
 
   @override
-  Future<List<ClaudeInstance>> running() async => [
-    for (final process in _claudeProcesses())
-      if (isClaudeDesktopExe(process.exe) &&
-          !isWindowsChildProcess(process.commandLine))
-        ClaudeInstance(
-          pid: process.pid,
-          dataDir: windowsUserDataDir(process.commandLine),
-        ),
-  ];
+  Future<List<ClaudeInstance>> running() async {
+    final instances = <ClaudeInstance>[];
+    for (final process in _claudeProcesses()) {
+      if (!isClaudeDesktopExe(process.exe)) continue;
+      if (process.commandLine.isEmpty) {
+        throw StateError(
+          'Не удалось прочитать командную строку Claude: принадлежность профилю неизвестна',
+        );
+      }
+      if (!isWindowsChildProcess(process.commandLine)) {
+        instances.add(
+          ClaudeInstance(
+            pid: process.pid,
+            dataDir: windowsUserDataDir(process.commandLine),
+          ),
+        );
+      }
+    }
+    return instances;
+  }
 
   @override
   Future<String?> commandLineOf(int pid) async {
@@ -361,7 +373,10 @@ class WindowsClaudeHost extends ClaudeHost {
     final result = <({int pid, String exe, String commandLine})>[];
     try {
       if (!EnumProcesses(ids, capacity * sizeOf<Uint32>(), needed).value) {
-        return result;
+        throw StateError('Windows не предоставила список процессов Claude');
+      }
+      if (needed.value >= capacity * sizeOf<Uint32>()) {
+        throw StateError('Список процессов Windows превышает доступный размер');
       }
       final count = needed.value ~/ sizeOf<Uint32>();
       for (var i = 0; i < count; i++) {
@@ -517,17 +532,21 @@ class WindowsClaudeHost extends ClaudeHost {
     }
   }
 
-  /// Повторный запуск с той же папкой: Claude держит блокировку «один экземпляр
-  /// на папку», поэтому новый процесс сразу завершится, а открытый покажет окно.
+  /// Показывает существующее окно по PID, включая скрытое в трее.
+  /// Повторный запуск exe не используется: дедупликация зависит от Claude.
   @override
   Future<void> activate(ClaudeInstance instance) async {
-    AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY
-    final dir = dataDirOf(instance);
-    await launch(samePath(dir, defaultDataDir) ? null : dir);
+    final current = (await running())
+        .where((p) => p.pid == instance.pid)
+        .firstOrNull;
+    if (current == null || !samePath(dataDirOf(current), dataDirOf(instance))) {
+      throw StateError('Выбранный процесс Claude уже закрыт или изменился.');
+    }
+    WindowsWindowActivator(NativeWindowsWindowApi()).activate(instance.pid);
   }
 
-  /// Как [activate], но с ссылкой: её вместе с остальными аргументами получит
-  /// открытый экземпляр той же папки.
+  /// Доставка через повторный запуск и single-instance transport Claude.
+  /// При нескольких экземплярах контроллер блокирует этот непроверенный путь.
   @override
   Future<void> openLink(ClaudeInstance instance, Uri link) async {
     AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY

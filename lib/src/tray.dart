@@ -116,7 +116,7 @@ class TrayController with TrayListener {
   }
 
   String _statusText() {
-    if (launcher.maintaining) return 'обновляю Claude…';
+    if (launcher.maintaining) return '${launcher.maintenanceLabel}…';
     final status = launcher.switchStatus;
     if (status != null) {
       return switch (status.target) {

@@ -496,12 +496,11 @@ class HomePage extends StatelessWidget {
     final status = launcher.switchStatus;
     return [
       if (launcher.maintaining)
-        const NoticeRow(
+        NoticeRow(
           icon: AppIcons.experiments,
           tone: NoticeTone.neutral,
-          title: 'Обновление Claude',
-          detail:
-              'Профили будут доступны после установки и восстановления окон.',
+          title: launcher.maintenanceLabel!,
+          detail: 'Операции с профилями будут доступны после завершения.',
         ),
       if (settings.parallelLaunch)
         const NoticeRow(
@@ -1523,11 +1522,15 @@ class _ProfileCard extends StatelessWidget {
                     const StatusDot(label: 'Запущен'),
                   ],
                   // Профиль, который лаунчер открывает при своём запуске.
-                  if (settings.startupProfileId == profile.id) ...[
+                  if (settings.startsProfile(profile.id)) ...[
                     const SizedBox(width: 8),
-                    const Tooltip(
+                    Tooltip(
                       message: 'Открывается при запуске лаунчера',
-                      child: Tag(label: 'По умолчанию'),
+                      child: Tag(
+                        label: settings.parallelLaunch
+                            ? 'Автозапуск'
+                            : 'По умолчанию',
+                      ),
                     ),
                   ],
                 ],
@@ -1696,7 +1699,7 @@ class _ProfileCard extends StatelessWidget {
           label: Platform.isMacOS ? 'Открыть в Finder' : 'Открыть в Проводнике',
         ),
         // Тег «По умолчанию»: этот профиль лаунчер открывает при своём запуске.
-        if (settings.startupProfileId == profile.id)
+        if (settings.startsProfile(profile.id))
           const MenuEntry(
             value: 'startup',
             icon: AppIcons.startupOff,
@@ -1731,9 +1734,13 @@ class _ProfileCard extends StatelessWidget {
       case 'folder':
         await launcher.host.revealFolder(launcher.dataDirOf(profile));
       case 'startup':
-        await settings.setStartupProfile(
-          settings.startupProfileId == profile.id ? null : profile.id,
-        );
+        if (settings.parallelLaunch) {
+          await settings.toggleParallelStartupProfile(profile.id);
+        } else {
+          await settings.setStartupProfile(
+            settings.startsProfile(profile.id) ? null : profile.id,
+          );
+        }
       case 'quit':
         await _quit(cardContext);
       case 'remove':
@@ -1772,8 +1779,6 @@ class _ProfileCard extends StatelessWidget {
     );
     if (!confirmed) return;
     await launcher.removeProfile(profile);
-    if (settings.startupProfileId == profile.id) {
-      await settings.setStartupProfile(null);
-    }
+    await settings.removeStartupProfile(profile.id);
   }
 }

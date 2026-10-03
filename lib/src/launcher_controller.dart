@@ -46,8 +46,9 @@ class LaunchBlocked implements Exception {
 
 /// Capability valid only within [LauncherController.withMaintenance].
 class LauncherMaintenance {
-  LauncherMaintenance._(this._launcher);
+  LauncherMaintenance._(this._launcher, this.label);
   final LauncherController _launcher;
+  final String label;
   bool _interrupted = false;
   bool get interrupted => _interrupted;
 
@@ -62,7 +63,7 @@ class LauncherMaintenance {
     return _launcher._close(profile, maintenance: this);
   }
 
-  Future<void> reopen(Profile profile) {
+  Future<void> reopen(Profile profile, {bool strict = false}) {
     _check();
     if (interrupted) {
       throw const LaunchBlocked(
@@ -71,6 +72,7 @@ class LauncherMaintenance {
     }
     return _launcher._switchTo(
       profile,
+      strict: strict,
       maintenance: this,
       preserveOthers: true,
     );
@@ -116,15 +118,17 @@ class LauncherController extends ChangeNotifier {
   LauncherMaintenance? _maintenance;
 
   bool get maintaining => _maintenance != null;
+  String? get maintenanceLabel => _maintenance?.label;
   bool get busy => _operating || maintaining;
 
   /// Reserve all profile operations before the first await. Emergency kill,
   /// manual force-close and cancelling a quit wait remain available.
   Future<T> withMaintenance<T>(
-    Future<T> Function(LauncherMaintenance operation) action,
-  ) async {
+    Future<T> Function(LauncherMaintenance operation) action, {
+    String label = 'Обновление Claude',
+  }) async {
     if (busy) throw StateError('Дождитесь завершения операции с Claude');
-    final operation = _maintenance = LauncherMaintenance._(this);
+    final operation = _maintenance = LauncherMaintenance._(this, label);
     _notify();
     try {
       return await action(operation);
@@ -244,7 +248,7 @@ class LauncherController extends ChangeNotifier {
         );
       }
 
-      await refresh();
+      await refresh(strict: strict || maintenance != null);
       final targetDir = dataDirOf(target);
       ClaudeInstance? targetInstance;
       final others = <ClaudeInstance>[];
@@ -349,6 +353,43 @@ class LauncherController extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  /// A selected set starts only when Claude is initially closed. Reserve the
+  /// sequence so a tray click cannot interleave another launch. Each launch
+  /// still passes the strict location/proxy guard; stop at the first refusal.
+  Future<int> openOnStartupProfiles(Iterable<String> profileIds) async {
+    if (!parallelLaunch || busy) return 0;
+    final ids = profileIds.toSet().toList();
+    if (ids.isEmpty) return 0;
+    try {
+      await refresh(strict: true);
+      if (instances.isNotEmpty || busy) return 0;
+      return await withMaintenance((operation) async {
+        // Another caller could have acted during the initial scan.
+        await refresh(strict: true);
+        if (instances.isNotEmpty) return 0;
+        var opened = 0;
+        for (final id in ids) {
+          if (operation.interrupted || !parallelLaunch) break;
+          final profile = profiles.where((p) => p.id == id).firstOrNull;
+          if (profile == null) continue;
+          await operation.reopen(profile, strict: true);
+          if (operation.interrupted ||
+              !isRunning(profile) ||
+              lastError != null) {
+            break;
+          }
+          opened++;
+        }
+        return opened;
+      }, label: 'Автозапуск профилей');
+    } catch (error) {
+      lastError = 'Не удалось выполнить автозапуск профилей: $error';
+      onNeedsAttention?.call();
+      _notify();
+      return 0;
+    }
   }
 
   /// Пользователь закрыл сообщение об ошибке.

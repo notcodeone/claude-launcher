@@ -16,6 +16,9 @@ class FakeHost extends ClaudeHost {
   bool quitsOnRequest = true;
   int _nextPid = 100;
   bool targetedLinks = false;
+  bool scanFails = false;
+  int scanCount = 0;
+  int? failScanAt;
   @override
   bool get supportsTargetedLinks => targetedLinks;
 
@@ -47,7 +50,10 @@ class FakeHost extends ClaudeHost {
   Future<String?> commandLineOf(int pid) async => null;
 
   @override
-  Future<List<ClaudeInstance>> running() async => List.of(instances);
+  Future<List<ClaudeInstance>> running() async {
+    if (scanFails || ++scanCount == failScanAt) throw StateError('scan failed');
+    return List.of(instances);
+  }
 
   ClaudeInstance start(String? dataDir) {
     final instance = ClaudeInstance(pid: _nextPid++, dataDir: dataDir);
@@ -485,6 +491,121 @@ void main() {
     test('ничего не делает без выбранного или с удалённым профилем', () async {
       expect(await launcher.openOnStartup(null), isFalse);
       expect(await launcher.openOnStartup('нет такого'), isFalse);
+      expect(host.calls, isEmpty);
+    });
+  });
+
+  group('автозапуск набора', () {
+    setUp(() => launcher.setParallelLaunch(true));
+
+    test(
+      'последовательно запускает уникальные ID со строгой защитой каждого',
+      () async {
+        final checks = <bool>[];
+        launcher.launchGuard = ({required strict}) async => checks.add(strict);
+        expect(
+          await launcher.openOnStartupProfiles([
+            work.id,
+            personal.id,
+            work.id,
+            'deleted',
+          ]),
+          2,
+        );
+        expect(checks, [true, true]);
+        expect(host.calls, [
+          'launch default',
+          'launch /support/Claude-Lichnyy',
+        ]);
+        expect(host.instances, hasLength(2));
+        expect(launcher.busy, isFalse);
+      },
+    );
+
+    test(
+      'свежий внешний экземпляр и ошибка сканирования отменяют весь набор',
+      () async {
+        host.start('/outside');
+        expect(await launcher.openOnStartupProfiles([work.id, personal.id]), 0);
+        expect(host.calls, isEmpty);
+        host.instances.clear();
+        host.scanFails = true;
+        expect(await launcher.openOnStartupProfiles([work.id]), 0);
+        expect(launcher.lastError, contains('scan failed'));
+        expect(host.calls, isEmpty);
+        expect(launcher.busy, isFalse);
+      },
+    );
+
+    test(
+      'ошибка сканирования после резервирования не запускает профиль',
+      () async {
+        host.failScanAt = host.scanCount + 3;
+        expect(await launcher.openOnStartupProfiles([work.id]), 0);
+        expect(host.calls, isEmpty);
+        expect(launcher.lastError, contains('scan failed'));
+        expect(launcher.busy, isFalse);
+      },
+    );
+
+    test(
+      'отказ второй защиты сохраняет первый профиль и пропускает остальные',
+      () async {
+        final third = await launcher.addProfile(name: 'Третий');
+        var checks = 0;
+        launcher.launchGuard = ({required strict}) async {
+          if (++checks == 2) throw const LaunchBlocked('blocked');
+        };
+        expect(
+          await launcher.openOnStartupProfiles([
+            work.id,
+            personal.id,
+            third.id,
+          ]),
+          1,
+        );
+        expect(checks, 2);
+        expect(host.calls, ['launch default']);
+        expect(launcher.isRunning(work), isTrue);
+        expect(launcher.lastError, 'blocked');
+      },
+    );
+
+    test(
+      'весь набор резервирует операции, аварийное закрытие отменяет запуск',
+      () async {
+        final ready = Completer<void>();
+        final release = Completer<void>();
+        launcher.launchGuard = ({required strict}) async {
+          ready.complete();
+          await release.future;
+        };
+        final startup = launcher.openOnStartupProfiles([work.id, personal.id]);
+        await ready.future;
+        expect(launcher.maintenanceLabel, 'Автозапуск профилей');
+        await launcher.switchTo(personal);
+        expect(await launcher.openOnStartupProfiles([personal.id]), 0);
+        await launcher.killAll();
+        release.complete();
+        expect(await startup, 0);
+        expect(host.calls.where((c) => c.startsWith('launch ')), isEmpty);
+        expect(launcher.busy, isFalse);
+      },
+    );
+
+    test(
+      'смена режима в середине набора прекращает оставшиеся запуски',
+      () async {
+        launcher.beforeLaunch = (_) async => launcher.setParallelLaunch(false);
+        expect(await launcher.openOnStartupProfiles([work.id, personal.id]), 1);
+        expect(host.calls, ['launch default']);
+        expect(launcher.isRunning(work), isTrue);
+      },
+    );
+
+    test('в обычном режиме набор не запускается', () async {
+      launcher.setParallelLaunch(false);
+      expect(await launcher.openOnStartupProfiles([work.id]), 0);
       expect(host.calls, isEmpty);
     });
   });

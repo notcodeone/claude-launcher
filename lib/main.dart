@@ -335,7 +335,11 @@ Future<void> main(List<String> args) async {
   // Перед запуском профиль ждёт проверку страны (LocationGuard.ensureCanLaunch),
   // а она идёт с самого начала запуска. Окно лаунчера остаётся над Claude.
   await window.keepInFrontDuring(
-    launcher.openOnStartup(settings.startupProfileId),
+    settings.parallelLaunch
+        ? launcher
+              .openOnStartupProfiles(settings.startupProfileIds)
+              .then((count) => count > 0)
+        : launcher.openOnStartup(settings.startupProfileId),
   );
 }
 

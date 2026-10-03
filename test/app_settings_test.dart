@@ -85,6 +85,52 @@ void main() {
     expect(reloaded.parallelLaunch, isTrue);
   });
 
+  test(
+    'старый автозапуск переносится в набор, явный пустой набор сохраняется',
+    () async {
+      final file = File('${dir.path}/settings.json')
+        ..writeAsStringSync('{"startupProfileId":"old"}');
+      final settings = AppSettings(file);
+      await settings.load();
+      expect(settings.startupProfileIds, ['old']);
+      await settings.toggleParallelStartupProfile('old');
+      final reloaded = AppSettings(file);
+      await reloaded.load();
+      expect(reloaded.startupProfileId, 'old');
+      expect(reloaded.startupProfileIds, isEmpty);
+    },
+  );
+
+  test(
+    'набор и одиночный автозапуск выбираются независимо; удаление чистит оба',
+    () async {
+      final file = File('${dir.path}/settings.json');
+      final settings = AppSettings(file);
+      await settings.load();
+      await settings.setStartupProfile('a');
+      await settings.toggleParallelStartupProfile('a');
+      await settings.toggleParallelStartupProfile('b');
+      await settings.setParallelLaunch(true);
+      final reloaded = AppSettings(file);
+      await reloaded.load();
+      expect(reloaded.startsProfile('a'), isTrue);
+      expect(reloaded.startsProfile('b'), isTrue);
+      await reloaded.removeStartupProfile('a');
+      expect(reloaded.startupProfileId, isNull);
+      expect(reloaded.startupProfileIds, ['b']);
+      await reloaded.setParallelLaunch(false);
+      expect(reloaded.startsProfile('b'), isFalse);
+    },
+  );
+
+  test('повторяющиеся и нестроковые ID набора не переносятся', () async {
+    final file = File('${dir.path}/settings.json')
+      ..writeAsStringSync('{"startupProfileIds":["a",null,1,"","a","b"]}');
+    final settings = AppSettings(file);
+    await settings.load();
+    expect(settings.startupProfileIds, ['a', 'b']);
+  });
+
   test('повреждённый файл не ломает запуск', () async {
     final file = File('${dir.path}/settings.json')
       ..writeAsStringSync('{не json');

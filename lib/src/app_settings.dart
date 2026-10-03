@@ -62,6 +62,12 @@ class AppSettings extends ChangeNotifier {
   /// Профиль, который открывается при запуске лаунчера; `null` — ничего не открывать.
   String? startupProfileId;
 
+  /// Independent startup selection for the parallel experiment.
+  List<String> startupProfileIds = [];
+
+  bool startsProfile(String id) =>
+      parallelLaunch ? startupProfileIds.contains(id) : startupProfileId == id;
+
   /// Локальный порт и ключ приёма событий Claude Code. Ключ не даёт чужим
   /// процессам подсовывать лаунчеру события.
   int eventsPort = 47813;
@@ -80,6 +86,15 @@ class AppSettings extends ChangeNotifier {
         claudeCodeEvents = json['claudeCodeEvents'] as bool? ?? false;
         launcherNotifications = json['launcherNotifications'] as bool? ?? true;
         startupProfileId = json['startupProfileId'] as String?;
+        final startup = json['startupProfileIds'];
+        startupProfileIds = startup is List
+            ? startup
+                  .whereType<String>()
+                  .where((id) => id.isNotEmpty)
+                  .toSet()
+                  .take(256)
+                  .toList()
+            : [?startupProfileId];
         locationCheck = json['locationCheck'] as bool? ?? true;
         experimentsAccepted = json['experimentsAccepted'] as bool? ?? false;
         killSwitch = json['killSwitch'] as bool? ?? false;
@@ -115,6 +130,19 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setStartupProfile(String? id) =>
       _update(() => startupProfileId = id);
+
+  Future<void> toggleParallelStartupProfile(String id) => _update(() {
+    startupProfileIds = startupProfileIds.contains(id)
+        ? startupProfileIds.where((value) => value != id).toList()
+        : [...startupProfileIds, id];
+  });
+
+  Future<void> removeStartupProfile(String id) => _update(() {
+    startupProfileIds = startupProfileIds
+        .where((value) => value != id)
+        .toList();
+    if (startupProfileId == id) startupProfileId = null;
+  });
 
   Future<void> setLocationCheck(bool enabled) =>
       _update(() => locationCheck = enabled);
@@ -173,6 +201,7 @@ class AppSettings extends ChangeNotifier {
         'claudeCodeEvents': claudeCodeEvents,
         'launcherNotifications': launcherNotifications,
         'startupProfileId': startupProfileId,
+        'startupProfileIds': startupProfileIds,
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
         'parallelLaunch': parallelLaunch,
