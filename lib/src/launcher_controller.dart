@@ -318,7 +318,7 @@ class LauncherController extends ChangeNotifier {
     _operating = true;
     lastError = null;
     try {
-      await refresh();
+      await refresh(strict: true);
       // Системный обработчик URL пока не адресует конкретный экземпляр.
       if (instances.length > 1 && !host.supportsTargetedLinks) {
         throw StateError(
@@ -326,11 +326,16 @@ class LauncherController extends ChangeNotifier {
           'Покажите окно нужного профиля и выберите сессию в Claude.',
         );
       }
-      final instance = instances
+      final targets = instances
           .where((instance) => profileOf(instance)?.id == profile.id)
-          .firstOrNull;
-      if (instance == null) return;
-      await host.openLink(instance, link);
+          .toList();
+      if (targets.isEmpty) return;
+      if (targets.length != 1) {
+        throw StateError(
+          'Для профиля обнаружено несколько процессов Claude. Переход неоднозначен.',
+        );
+      }
+      await host.openLink(targets.single, link);
     } catch (error) {
       lastError = error is StateError
           ? error.message

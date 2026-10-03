@@ -316,6 +316,34 @@ void main() {
     });
 
     test(
+      'ошибка свежего сканирования не позволяет отправить по старому списку',
+      () async {
+        host.targetedLinks = true;
+        host.start(launcher.dataDirOf(personal));
+        await launcher.refresh();
+        host.scanFails = true;
+        await launcher.openLink(
+          personal,
+          Uri.parse('claude://claude.ai/epitaxy/test'),
+        );
+        expect(host.calls, isEmpty);
+        expect(launcher.lastError, contains('scan failed'));
+      },
+    );
+
+    test('два процесса одного профиля не выбираются произвольно', () async {
+      host.targetedLinks = true;
+      host.start(launcher.dataDirOf(personal));
+      host.start(launcher.dataDirOf(personal));
+      await launcher.openLink(
+        personal,
+        Uri.parse('claude://claude.ai/epitaxy/test'),
+      );
+      expect(host.calls, isEmpty);
+      expect(launcher.lastError, contains('неоднозначен'));
+    });
+
+    test(
       'не отправляет неоднозначную ссылку; один экземпляр получает её',
       () async {
         final first = host.start(null);
