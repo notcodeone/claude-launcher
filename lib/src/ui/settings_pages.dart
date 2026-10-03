@@ -401,6 +401,48 @@ class SettingsSectionPage extends StatelessWidget {
     return [
       _Card(
         rows: [
+          // Хранится как `parallelLaunch` — бывший эксперимент «Параллельные
+          // профили».
+          SettingSwitchRow(
+            title: 'Закрывать другие профили при открытии',
+            description:
+                'Открыт только один профиль, как раньше. Выключите — профили '
+                'будут работать одновременно. Cowork на одном аккаунте '
+                'работает через профиль, открытый первым.',
+            value: !settings.parallelLaunch,
+            onChanged: (closeOthers) =>
+                settings.setParallelLaunch(!closeOthers),
+          ),
+          if (Platform.isMacOS || Platform.isWindows)
+            SettingSwitchRow(
+              title: 'Открывать ссылки Claude через лаунчер',
+              description:
+                  'Ссылку входа из письма лаунчер отдаёт профилю, который '
+                  'ждёт входа, а ссылку на сессию — профилю, где она лежит. '
+                  'Выключите — ссылки снова открывает Claude, и при '
+                  'нескольких открытых профилях система выберет любой.',
+              value: settings.claudeLinks,
+              onChanged: settings.setClaudeLinks,
+            ),
+          if (settings.parallelLaunch)
+            AppButton(
+              label: 'Отчёт о параллельной работе',
+              kind: AppButtonKind.secondary,
+              onPressed: () => showParallelReport(
+                context,
+                () => parallelReport(
+                  version: c.version,
+                  launcher: c.launcher,
+                  settings: settings,
+                  sessions: c.claudeCode.sessions.all,
+                  killSwitch: c.killSwitch,
+                ),
+              ),
+            ),
+        ],
+      ),
+      _Card(
+        rows: [
           SettingSwitchRow(
             title: 'Проверять страну перед запуском',
             description:
@@ -565,38 +607,6 @@ class SettingsSectionPage extends StatelessWidget {
           '— свой переключатель.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-      ),
-      _Card(
-        rows: [
-          SettingSwitchRow(
-            title: 'Параллельные профили',
-            description:
-                'Открывает несколько профилей, сохраняя уже запущенные. '
-                'Для входа оставьте открытым только нужный профиль. '
-                '${deps.launcher.host.supportsTargetedLinks ? 'Ссылки из лаунчера направляются выбранному процессу. ' : 'Переходы к сессиям при нескольких профилях пока отключены. '}'
-                'Сессии Code определяются по записям Claude; при неизвестном '
-                'владельце событие не появляется на карточке. '
-                'Одновременный Cowork ещё не проверен. '
-                'После выключения следующий выбор профиля снова закроет остальные.',
-            value: settings.parallelLaunch,
-            onChanged: settings.setParallelLaunch,
-          ),
-          if (settings.parallelLaunch)
-            AppButton(
-              label: 'Отчёт параллельных профилей',
-              kind: AppButtonKind.secondary,
-              onPressed: () => showParallelReport(
-                context,
-                () => parallelReport(
-                  version: deps.version,
-                  launcher: deps.launcher,
-                  settings: settings,
-                  sessions: deps.claudeCode.sessions.all,
-                  killSwitch: deps.killSwitch,
-                ),
-              ),
-            ),
-        ],
       ),
       _Card(
         rows: [

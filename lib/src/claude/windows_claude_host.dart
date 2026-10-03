@@ -478,8 +478,10 @@ class WindowsClaudeHost extends ClaudeHost {
     Map<String, String> environment = const {},
   }) => _start(dataDir, environment: environment);
 
-  /// Стандартный профиль — из пакета MSIX, как из «Пуска»; ссылку ему передаёт
-  /// протокол `claude:`, тоже от имени пакета. Остальные — напрямую с папкой.
+  /// Стандартный профиль — из пакета MSIX, как из «Пуска»; ссылку ему — тоже
+  /// через пакет, аргументом. Не через протокол `claude:`: его обработчиком
+  /// может быть сам лаунчер, и ссылка вернулась бы к нему. Остальные —
+  /// напрямую с папкой.
   Future<void> _start(
     String? dataDir, {
     Uri? link,
@@ -490,8 +492,12 @@ class WindowsClaudeHost extends ClaudeHost {
 
     final aumid = installation.aumid;
     if (dataDir == null && aumid != null) {
+      if (link != null) {
+        _activatePackaged(aumid, ['$link']);
+        return;
+      }
       await Process.start('explorer.exe', [
-        link?.toString() ?? 'shell:AppsFolder\\$aumid',
+        'shell:AppsFolder\\$aumid',
       ], mode: ProcessStartMode.detached);
       return;
     }
@@ -569,8 +575,13 @@ class WindowsClaudeHost extends ClaudeHost {
     WindowsWindowActivator(NativeWindowsWindowApi()).activate(instance.pid);
   }
 
-  /// Доставка через повторный запуск и single-instance transport Claude.
-  /// При нескольких экземплярах контроллер блокирует этот непроверенный путь.
+  /// Повторный запуск Claude с папкой профиля и ссылкой: Claude держит
+  /// блокировку «один экземпляр на папку» — новый процесс передаёт ссылку
+  /// экземпляру этой папки и завершается (тот же путь, что «Показать окно» в
+  /// обычном режиме). Поэтому получатель однозначен и при нескольких открытых.
+  @override
+  bool get supportsTargetedLinks => true;
+
   @override
   Future<void> openLink(ClaudeInstance instance, Uri link) async {
     AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY

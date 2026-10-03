@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
 import '../claude/claude_updates.dart';
+import '../integrations/claude_links.dart';
 import '../integrations/session_sync_service.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
@@ -133,6 +134,7 @@ class HomePage extends StatelessWidget {
     this.claudeUpdates,
     this.coworkFirewall,
     this.sessionSync,
+    this.links,
     this.version = '',
   });
 
@@ -150,9 +152,13 @@ class HomePage extends StatelessWidget {
   /// Обновление Claude лаунчером, пока включён Kill Switch; null — без него.
   final ClaudeUpdates? claudeUpdates;
 
-  /// Windows: правило брандмауэра для службы Cowork.
   final SessionSyncService? sessionSync;
+
+  /// Windows: правило брандмауэра для службы Cowork.
   final CoworkFirewall? coworkFirewall;
+
+  /// Ссылки `claude://` — нужному профилю; null — не эта ОС или тесты.
+  final ClaudeLinkHandler? links;
 
   /// Версия приложения — в подвале.
   final String version;
@@ -304,6 +310,7 @@ class HomePage extends StatelessWidget {
         settings,
         killSwitch,
         claudeUpdates,
+        links,
       ]),
       builder: (context, _) => Stack(
         children: [
@@ -546,14 +553,37 @@ class HomePage extends StatelessWidget {
           title: launcher.maintenanceLabel!,
           detail: 'Операции с профилями будут доступны после завершения.',
         ),
-      if (settings.parallelLaunch)
-        const NoticeRow(
-          icon: AppIcons.experiments,
+      // Windows: в «Приложениях по умолчанию» для `claude` выбран Claude —
+      // программа это не меняет, выбрать лаунчер может только пользователь.
+      if (settings.claudeLinks && (links?.blocked ?? false))
+        NoticeRow(
+          icon: AppIcons.info,
           tone: NoticeTone.neutral,
-          title: 'Параллельные профили',
+          title: 'Ссылки Claude открывает не лаунчер',
           detail:
-              'Для входа оставьте один профиль. Сессии Code определяются '
-              'по данным Claude. Одновременный Cowork ещё не проверен.',
+              'Выберите ClaudeLauncher для «claude» в приложениях по умолчанию',
+          actions: [
+            AppButton(
+              label: 'Выбрать',
+              kind: AppButtonKind.secondary,
+              onPressed: () => launchUrl(
+                Uri.parse(
+                  'ms-settings:defaultapps?registeredAppUser=ClaudeLauncher',
+                ),
+              ),
+            ),
+          ],
+        ),
+      // Ссылку входа из письма система отдаёт любому экземпляру Claude, если
+      // лаунчер не принимает `claude://` сам.
+      if (settings.parallelLaunch &&
+          (links == null || !settings.claudeLinks || links!.blocked) &&
+          launcher.runningProfiles.length > 1)
+        const NoticeRow(
+          icon: AppIcons.info,
+          tone: NoticeTone.neutral,
+          title: 'Открыто несколько профилей',
+          detail: 'Входите в аккаунт, когда открыт только нужный профиль',
         ),
       // Ход проверки и переключения — в шапке (headerStatus); строка — только
       // когда Claude не закрылся сам и нужен выбор пользователя.

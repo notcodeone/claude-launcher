@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -84,6 +85,20 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == ReopenMessage()) {
     if (native_channel_) native_channel_->InvokeMethod("reopen", nullptr);
     return 0;
+  }
+  // Ссылка `claude://` от второго запуска (Windows открыл её лаунчером как
+  // обработчиком) — Dart отдаст её нужному профилю.
+  if (message == WM_COPYDATA) {
+    const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+    if (data != nullptr && data->dwData == kOpenLinkData &&
+        data->lpData != nullptr && native_channel_) {
+      const std::wstring link(static_cast<const wchar_t*>(data->lpData),
+                              data->cbData / sizeof(wchar_t));
+      native_channel_->InvokeMethod(
+          "openUrl",
+          std::make_unique<flutter::EncodableValue>(Utf8FromUtf16(link.c_str())));
+      return TRUE;
+    }
   }
   if (message == QuitMessage()) {
     if (native_channel_) native_channel_->InvokeMethod("quit", nullptr);

@@ -104,15 +104,8 @@ void main() {
     expect(find.text('Лимиты профиля'), findsOneWidget);
     expect(settings.usageLimits, isFalse);
     expect(find.text('Kill Switch'), findsOneWidget);
-    expect(settings.parallelLaunch, isFalse);
-    await tester.tap(
-      find.descendant(
-        of: find.widgetWithText(SettingSwitchRow, 'Параллельные профили'),
-        matching: find.byType(Switch),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(settings.parallelLaunch, isTrue);
+    // Параллельная работа — уже не эксперимент, а «Основные» (1.7.0).
+    expect(find.text('Закрывать другие профили при открытии'), findsNothing);
     final usageSwitch = find.descendant(
       of: find.widgetWithText(SettingSwitchRow, 'Лимиты профиля'),
       matching: find.byType(Switch),
@@ -137,6 +130,20 @@ void main() {
     await settle(tester);
     await tester.tap(find.text('Основные'));
     await tester.pumpAndSettle();
+    // Включено = прежний режим «один профиль»; выключили — профили параллельно.
+    expect(settings.parallelLaunch, isFalse);
+    final closeOthers = find.descendant(
+      of: find.widgetWithText(
+        SettingSwitchRow,
+        'Закрывать другие профили при открытии',
+      ),
+      matching: find.byType(Switch),
+    );
+    await tester.tap(closeOthers);
+    await tester.pumpAndSettle();
+    expect(settings.parallelLaunch, isTrue);
+    expect(find.text('Отчёт о параллельной работе'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Тёмная'), 200);
     expect(find.text('Тема окна'), findsOneWidget);
     await tester.tap(find.text('Тёмная'));
     await tester.pumpAndSettle();

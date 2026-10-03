@@ -38,6 +38,16 @@ fi
 rm -rf "$app"
 ditto "$fresh" "$app"
 xattr -cr "$app" 2>/dev/null || true
+# Собранная копия — тоже приложение: Spotlight и Launchpad показали бы её рядом с
+# установленным (так у автора набралось девять «ClaudeLauncher»). Убираем её из
+# базы приложений и в папку *.noindex — её Spotlight не просматривает. Заодно
+# следующая установка без новой сборки не поставит старую версию.
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$lsregister" -u "$fresh" 2>/dev/null || true
+installed="build/installed.noindex"
+rm -rf "$installed/ClaudeLauncher.app"
+mkdir -p "$installed"
+mv "$fresh" "$installed/"
 # -n: новый экземпляр. Без него macOS, увидев запущенный фоновый процесс
 # лаунчера (затвор Kill Switch), покажет его, а не запустит новую версию.
 # Без прокси из окружения: в терминале Claude Code это затвор Kill Switch, и

@@ -18,6 +18,9 @@ import 'src/integrations/code_session_registry.dart';
 import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/integrations/profile_claude_code.dart';
+import 'src/claude/link_handler_platform.dart';
+import 'src/integrations/claude_links.dart';
+import 'src/integrations/session_overview.dart';
 import 'src/integrations/session_sync_service.dart';
 import 'src/launcher_controller.dart';
 import 'src/claude/claude_icon_keeper.dart';
@@ -30,6 +33,7 @@ import 'src/location/windows_network_watch.dart';
 import 'src/notifications.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
+import 'src/ui/profile_dialog.dart' show showLinkProfileDialog;
 import 'src/ui/announcements.dart';
 import 'src/ui/home_page.dart';
 import 'src/ui/settings_dialog.dart';
@@ -156,6 +160,33 @@ Future<void> main(List<String> args) async {
     settings: settings,
     supportDir: supportDir,
   )..start();
+  // Ссылки `claude://` — нужному профилю.
+  final linkPlatform = LinkHandlerPlatform.forCurrentPlatform();
+  final links = linkPlatform != null
+      ? ClaudeLinkHandler(
+          launcher: launcher,
+          settings: settings,
+          platform: linkPlatform,
+          sessionOwner: (id) async {
+            for (final entry in await SessionOverview.read(launcher)) {
+              if (entry.sessions.any((card) => card.id == id)) {
+                return entry.profile;
+              }
+            }
+            return null;
+          },
+          choose: (candidates, kind) async {
+            await window.show();
+            final context = _navigatorKey.currentContext;
+            if (context == null || !context.mounted) return null;
+            return showLinkProfileDialog(
+              context,
+              candidates: candidates,
+              kind: kind,
+            );
+          },
+        )
+      : null;
 
   // Окно создаётся скрытым: приложение живёт в трее, окно — только для настроек.
   await windowManager.waitUntilReadyToShow(
@@ -209,6 +240,9 @@ Future<void> main(List<String> args) async {
     } catch (error) {
       debugPrint('Kill Switch: не удалось передать затвор охраннику: $error');
     }
+    // Роль обработчика `claude://` — обратно Claude: без лаунчера ссылки
+    // запускали бы его, а не Claude. При обновлении новая версия заберёт её сама.
+    if (!updating) await links?.release();
     await tray.dispose();
     exit(0);
   }
@@ -255,6 +289,10 @@ Future<void> main(List<String> args) async {
     if (call.method == 'quit') await quit();
     if (call.method == 'endSession') await endSession();
     if (call.method == 'networkChanged') await killSwitch.networkChanged();
+    if (call.method == 'linksArrived') await links?.drain();
+    if (call.method == 'openUrl' && call.arguments is String) {
+      await links?.handleString(call.arguments as String);
+    }
   });
   // Окно открыли — заодно проверим обновления, если давно не проверяли.
   window.visible.addListener(() {
@@ -281,6 +319,7 @@ Future<void> main(List<String> args) async {
       claudeUpdates: claudeUpdates,
       coworkFirewall: coworkFirewall,
       sessionSync: sessionSync,
+      links: links,
       version: version,
     ),
   );
@@ -334,6 +373,9 @@ Future<void> main(List<String> args) async {
   await claudeCode.start();
   // Лаунчер запустили нажатием на его уведомление — открыть ту сессию.
   await claudeCode.openLaunchNotification();
+  // До профиля по умолчанию: если лаунчер запустила ссылка, её профиль
+  // откроется первым, а профиль по умолчанию тогда не откроется.
+  await links?.start(initial: _openUrlArguments(args));
 
   // Первый запуск: окно приветствия с настройками.
   if (!settings.onboardingDone) {
@@ -707,6 +749,14 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
 Future<void> _cleanup(Directory supportDir) async {
   final settings = AppSettings(File(p.join(supportDir.path, 'settings.json')));
   await settings.load();
+  // Ссылки `claude://` — снова Claude.
+  try {
+    await LinkHandlerPlatform.forCurrentPlatform()?.restore(
+      settings.previousLinkHandler,
+    );
+  } catch (error) {
+    debugPrint('Не удалось вернуть обработчик claude://: $error');
+  }
   final host = ClaudeHost.forCurrentPlatform();
   await ClaudeHost.removeQuietly(
     p.join(supportDir.path, 'code-session-registry.json'),
@@ -794,6 +844,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     required this.claudeUpdates,
     this.coworkFirewall,
     this.sessionSync,
+    this.links,
     required this.version,
   });
 
@@ -806,6 +857,7 @@ class ClaudeLauncherApp extends StatelessWidget {
   final ClaudeUpdates claudeUpdates;
   final CoworkFirewall? coworkFirewall;
   final SessionSyncService? sessionSync;
+  final ClaudeLinkHandler? links;
   final String version;
 
   @override
@@ -829,9 +881,17 @@ class ClaudeLauncherApp extends StatelessWidget {
           claudeUpdates: claudeUpdates,
           coworkFirewall: coworkFirewall,
           sessionSync: sessionSync,
+          links: links,
           version: version,
         ),
       ),
     );
   }
 }
+
+/// Ссылки из `--open-url <ссылка>`: так Windows запускает лаунчер как
+/// обработчик `claude://`.
+List<String> _openUrlArguments(List<String> args) => [
+  for (var i = 0; i + 1 < args.length; i++)
+    if (args[i] == '--open-url') args[i + 1],
+];

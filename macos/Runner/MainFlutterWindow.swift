@@ -59,6 +59,25 @@ class MainFlutterWindow: NSWindow {
           CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
         }.min())
         return
+      // Обработчик ссылок `claude://` в системе: чей он сейчас, сменить, наш id.
+      case "linkHandler":
+        result(LSCopyDefaultHandlerForURLScheme("claude" as CFString)?.takeRetainedValue() as String?)
+        return
+      case "setLinkHandler":
+        guard let bundleId = call.arguments as? String else {
+          result(false)
+          return
+        }
+        result(LSSetDefaultHandlerForURLScheme("claude" as CFString, bundleId as CFString) == noErr)
+        return
+      case "ownBundleId":
+        result(Bundle.main.bundleIdentifier)
+        return
+      case "takeLinks":
+        let delegate = NSApp.delegate as? AppDelegate
+        result(delegate?.pendingLinks ?? [])
+        delegate?.pendingLinks = []
+        return
       // Окно лаунчера — вперёд. Из фона система может не дать приложению стать
       // активным, а обычный orderFront тогда кладёт окно под активное приложение.
       case "bringToFront":

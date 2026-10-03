@@ -30,6 +30,16 @@ class AppDelegate: FlutterAppDelegate {
     return .terminateLater
   }
 
+  /// Ссылки `claude://`, которые macOS отдала лаунчеру как обработчику. Копятся,
+  /// пока Dart их не заберёт (`takeLinks`): при запуске ссылкой событие приходит
+  /// раньше, чем Dart готов.
+  var pendingLinks: [String] = []
+
+  override func application(_ application: NSApplication, open urls: [URL]) {
+    pendingLinks += urls.filter { $0.scheme == "claude" }.map(\.absoluteString)
+    (mainFlutterWindow as? MainFlutterWindow)?.nativeChannel?.invokeMethod("linksArrived", arguments: nil)
+  }
+
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }

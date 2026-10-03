@@ -45,6 +45,9 @@ flutter test integration_test/macos_host_test.dart -d macos
 Claude, и в нём `HTTPS_PROXY` указывает на затвор Kill Switch: всё, что запускаешь
 оттуда, наследует его (скрипт запускает лаунчер через `env -u HTTPS_PROXY …`). Если
 Claude остался без сети — смотри `~/Library/Application Support/com.notcodeone.claudeLauncher/kill-switch.log`.
+После установки скрипт переносит собранную копию в `build/installed.noindex/`: иначе
+Spotlight и Launchpad показывают каждую сборку как ещё одно приложение (2026-10-03 у
+автора их было девять). Не копируй `.app` никуда, кроме как этим скриптом.
 
 Запускать собранный из исходников лаунчер (`flutter run -d macos`) — только если автор
 попросил: он работает с настоящими профилями и может их переключать. Ничего не

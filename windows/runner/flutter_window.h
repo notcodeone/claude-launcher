@@ -46,6 +46,10 @@ inline UINT ReopenMessage() {
   return message;
 }
 
+// Метка WM_COPYDATA со ссылкой `claude://`: её передаёт работающему лаунчеру
+// второй запуск `claude_launcher.exe --open-url <ссылка>` (см. main.cpp).
+constexpr ULONG_PTR kOpenLinkData = 0x434C4C4B;  // 'CLLK'
+
 // Сообщение «выйти, как из меню» — его шлёт `claude_launcher.exe --quit`
 // (команда установки, см. tool/install.ps1).
 inline UINT QuitMessage() {

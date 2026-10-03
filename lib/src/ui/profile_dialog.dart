@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../integrations/claude_links.dart';
 import '../integrations/profile_claude_code.dart';
+import '../profile.dart';
 
 import 'theme.dart';
 import 'widgets.dart';
@@ -261,3 +263,64 @@ class ChoiceCircle extends StatelessWidget {
     );
   }
 }
+
+/// Ссылку `claude://` нельзя однозначно отдать одному профилю (например, вход
+/// при нескольких открытых) — спрашиваем, какому. `null` — отменили.
+Future<Profile?> showLinkProfileDialog(
+  BuildContext context, {
+  required List<Profile> candidates,
+  required ClaudeLinkKind kind,
+}) => showDialog<Profile>(
+  context: context,
+  builder: (context) {
+    final theme = Theme.of(context);
+    return AppDialogFrame(
+      children: [
+        Text(
+          kind == ClaudeLinkKind.login
+              ? 'В какой профиль войти?'
+              : 'В каком профиле открыть ссылку?',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          kind == ClaudeLinkKind.login
+              ? 'Пришла ссылка входа в Claude, а открыто несколько профилей. '
+                    'Выберите тот, в который входите.'
+              : 'Пришла ссылка Claude. Выберите профиль, который её откроет.',
+          style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+        ),
+        const SizedBox(height: 14),
+        for (final profile in candidates)
+          HoverSurface(
+            onTap: () => Navigator.of(context).pop(profile),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+              child: Row(
+                children: [
+                  MarkerDot(marker: profile.marker, size: 12),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      profile.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 14),
+        AppButton(
+          label: 'Отмена',
+          kind: AppButtonKind.secondary,
+          expand: true,
+          large: true,
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+  },
+);

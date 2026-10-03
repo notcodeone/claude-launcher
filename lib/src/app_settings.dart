@@ -59,6 +59,13 @@ class AppSettings extends ChangeNotifier {
   /// Тестовый режим: запуск профиля сохраняет остальные экземпляры.
   bool parallelLaunch = false;
 
+  /// Лаунчер — обработчик ссылок `claude://` и отдаёт их нужному профилю (см.
+  /// `ClaudeLinkHandler`).
+  bool claudeLinks = true;
+
+  /// Чей был обработчик `claude://` до лаунчера — вернуть при выключении и выходе.
+  String? previousLinkHandler;
+
   /// Синхронизация сессий Code между профилями [syncProfiles] (см.
   /// `SessionSync`).
   bool sessionSync = false;
@@ -116,6 +123,8 @@ class AppSettings extends ChangeNotifier {
             json['experimentalFeatures'] as bool? ??
             false;
         parallelLaunch = json['parallelLaunch'] as bool? ?? false;
+        claudeLinks = json['claudeLinks'] as bool? ?? true;
+        previousLinkHandler = json['previousLinkHandler'] as String?;
         sessionSync = json['sessionSync'] as bool? ?? false;
         syncProfiles = [
           ...?(json['syncProfiles'] as List?)?.whereType<String>(),
@@ -182,6 +191,12 @@ class AppSettings extends ChangeNotifier {
   Future<void> setUsageLimits(bool enabled) =>
       _update(() => usageLimits = enabled);
 
+  Future<void> setClaudeLinks(bool enabled) =>
+      _update(() => claudeLinks = enabled);
+
+  Future<void> setPreviousLinkHandler(String? bundleId) =>
+      _update(() => previousLinkHandler = bundleId);
+
   Future<void> setSessionSync(bool enabled) =>
       _update(() => sessionSync = enabled);
 
@@ -236,6 +251,8 @@ class AppSettings extends ChangeNotifier {
         'locationCheck': locationCheck,
         'usageLimits': usageLimits,
         'parallelLaunch': parallelLaunch,
+        'claudeLinks': claudeLinks,
+        'previousLinkHandler': previousLinkHandler,
         'sessionSync': sessionSync,
         'syncProfiles': syncProfiles,
         'syncProjects': syncProjects,
