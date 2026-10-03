@@ -89,7 +89,10 @@ Future<({String country, String source})> lookupCountry({
 }) async {
   final client = HttpClient()
     ..connectionTimeout = timeout
-    ..userAgent = 'ClaudeLauncher';
+    ..userAgent = 'ClaudeLauncher'
+    // Всегда напрямую: страна — та, через которую компьютер выходит в сеть, а
+    // прокси из окружения может оказаться закрытым затвором Kill Switch.
+    ..findProxy = (_) => 'DIRECT';
   final result = Completer<({String country, String source})>();
   final errors = List<String?>.filled(sources.length, null);
   final asked = <Future<void>>[];

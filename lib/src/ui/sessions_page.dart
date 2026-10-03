@@ -7,6 +7,7 @@ import '../integrations/claude_code_sessions.dart';
 import '../integrations/session_overview.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
+import 'feature_menu.dart';
 import 'settings_pages.dart' show AppearIn;
 import 'theme.dart';
 import 'widgets.dart';
@@ -98,11 +99,11 @@ class _SessionsPageState extends State<SessionsPage> {
     return ListView(
       padding: widget.padding,
       children: [
-        Text('Сессии', style: theme.textTheme.headlineMedium),
-        const SizedBox(height: 8),
-        Text(
-          'Сессии вкладки Code во всех профилях — по проектам.',
-          style: theme.textTheme.bodySmall?.copyWith(fontSize: 13.5),
+        // Как в разделах «Настроек»: значок и название перелетели из строки
+        // на странице «Возможности».
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FeatureHeading(tile: featureTile('sessions')),
         ),
         for (final notice in notices) ...[const SizedBox(height: 12), notice],
         if (profiles != null) ...[

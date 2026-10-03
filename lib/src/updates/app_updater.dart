@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../http_proxy.dart';
 import '../app_settings.dart';
 
 /// Выпуск на GitHub.
@@ -244,7 +245,8 @@ class AppUpdater extends ChangeNotifier {
 
   Future<AppRelease> _latest() async {
     final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 10);
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..findProxy = launcherProxy;
     try {
       final request = await client.getUrl(
         Uri.https('api.github.com', '/repos/$repo/releases/latest'),
@@ -356,7 +358,8 @@ class AppUpdater extends ChangeNotifier {
     bool reportProgress = true,
   }) async {
     final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15);
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..findProxy = launcherProxy;
     try {
       final request = await client.getUrl(url);
       request.headers.set(
@@ -454,7 +457,7 @@ while kill -0 "$1" 2>/dev/null; do sleep 0.3; done
 rm -rf "$2" && mv "$3" "$2"
 xattr -cr "$2" 2>/dev/null
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$2" 2>/dev/null
-open "$2"
+open -n "$2"
 rm -rf "$4"
 ''';
     await Process.start('/bin/sh', [

@@ -35,17 +35,26 @@ fi
 hdiutil attach "$work/ClaudeLauncher.dmg" -nobrowse -readonly -noautoopen \
   -mountpoint "$work/mnt" -quiet
 
+# Главный процесс лаунчера — ровно путь, без аргументов: у фоновых есть флаги
+# (--kill-switch-guard), а у наблюдателя /bin/sh путь к лаунчеру — в конце
+# командной строки.
+# Без -q: grep -q выходит на первом совпадении и обрывает ps, а с pipefail
+# такой конвейер считается неудачным — лаунчер «не найден».
+main_running() {
+  ps -axo args= | grep -xF "$app/Contents/MacOS/ClaudeLauncher" >/dev/null
+}
+
 # Запущенный лаунчер просим выйти, как из его меню.
-if pgrep -xq ClaudeLauncher; then
+if main_running; then
   echo "Закрываю запущенный ClaudeLauncher…"
   osascript -e 'quit app "ClaudeLauncher"' >/dev/null 2>&1 || true
   # С Kill Switch выход дольше: лаунчер передаёт затвор фоновому процессу.
   # Подменять приложение раньше нельзя — Claude останется без сети.
   for _ in $(seq 1 60); do
-    pgrep -f '/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher$' >/dev/null || break
+    main_running || break
     sleep 0.5
   done
-  if pgrep -f '/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher$' >/dev/null; then
+  if main_running; then
     echo "ClaudeLauncher не вышел за 30 секунд. Выйдите из него через меню и повторите." >&2
     exit 1
   fi
@@ -56,5 +65,10 @@ ditto "$work/mnt/ClaudeLauncher.app" "$app"
 # На случай, если пометка всё же есть (например, DMG скачан браузером).
 xattr -cr "$app" 2>/dev/null || true
 
-open "$app"
+# -n: новый экземпляр. Без него macOS, увидев запущенный фоновый процесс
+# лаунчера (затвор Kill Switch), покажет его, а не запустит новую версию.
+# Без прокси из окружения: в терминале Claude Code это затвор Kill Switch, и
+# лаунчер унаследовал бы его.
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy -u ALL_PROXY \
+  -u all_proxy open -n "$app"
 echo "Готово: $(defaults read "$app/Contents/Info" CFBundleShortVersionString) в «Программах»."

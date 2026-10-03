@@ -228,56 +228,105 @@ class _SectionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return HoverSurface(
+    final theme = Theme.of(context);
+    return NavRow(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SectionHeading(section: section),
-                  Padding(
-                    // Под названием, по краю текста, а не значка.
-                    padding: const EdgeInsets.only(left: 30, top: 2),
-                    child: Text(
-                      summary,
-                      // «Опасная зона!» — красным.
-                      style: section == SettingsSection.experiments
-                          ? Theme.of(
-                              context,
-                            ).textTheme.bodySmall?.copyWith(color: p.danger)
-                          : Theme.of(context).textTheme.bodySmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(AppIcons.chevron, size: 18, color: p.muted),
-          ],
-        ),
+      leading: SectionIcon(section: section),
+      title: SectionTitle(section: section),
+      subtitle: Text(
+        summary,
+        // «Опасная зона!» — красным.
+        style: section == SettingsSection.experiments
+            ? theme.textTheme.bodySmall?.copyWith(color: p.danger)
+            : theme.textTheme.bodySmall,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
+      trailing: Icon(AppIcons.chevron, size: 18, color: p.muted),
     );
   }
 }
 
-/// Значок и название раздела. [t] — 0 в строке списка, 1 в заголовке
-/// страницы; в полёте Hero — между ними.
+/// Значок и название раздела в заголовке его страницы. В строке списка они
+/// стоят порознь ([SectionIcon] слева по центру строки, [SectionTitle] над
+/// пояснением) и при переходе перелетают сюда каждый своим Hero.
 class SectionHeading extends StatelessWidget {
-  const SectionHeading({super.key, required this.section, this.t = 0});
+  const SectionHeading({super.key, required this.section});
+
+  final SettingsSection section;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      SectionIcon(section: section, t: 1),
+      const SizedBox(width: 12),
+      Flexible(child: SectionTitle(section: section, t: 1)),
+    ],
+  );
+}
+
+/// Значок раздела: 0 — в строке списка, 1 — в заголовке страницы.
+class SectionIcon extends StatelessWidget {
+  const SectionIcon({super.key, required this.section, this.t = 0});
 
   final SettingsSection section;
   final double t;
 
   @override
+  Widget build(BuildContext context) => LerpHero(
+    tag: 'settings-icon-${section.name}',
+    t: t,
+    builder: (t, color) =>
+        Icon(section.icon, size: NavRow.iconSize + 2 * t, color: color),
+  );
+}
+
+/// Название раздела: 0 — в строке списка, 1 — в заголовке страницы.
+class SectionTitle extends StatelessWidget {
+  const SectionTitle({super.key, required this.section, this.t = 0});
+
+  final SettingsSection section;
+  final double t;
+
+  @override
+  Widget build(BuildContext context) => LerpHero(
+    tag: 'settings-title-${section.name}',
+    t: t,
+    builder: (t, color) => Text(
+      section.title,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.fade,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+        fontSize: 15 + 7 * t,
+        fontWeight: FontWeight.lerp(FontWeight.w600, FontWeight.w700, t),
+        letterSpacing: -0.3 * t,
+        color: color,
+      ),
+    ),
+  );
+}
+
+/// Hero, который в полёте плавно меняет вид от строки списка (0) к заголовку
+/// страницы (1) — размер шрифта и значка. Общий для «Настроек» и «Возможностей».
+class LerpHero extends StatelessWidget {
+  const LerpHero({
+    super.key,
+    required this.tag,
+    required this.t,
+    required this.builder,
+  });
+
+  final String tag;
+  final double t;
+  final Widget Function(double t, Color color) builder;
+
+  @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Hero(
-      tag: 'settings-${section.name}',
+      tag: tag,
       flightShuttleBuilder: (_, animation, direction, _, _) {
         final curved = CurvedAnimation(
           parent: animation,
@@ -291,56 +340,17 @@ class SectionHeading extends StatelessWidget {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: _HeadingContent(
-                section: section,
-                t: curved.value,
-                color: p.text,
-              ),
+              child: builder(curved.value, p.text),
             ),
           ),
         );
       },
       child: Material(
         type: MaterialType.transparency,
-        child: _HeadingContent(section: section, t: t, color: p.text),
+        child: builder(t, p.text),
       ),
     );
   }
-}
-
-class _HeadingContent extends StatelessWidget {
-  const _HeadingContent({
-    required this.section,
-    required this.t,
-    required this.color,
-  });
-
-  final SettingsSection section;
-  final double t;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(section.icon, size: 20 + 4 * t, color: color),
-      SizedBox(width: 10 + 2 * t),
-      Flexible(
-        child: Text(
-          section.title,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.fade,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontSize: 15 + 7 * t,
-            fontWeight: FontWeight.lerp(FontWeight.w600, FontWeight.w700, t),
-            letterSpacing: -0.3 * t,
-            color: color,
-          ),
-        ),
-      ),
-    ],
-  );
 }
 
 /// Страница раздела: заголовок и карточки с настройками.
@@ -371,7 +381,7 @@ class SettingsSectionPage extends StatelessWidget {
         children: [
           Align(
             alignment: Alignment.centerLeft,
-            child: SectionHeading(section: section, t: 1),
+            child: SectionHeading(section: section),
           ),
           for (final (index, card) in cards.indexed)
             Padding(

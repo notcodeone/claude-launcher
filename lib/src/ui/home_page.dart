@@ -19,6 +19,7 @@ import '../updates/app_updater.dart';
 import 'anchored_menu.dart';
 import 'code_sessions_view.dart';
 import 'kill_switch_status.dart';
+import 'feature_menu.dart';
 import 'profile_dialog.dart';
 import 'profile_page.dart';
 import 'profile_usage_menu.dart';
@@ -35,7 +36,8 @@ abstract final class AppPages {
   static const home = '/';
   static const settings = '/settings';
   static const newProfile = '/profiles/new';
-  static const sessions = '/sessions';
+  static const features = '/features';
+  static const sessions = '/features/sessions';
 
   /// Правка профиля [id].
   static String editProfile(String id) => '/profiles/edit/$id';
@@ -225,6 +227,18 @@ class HomePage extends StatelessWidget {
           onDone: AppPages.back,
         );
       }
+    }
+    if (route == AppPages.features) {
+      return _withScrim(
+        context,
+        FeaturesPage(
+          padding: padding,
+          onOpen: (feature) => switch (feature) {
+            'sessions' => AppPages.open(AppPages.sessions),
+            _ => null,
+          },
+        ),
+      );
     }
     if (route == AppPages.sessions) {
       return _withScrim(
@@ -1011,8 +1025,10 @@ class _HeaderBar extends StatelessWidget {
         ? busy
         : page.startsWith(AppPages.settings)
         ? const HeaderStatus('settings', 'Настройки', plain: true)
-        : page == AppPages.sessions
-        ? const HeaderStatus('sessions', 'Сессии', plain: true)
+        // Как в «Настройках»: на вложенных страницах шапка та же, меняется
+        // только содержимое.
+        : page.startsWith(AppPages.features)
+        ? const HeaderStatus('features', 'Возможности', plain: true)
         : const HeaderStatus('profiles', 'Профили', plain: true);
     const duration = Duration(milliseconds: 280);
     return Builder(
@@ -1101,12 +1117,10 @@ class _HeaderBar extends StatelessWidget {
                             },
                           ),
                           CircleIconButton(
-                            icon: AppIcons.sessions,
-                            tooltip: interactive ? 'Сессии' : null,
+                            icon: AppIcons.features,
+                            tooltip: interactive ? 'Возможности' : null,
                             onPressed: () {
-                              if (interactive) {
-                                AppPages.open(AppPages.sessions);
-                              }
+                              if (interactive) AppPages.open(AppPages.features);
                             },
                           ),
                           CircleIconButton(

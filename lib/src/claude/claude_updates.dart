@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../http_proxy.dart';
 import '../app_settings.dart';
 import '../launcher_controller.dart';
 import '../location/kill_switch.dart';
@@ -187,6 +188,7 @@ class ClaudeUpdates extends ChangeNotifier {
       );
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 15)
+        ..findProxy = launcherProxy
         ..userAgent = 'ClaudeLauncher';
       try {
         final request = await client.getUrl(uri);
@@ -400,6 +402,7 @@ class ClaudeUpdates extends ChangeNotifier {
   Future<void> _download(ClaudeRelease release, File file) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15)
+      ..findProxy = launcherProxy
       ..userAgent = 'ClaudeLauncher';
     void abortIfClosed() {
       if (!killSwitch.open) client.close(force: true);

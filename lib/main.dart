@@ -122,6 +122,7 @@ Future<void> main(List<String> args) async {
     launcher: launcher,
     notifier: notifier,
     onFired: window.show,
+    onLog: _killSwitchLog(supportDir, 'лаунчер'),
   );
   // Перед запуском профиля: уведомления Claude — лаунчеру, а при Kill
   // switch — закрепить профиль за затвором (Claude читает это при запуске).
@@ -432,6 +433,26 @@ Future<void> _stopKillSwitchGuard(Directory supportDir, ClaudeHost host) async {
   }
 }
 
+/// Журнал Kill Switch — `kill-switch.log` в папке лаунчера: что делал затвор,
+/// когда Claude остался без сети. Последние ~256 КБ, без адресов сети.
+void Function(String) _killSwitchLog(Directory supportDir, String who) {
+  final file = File(p.join(supportDir.path, 'kill-switch.log'));
+  return (message) {
+    try {
+      if (file.existsSync() && file.lengthSync() > 256 * 1024) {
+        final text = file.readAsStringSync();
+        file.writeAsStringSync(text.substring(text.length ~/ 2));
+      }
+      file.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} [$who $pid] $message\n',
+        mode: FileMode.append,
+      );
+    } on FileSystemException {
+      // Журнал — подспорье; без него лаунчер работает так же.
+    }
+  };
+}
+
 File _handoverFile(Directory supportDir) =>
     File(p.join(supportDir.path, 'kill-switch-handover.json'));
 
@@ -484,19 +505,18 @@ Future<bool> _takeHandover(
 /// убирает конфигурацию Claude и уходит. Без окна и значка.
 ///
 /// На macOS повторный запуск лаунчера система передаёт этому процессу — тогда
-/// охранник сам становится лаунчером: возвращает `true`, и main() продолжает
-/// обычный запуск (если лаунчер тем временем обновили — запускает новую
-/// версию и уходит). На Windows новый лаунчер находит охранника по pid-файлу и
-/// завершает.
+/// охранник запускает свежий лаунчер ([_openFreshLauncher]) и держит затвор,
+/// пока тот не заберёт работу: новый лаунчер находит охранника по pid-файлу и
+/// завершает (так же и на Windows). Самому становиться лаунчером охраннику
+/// нельзя: в таком процессе не определялась страна, и Claude оставался без
+/// сети, а после обновления в памяти ещё и старый код.
 Future<bool> _guardKillSwitch(
   Directory supportDir, {
   required bool passthrough,
 }) async {
-  final executable = File(Platform.resolvedExecutable);
-  final startedAs = executable.statSync();
   final pidFile = _guardPidFile(supportDir);
   await pidFile.writeAsString('$pid');
-  final reopened = Completer<void>();
+  final log = _killSwitchLog(supportDir, 'охранник');
   // Охранника закрывают по имени (⌘Q не дойдёт — окна нет, но так делает,
   // например, команда установки): снимаем настройку, чтобы Claude не остался
   // без сети, если лаунчер больше не запустят.
@@ -517,11 +537,13 @@ Future<bool> _guardKillSwitch(
     notifier: SystemNotifier(),
     exactPort: true,
     passthrough: passthrough,
+    onLog: log,
   );
   _nativeChannel.setMethodCallHandler((call) async {
     if (call.method == 'networkChanged') await killSwitch.networkChanged();
-    if (Platform.isMacOS && call.method == 'reopen' && !reopened.isCompleted) {
-      reopened.complete();
+    if (Platform.isMacOS && call.method == 'reopen') {
+      log('лаунчер открыли снова — запускаю его');
+      await _openFreshLauncher();
     }
     if (call.method == 'quit' && !quitRequested.isCompleted) {
       quitRequested.complete();
@@ -540,21 +562,18 @@ Future<bool> _guardKillSwitch(
   }
 
   // Затвор поднимается не мгновенно — serving уже true (armed или passthrough).
-  while (!reopened.isCompleted &&
-      !quitRequested.isCompleted &&
+  while (!quitRequested.isCompleted &&
       killSwitch.serving &&
       launcher.instances.isNotEmpty &&
       ours()) {
     await Future.any([
       Future<void>.delayed(const Duration(seconds: 2)),
-      reopened.future,
       quitRequested.future,
     ]);
     await launcher.refresh();
   }
   windowsWatch?.stop();
-  final reopen = reopened.isCompleted;
-  final quit = quitRequested.isCompleted && !reopen;
+  final quit = quitRequested.isCompleted;
   final stillOurs = ours();
   // Закрыли, а Claude ещё открыт: настройку снимаем, но оставляем записку —
   // если лаунчер запустят следом (команда установки), он поднимет затвор на
@@ -566,9 +585,13 @@ Future<bool> _guardKillSwitch(
       claudePids: [for (final instance in launcher.instances) instance.pid],
     );
   }
-  // Claude закрыт или охранника закрыли — конфигурация не нужна; лаунчер
-  // снова открыли или он забрал работу — она нужна ему.
-  await killSwitch.shutdown(keepPinned: !quit && (reopen || !stillOurs));
+  log(
+    'выход: закрыли — $quit, затвор ещё его — $stillOurs, '
+    'открытых Claude — ${launcher.instances.length}',
+  );
+  // Claude закрыт или охранника закрыли — конфигурация не нужна; работу
+  // забрал лаунчер — она нужна ему.
+  await killSwitch.shutdown(keepPinned: !quit && !stillOurs);
   killSwitch.dispose();
   location.dispose();
   launcher.dispose();
@@ -579,20 +602,34 @@ Future<bool> _guardKillSwitch(
       // Уже удалён.
     }
   }
-  if (!reopen) return false;
-  final FileStat now;
-  try {
-    now = executable.statSync();
-  } on FileSystemException {
-    return false;
-  }
-  if (now.modified == startedAs.modified && now.size == startedAs.size) {
-    return true;
-  }
-  final bundle = p.dirname(p.dirname(p.dirname(executable.path)));
-  await Process.start('open', ['-n', bundle], mode: ProcessStartMode.detached);
   return false;
 }
+
+/// Свежий экземпляр лаунчера из его приложения на диске (`open -n`: иначе
+/// macOS снова передаст запуск этому фоновому процессу). Не чаще раза в 10 с —
+/// повторные нажатия, пока он запускается, не плодят экземпляры.
+Future<void> _openFreshLauncher() async {
+  final now = DateTime.now();
+  if (_freshLaunchAt case final at?
+      when now.difference(at) < const Duration(seconds: 10)) {
+    return;
+  }
+  _freshLaunchAt = now;
+  // …/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher → …/ClaudeLauncher.app
+  final bundle = p.dirname(
+    p.dirname(p.dirname(File(Platform.resolvedExecutable).path)),
+  );
+  try {
+    await Process.start('open', [
+      '-n',
+      bundle,
+    ], mode: ProcessStartMode.detached);
+  } catch (error) {
+    debugPrint('Не удалось запустить лаунчер: $error');
+  }
+}
+
+DateTime? _freshLaunchAt;
 
 /// Лаунчер снова запущен и забирает уведомления себе — оболочки, которые ждут
 /// закрытия Claude после прошлых выходов (см. [_startWatcher]), больше не
@@ -619,20 +656,13 @@ Future<void> _stopWaitingWatchers() async {
 /// наблюдатель уходит.
 ///
 /// На macOS повторный запуск система передаёт этому же процессу (второй
-/// экземпляр не запускает) — тогда наблюдатель сам становится лаунчером:
-/// возвращает `true`, и main() продолжает обычный запуск. Но если за это время
-/// лаунчер обновили, в памяти у наблюдателя старый код: он запускает новую
-/// версию и уходит.
+/// экземпляр не запускает) — тогда наблюдатель запускает свежий лаунчер
+/// ([_openFreshLauncher]) и уходит, когда тот заберёт настройки себе.
 Future<bool> _returnClaudeNotifications(Directory supportDir) async {
-  final executable = File(Platform.resolvedExecutable);
-  final startedAs = executable.statSync();
-  final reopened = Completer<void>();
   // Только macOS: на Windows повторный запуск будит запущенный лаунчер, а не
   // наблюдателя — тот уйдёт сам, когда новый лаунчер заберёт настройки.
   _nativeChannel.setMethodCallHandler((call) async {
-    if (Platform.isMacOS && call.method == 'reopen' && !reopened.isCompleted) {
-      reopened.complete();
-    }
+    if (Platform.isMacOS && call.method == 'reopen') await _openFreshLauncher();
   });
   final host = ClaudeHost.forCurrentPlatform();
   final handoff = _handoff(supportDir, host);
@@ -643,7 +673,7 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
   } catch (error) {
     debugPrint('Не удалось найти Claude: $error');
   }
-  while (!reopened.isCompleted) {
+  while (true) {
     try {
       final result = await handoff.sync(
         active: false,
@@ -657,25 +687,9 @@ Future<bool> _returnClaudeNotifications(Directory supportDir) async {
     } catch (error) {
       debugPrint('Не удалось вернуть уведомления Claude: $error');
     }
-    await Future.any([
-      Future<void>.delayed(host.pollInterval),
-      reopened.future,
-    ]);
+    await Future<void>.delayed(host.pollInterval);
   }
   await handoff.resign();
-  if (!reopened.isCompleted) return false;
-  final FileStat now;
-  try {
-    now = executable.statSync();
-  } on FileSystemException {
-    return false;
-  }
-  if (now.modified == startedAs.modified && now.size == startedAs.size) {
-    return true;
-  }
-  // …/ClaudeLauncher.app/Contents/MacOS/ClaudeLauncher → …/ClaudeLauncher.app
-  final bundle = p.dirname(p.dirname(p.dirname(executable.path)));
-  await Process.start('open', ['-n', bundle], mode: ProcessStartMode.detached);
   return false;
 }
 

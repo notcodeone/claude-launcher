@@ -636,6 +636,56 @@ class AppDialogFrame extends StatelessWidget {
   }
 }
 
+/// Строка-переход в карточке: значок слева по центру строки, название,
+/// пояснение в одну строку и стрелка (или метка) справа. Одна для «Настроек»
+/// и «Возможностей».
+class NavRow extends StatelessWidget {
+  const NavRow({
+    super.key,
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  /// Размер значка слева.
+  static const iconSize = 22.0;
+
+  final Widget leading;
+  final Widget title;
+  final Widget subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => HoverSurface(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      child: Row(
+        children: [
+          SizedBox(
+            width: iconSize + 2,
+            child: Center(child: leading),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [title, const SizedBox(height: 2), subtitle],
+            ),
+          ),
+          if (trailing case final trailing?) ...[
+            const SizedBox(width: 12),
+            trailing,
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
 /// Строка настройки: заголовок, пояснение, необязательная ссылка и переключатель.
 class SettingSwitchRow extends StatelessWidget {
   const SettingSwitchRow({
@@ -930,6 +980,8 @@ abstract final class AppIcons {
   static const themeDark = LucideIcons.moon;
   static const settings = LucideIcons.settings;
   static const sessions = LucideIcons.messagesSquare;
+  static const features = LucideIcons.layoutGrid;
+  static const connectors = LucideIcons.plug;
   static const back = LucideIcons.arrowLeft;
   static const chevron = LucideIcons.chevronRight;
   static const general = LucideIcons.slidersHorizontal;

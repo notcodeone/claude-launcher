@@ -14,9 +14,14 @@ fresh="build/macos/Build/Products/Release/ClaudeLauncher.app"
 app="/Applications/ClaudeLauncher.app"
 [ -d "$fresh" ] || { echo "Сначала: flutter build macos --release" >&2; exit 1; }
 
-# Главный процесс лаунчера — без флагов (фоновые: --kill-switch-guard,
-# --return-claude-notifications и наблюдатель /bin/sh).
-main_running() { pgrep -f "$app/Contents/MacOS/ClaudeLauncher\$" >/dev/null; }
+# Главный процесс лаунчера — ровно путь к нему, без аргументов. Фоновые — с
+# флагами (--kill-switch-guard), а у наблюдателя /bin/sh путь к лаунчеру стоит
+# в конце командной строки: поиск по шаблону принял бы его за лаунчер.
+# Без -q: grep -q выходит на первом совпадении и обрывает ps, а с pipefail
+# такой конвейер считается неудачным — лаунчер «не найден».
+main_running() {
+  ps -axo args= | grep -xF "$app/Contents/MacOS/ClaudeLauncher" >/dev/null
+}
 
 if main_running; then
   echo "Прошу ClaudeLauncher выйти…"
@@ -33,7 +38,12 @@ fi
 rm -rf "$app"
 ditto "$fresh" "$app"
 xattr -cr "$app" 2>/dev/null || true
-open "$app"
+# -n: новый экземпляр. Без него macOS, увидев запущенный фоновый процесс
+# лаунчера (затвор Kill Switch), покажет его, а не запустит новую версию.
+# Без прокси из окружения: в терминале Claude Code это затвор Kill Switch, и
+# лаунчер унаследовал бы его.
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy -u ALL_PROXY \
+  -u all_proxy open -n "$app"
 
 for _ in $(seq 1 60); do main_running && break; sleep 0.5; done
 if main_running; then

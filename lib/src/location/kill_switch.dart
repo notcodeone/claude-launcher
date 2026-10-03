@@ -104,6 +104,7 @@ class KillSwitch extends ChangeNotifier {
     this.useGate = true,
     this.exactPort = false,
     this._passthrough = false,
+    this.onLog,
   }) {
     gate = EgressGate(allow: _allows);
   }
@@ -115,6 +116,12 @@ class KillSwitch extends ChangeNotifier {
 
   /// Сработал — например, показать окно лаунчера.
   final VoidCallback? onFired;
+
+  /// Журнал: включение, затвор, проверки страны — чтобы разобрать, что было,
+  /// когда Claude остался без сети (сам Claude в это время ничего не покажет).
+  final void Function(String message)? onLog;
+
+  void _log(String message) => onLog?.call(message);
 
   final Future<String> Function() fingerprint;
   final EgressConfig config;
@@ -420,9 +427,14 @@ class KillSwitch extends ChangeNotifier {
       }
     } catch (error) {
       debugPrint('Kill Switch: не удалось поднять затвор: $error');
+      _log('не удалось поднять затвор: $error');
     } finally {
       if (!ready.isCompleted) ready.complete();
     }
+    _log(
+      'включён: затвор на порту ${gate.port}, Claude открыт: $_wasRunning, '
+      'нужен перезапуск: $needsRestart, без защиты: $unprotected',
+    );
     if (!armed) return;
     _fingerprint = await _safeFingerprint();
     _verifying = false;
@@ -504,6 +516,7 @@ class KillSwitch extends ChangeNotifier {
   }
 
   void _disarm({bool stopGate = true}) {
+    _log('выключен');
     _processAuditGeneration++;
     _observedPids.clear();
     _poll?.cancel();
@@ -568,6 +581,7 @@ class KillSwitch extends ChangeNotifier {
   }
 
   void _close() {
+    if (open) _log('затвор закрыт');
     open = false;
     gate.cutAll();
     if (_verdict.isCompleted) _verdict = Completer<bool>();
@@ -575,6 +589,7 @@ class KillSwitch extends ChangeNotifier {
 
   /// Страна [country] проверена в нынешней сети — затвор открыт.
   void _accept(String? country) {
+    if (!open) _log('затвор открыт: $country');
     baseline = country;
     _verified = _fingerprint;
     open = true;
@@ -585,6 +600,7 @@ class KillSwitch extends ChangeNotifier {
 
   /// Окончательный отказ: страна не та или Claude в ней недоступен.
   void _block() {
+    _log('отказ: страна ${location.country}');
     _close();
     _blockedAt = DateTime.now();
     _verdict.complete(false);
@@ -595,6 +611,7 @@ class KillSwitch extends ChangeNotifier {
       return await fingerprint();
     } catch (error) {
       debugPrint('Kill Switch: не удалось прочитать адреса: $error');
+      _log('не удалось прочитать адреса сети: $error');
       return null;
     }
   }
@@ -613,6 +630,7 @@ class KillSwitch extends ChangeNotifier {
     _fingerprint = current;
     // Адреса только что прочитаны впервые — сравнивать не с чем.
     if (previous == null) return;
+    _log('сеть сменилась');
     _close();
     notifyListeners();
     if (strict && _claudeRunning) {
@@ -643,6 +661,7 @@ class KillSwitch extends ChangeNotifier {
         return;
       }
       final country = location.country;
+      _log('проверка страны: ${state.name} $country');
       switch (state) {
         case LocationState.unknown:
           // Нет сети — запросы и так не уходят. Затвор закрыт, соединения
@@ -672,6 +691,7 @@ class KillSwitch extends ChangeNotifier {
   /// [network] — строгий режим: сеть сменилась, страну ещё не знаем.
   Future<void> _fire({required String? to, bool network = false}) async {
     final from = baseline;
+    _log('сработал: $from → $to${network ? ' (сменилась сеть)' : ''}');
     try {
       await launcher.killAll();
     } catch (error) {

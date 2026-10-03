@@ -41,7 +41,10 @@ flutter test integration_test/macos_host_test.dart -d macos
 `flutter build macos --release && tool/install_local.sh`. Скрипт дожидается полного выхода
 лаунчера: при Kill Switch тот передаёт затвор фоновому процессу, и подмена приложения
 посреди выхода оставляет Claude без сети, а лаунчер — без иконок (так было 2026-10-03).
-Не удаляй и не подменяй `/Applications/ClaudeLauncher.app` вручную.
+Не удаляй и не подменяй `/Applications/ClaudeLauncher.app` вручную. Терминал агента — внутри
+Claude, и в нём `HTTPS_PROXY` указывает на затвор Kill Switch: всё, что запускаешь
+оттуда, наследует его (скрипт запускает лаунчер через `env -u HTTPS_PROXY …`). Если
+Claude остался без сети — смотри `~/Library/Application Support/com.notcodeone.claudeLauncher/kill-switch.log`.
 
 Запускать собранный из исходников лаунчер (`flutter run -d macos`) — только если автор
 попросил: он работает с настоящими профилями и может их переключать. Ничего не
