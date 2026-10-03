@@ -11,6 +11,10 @@
   #define AppVersion "1.0.0"
 #endif
 
+#ifndef AppFileVersion
+  #define AppFileVersion "1.0.0.0"
+#endif
+
 #define AppName "ClaudeLauncher"
 #define AppExe "claude_launcher.exe"
 #define ReleaseDir "..\..\build\windows\x64\runner\Release"
@@ -20,6 +24,7 @@
 AppId={{6F3B2C1E-8C4A-4F1B-9C57-2D6A7E91B4C3}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppFileVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=NotCode
 DefaultDirName={localappdata}\Programs\{#AppName}

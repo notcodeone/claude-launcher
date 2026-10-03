@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_settings.dart';
+import '../diagnostics/parallel_report.dart';
+import 'parallel_report_dialog.dart';
 import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
 import '../launcher_controller.dart';
@@ -569,6 +571,21 @@ class SettingsSectionPage extends StatelessWidget {
             value: settings.parallelLaunch,
             onChanged: settings.setParallelLaunch,
           ),
+          if (settings.parallelLaunch)
+            AppButton(
+              label: 'Отчёт параллельных профилей',
+              kind: AppButtonKind.secondary,
+              onPressed: () => showParallelReport(
+                context,
+                () => parallelReport(
+                  version: deps.version,
+                  launcher: deps.launcher,
+                  settings: settings,
+                  sessions: deps.claudeCode.sessions.all,
+                  killSwitch: deps.killSwitch,
+                ),
+              ),
+            ),
         ],
       ),
       _Card(
