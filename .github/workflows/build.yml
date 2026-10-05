@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, parallelism]
+    branches: [main]
     # Тег vX.Y.Z — выпуск версии (см. задачу release и README, «Версии»).
     tags: ['v*']
   pull_request:
@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/parallelism' }}
+  cancel-in-progress: false
 
 env:
   FLUTTER_VERSION: 3.44.7
@@ -74,11 +74,6 @@ jobs:
         with:
           name: ClaudeLauncher-windows-portable
           path: build/windows/x64/runner/Release/
-      - uses: actions/upload-artifact@v7
-        if: github.ref == 'refs/heads/parallelism'
-        with:
-          name: parallel-testing-guide
-          path: docs/two-agents-test.md
 
   # Выпуск версии по тегу vX.Y.Z: GitHub Release с установщиками, текст — раздел
   # этой версии из CHANGELOG.md. Тег должен совпадать с версией в pubspec.yaml.
@@ -92,7 +87,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Версия тега и pubspec.yaml совпадают
         run: |
-          # Полная версия, с меткой предварительной сборки: тег v1.5.10 не выпустит 1.5.10-parallelism.N.
+          # Полная версия, с меткой предварительной сборки (1.7.1-beta.1 и т. п.).
           version=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Тег $GITHUB_REF_NAME, а в pubspec.yaml версия $version"
