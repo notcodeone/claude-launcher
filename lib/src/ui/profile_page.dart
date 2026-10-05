@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../integrations/profile_claude_code.dart';
+import '../integrations/profile_settings_copy.dart';
 import '../launcher_controller.dart';
 import '../profile.dart';
 import 'profile_dialog.dart';
@@ -247,6 +248,26 @@ class _ProfilePageState extends State<ProfilePage> {
   late String _marker = widget.profile?.marker ?? Profile.defaultMarker;
   late String _icon = widget.profile?.icon ?? Profile.defaultIcon;
   late bool _ownClaudeCode = widget.profile?.ownClaudeCode ?? true;
+
+  /// Новый профиль: из какого взять настройки Claude; `null` — ни из какого.
+  String? _settingsFrom;
+
+  /// Профили, из которых есть что взять: Claude в них уже открывали.
+  List<Profile> get _settingsSources => [
+    for (final profile in widget.launcher.profiles)
+      if (_configDirOf(profile) != null) profile,
+  ];
+
+  /// Папка, где у профиля лежат настройки Claude (на Windows бывает в пакете).
+  String? _configDirOf(Profile profile) {
+    for (final dir in widget.launcher.readableDataDirsOf(profile)) {
+      if (File(p.join(dir, 'claude_desktop_config.json')).existsSync()) {
+        return dir;
+      }
+    }
+    return null;
+  }
+
   String? _nameError;
   bool _saving = false;
 
@@ -320,6 +341,21 @@ class _ProfilePageState extends State<ProfilePage> {
       icon: _icon,
       ownClaudeCode: _ownClaudeCode,
     );
+    final source = widget.launcher.profiles
+        .where((other) => other.id == _settingsFrom)
+        .firstOrNull;
+    if (source != null) {
+      if (_configDirOf(source) case final from?) {
+        try {
+          await ProfileSettingsCopy.copy(
+            from: from,
+            to: widget.launcher.dataDirOf(profile),
+          );
+        } catch (error) {
+          debugPrint('Не удалось взять настройки из «${source.name}»: $error');
+        }
+      }
+    }
     if (!mounted) return;
     // Новый тег — до возврата: аватар улетит в карточку нового профиля.
     setState(() => _heroTag = ProfileHero.avatarTag(profile.id));
@@ -327,6 +363,67 @@ class _ProfilePageState extends State<ProfilePage> {
     final launcher = widget.launcher;
     AppSnackbar.show(
       Snacks.profileCreated(name, () => launcher.switchTo(profile)),
+    );
+  }
+
+  /// «Взять настройки Claude из профиля»: вид панели, Cowork, задачи по
+  /// расписанию, редактор вкладки Code — то, что не привязано к аккаунту.
+  Widget _settingsChoice(ThemeData theme) {
+    final palette = context.palette;
+    Widget option(String? id, String label, {String? marker}) {
+      final selected = _settingsFrom == id;
+      return HoverSurface(
+        onTap: () => setState(() => _settingsFrom = id),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+          child: Row(
+            children: [
+              // Без метки — отступ как у меток: подписи в один столбец.
+              if (marker != null)
+                MarkerDot(marker: marker, size: 12)
+              else
+                const SizedBox(width: 12),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              Icon(
+                selected ? AppIcons.checked : AppIcons.unchecked,
+                size: 20,
+                color: selected ? palette.text : palette.muted,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Настройки Claude', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Вид панели, Cowork, задачи по расписанию, редактор вкладки Code — '
+            'без входа, сессий и всего, что привязано к аккаунту.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          option(null, 'Как в новом Claude'),
+          for (final profile in _settingsSources)
+            option(
+              profile.id,
+              'Как в «${profile.name}»',
+              marker: profile.marker,
+            ),
+        ],
+      ),
     );
   }
 
@@ -523,6 +620,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                 ),
+              ],
+              if (_isNew && _settingsSources.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                AppearIn(index: 3, child: _settingsChoice(theme)),
               ],
               const SizedBox(height: 16),
               AppearIn(
