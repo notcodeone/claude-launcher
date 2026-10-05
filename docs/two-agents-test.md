@@ -1,12 +1,12 @@
 # Первый тест двух агентов — macOS и Windows
 
-Тестовая версия: 1.5.10-parallelism.8. Начать с двух профилей, затем двух задач.
+Тестовая версия: 1.5.10-parallelism.9. Начать с двух профилей, затем двух задач.
 Выполнять один и тот же сценарий отдельно на каждой ОС.
 
 ## Установка
 
 - macOS: DMG из тестовой сборки, перетащить ClaudeLauncher в «Программы».
-- Windows: установщик `ClaudeLauncher-Setup-1.5.10-parallelism.8.exe` либо
+- Windows: установщик `ClaudeLauncher-Setup-1.5.10-parallelism.9.exe` либо
   `ClaudeLauncher-windows-portable.zip`. Переносную версию распаковать целиком,
   запустить `claude_launcher.exe`, DLL и data оставить рядом.
 - Сборки GitHub Actions: выбрать успешный запуск Build для ветки parallelism,
