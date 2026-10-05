@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>ClaudeLauncher открывает сессии Claude Code в окне нужного профиля.</string>
+	<string>Лаунчер передаёт ссылки Claude — вход и сессии Code — окну нужного профиля, когда открыто несколько профилей.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

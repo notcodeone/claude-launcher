@@ -243,12 +243,8 @@ class ClaudeUpdates extends ChangeNotifier {
         var installing = false;
         try {
           for (final profile in reopen) {
-            await operation.close(profile);
-            if (launcher.lastError != null || launcher.isRunning(profile)) {
-              throw StateError(
-                launcher.lastError ?? 'Закрытие Claude отменено',
-              );
-            }
+            final closed = await operation.close(profile);
+            if (!closed.succeeded) throw StateError(closed.error!);
           }
           await launcher.refresh(strict: true);
           if (operation.interrupted) {
@@ -331,16 +327,8 @@ class ClaudeUpdates extends ChangeNotifier {
           .where((p) => p.id == profile.id)
           .firstOrNull;
       if (current == null) continue;
-      try {
-        await operation.reopen(current);
-        if (launcher.lastError != null || !launcher.isRunning(current)) {
-          failures.add(
-            '«${current.name}»: ${launcher.lastError ?? 'не запущен'}',
-          );
-        }
-      } catch (error) {
-        failures.add('«${current.name}»: ${_errorMessage(error)}');
-      }
+      final result = await operation.reopen(current);
+      if (!result.succeeded) failures.add('«${current.name}»: ${result.error}');
     }
     return failures;
   }
