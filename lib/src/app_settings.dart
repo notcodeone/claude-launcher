@@ -56,8 +56,10 @@ class AppSettings extends ChangeNotifier {
   /// У каждого эксперимента — свой переключатель (раздел «Эксперименты»).
   bool usageLimits = false;
 
-  /// Тестовый режим: запуск профиля сохраняет остальные экземпляры.
-  bool parallelLaunch = false;
+  /// Профили работают одновременно: запуск профиля не закрывает остальные
+  /// (настройка «Закрывать другие профили при открытии» — наоборот). С 1.7.2 —
+  /// по умолчанию; у кого значение уже сохранено, остаётся их выбор.
+  bool parallelLaunch = true;
 
   /// Лаунчер — обработчик ссылок `claude://` и отдаёт их нужному профилю (см.
   /// `ClaudeLinkHandler`).
@@ -122,7 +124,7 @@ class AppSettings extends ChangeNotifier {
             json['usageLimits'] as bool? ??
             json['experimentalFeatures'] as bool? ??
             false;
-        parallelLaunch = json['parallelLaunch'] as bool? ?? false;
+        parallelLaunch = json['parallelLaunch'] as bool? ?? true;
         claudeLinks = json['claudeLinks'] as bool? ?? true;
         previousLinkHandler = json['previousLinkHandler'] as String?;
         sessionSync = json['sessionSync'] as bool? ?? false;

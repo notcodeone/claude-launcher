@@ -191,6 +191,9 @@ void main() {
     });
 
     test('без проверенной сети не спрашивает', () async {
+      // В параллельном режиме (по умолчанию с 1.7.2) лаунчер обновляет Claude
+      // и без Kill Switch — см. группу ниже.
+      await settings.setParallelLaunch(false);
       await settings.setKillSwitch(false);
       await Future<void>.delayed(const Duration(milliseconds: 20));
       final u = updates();

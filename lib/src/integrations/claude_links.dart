@@ -229,6 +229,15 @@ class ClaudeLinkHandler extends ChangeNotifier {
     }
   }
 
+  /// Для диагностики: ссылки сейчас открывает лаунчер.
+  Future<bool> owned() async {
+    final own = await platform.ownId();
+    return own != null && await platform.currentHandler() == own;
+  }
+
+  /// «Исправить» в диагностике — забрать роль обработчика сейчас.
+  Future<void> reclaim() => _reclaim();
+
   void _setBlocked(bool value) {
     if (_blocked == value) return;
     _blocked = value;

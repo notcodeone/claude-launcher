@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_settings.dart';
+import '../diagnostics/diagnostics.dart';
 import '../diagnostics/parallel_report.dart';
+import '../integrations/claude_links.dart';
+import 'diagnostics_view.dart';
 import 'parallel_report_dialog.dart';
 import '../claude/claude_updates.dart';
 import '../integrations/claude_code_integration.dart';
@@ -25,6 +28,7 @@ enum SettingsSection {
   general('Основные', AppIcons.general),
   claudeCode('Claude Code', AppIcons.claudeCode),
   updates('Обновления', AppIcons.updates),
+  diagnostics('Диагностика', AppIcons.diagnostics),
   experiments('Эксперименты', AppIcons.experiments);
 
   const SettingsSection(this.title, this.icon);
@@ -47,6 +51,7 @@ class SettingsContext {
     this.killSwitch,
     this.claudeUpdates,
     this.coworkFirewall,
+    this.links,
   });
 
   final LauncherController launcher;
@@ -59,6 +64,9 @@ class SettingsContext {
 
   /// Windows: правило брандмауэра для службы Cowork; null — не Windows.
   final CoworkFirewall? coworkFirewall;
+
+  /// Ссылки `claude://` — нужному профилю; null — не эта ОС или тесты.
+  final ClaudeLinkHandler? links;
   final String version;
 
   Listenable get changes => Listenable.merge([
@@ -69,6 +77,7 @@ class SettingsContext {
     killSwitch,
     claudeUpdates,
     coworkFirewall,
+    links,
   ]);
 }
 
@@ -209,6 +218,7 @@ class SettingsListPage extends StatelessWidget {
           'Версия ${c.version}, автоматическая проверка выключена',
         _ => 'Версия ${c.version} и проверка новых',
       },
+      SettingsSection.diagnostics => 'Проверить, всё ли в порядке',
       SettingsSection.experiments => 'Опасная зона!',
     };
   }
@@ -374,6 +384,26 @@ class SettingsSectionPage extends StatelessWidget {
         SettingsSection.general => _general(context),
         SettingsSection.claudeCode => _claudeCode(context),
         SettingsSection.updates => _updates(context),
+        SettingsSection.diagnostics => [
+          DiagnosticsView(
+            diagnostics: Diagnostics(
+              launcher: deps.launcher,
+              settings: deps.settings,
+              claudeCode: deps.claudeCode,
+              links: deps.links,
+              killSwitch: deps.killSwitch,
+              coworkFirewall: deps.coworkFirewall,
+              openDefaultApps: Platform.isWindows
+                  ? () => launchUrl(
+                      Uri.parse(
+                        'ms-settings:defaultapps?registeredAppUser=ClaudeLauncher',
+                      ),
+                    )
+                  : null,
+            ),
+            version: deps.version,
+          ),
+        ],
         SettingsSection.experiments => _experiments(context),
       };
       return ListView(

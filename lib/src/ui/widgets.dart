@@ -991,6 +991,7 @@ abstract final class AppIcons {
   static const claudeCode = LucideIcons.squareTerminal;
   static const updates = LucideIcons.refreshCw;
   static const experiments = LucideIcons.flaskConical;
+  static const diagnostics = LucideIcons.stethoscope;
   static const quit = LucideIcons.power;
   static const location = LucideIcons.mapPin;
   static const shield = LucideIcons.shieldCheck;

@@ -217,6 +217,7 @@ class HomePage extends StatelessWidget {
       killSwitch: killSwitch,
       claudeUpdates: claudeUpdates,
       coworkFirewall: coworkFirewall,
+      links: links,
       version: version,
     );
     if (route == AppPages.newProfile) {

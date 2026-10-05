@@ -74,16 +74,19 @@ void main() {
     },
   );
 
-  test('параллельный режим выключен по умолчанию и сохраняется', () async {
-    final file = File('${dir.path}/settings.json');
-    final settings = AppSettings(file);
-    await settings.load();
-    expect(settings.parallelLaunch, isFalse);
-    await settings.setParallelLaunch(true);
-    final reloaded = AppSettings(file);
-    await reloaded.load();
-    expect(reloaded.parallelLaunch, isTrue);
-  });
+  test(
+    'параллельный режим включён по умолчанию, сохранённый выбор — нет',
+    () async {
+      final file = File('${dir.path}/settings.json');
+      final settings = AppSettings(file);
+      await settings.load();
+      expect(settings.parallelLaunch, isTrue);
+      await settings.setParallelLaunch(false);
+      final reloaded = AppSettings(file);
+      await reloaded.load();
+      expect(reloaded.parallelLaunch, isFalse);
+    },
+  );
 
   test(
     'старый автозапуск переносится в набор, явный пустой набор сохраняется',

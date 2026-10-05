@@ -220,6 +220,23 @@ class ClaudeCodeIntegration extends ChangeNotifier {
         ),
   ];
 
+  /// Для диагностики: сколько папок Claude Code (общая и своих у профилей) без
+  /// хуков лаунчера; `null` — события выключены или приём не поднят.
+  Future<int?> missingHooks() async {
+    final port = _server?.port;
+    if (!settings.claudeCodeEvents || port == null) return null;
+    var missing = 0;
+    for (final target in [hooks, ..._profileHooks()]) {
+      if (!await target.isInstalled(port: port, token: settings.eventsToken)) {
+        missing++;
+      }
+    }
+    return missing;
+  }
+
+  /// «Исправить» в диагностике: поднять приём и поставить недостающие хуки.
+  Future<void> repairHooks() => _connect();
+
   /// Перед запуском профиля со своей папкой Claude Code: ставит в неё хуки,
   /// если события включены.
   Future<void> prepareProfile(Profile profile, String configDir) async {

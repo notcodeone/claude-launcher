@@ -130,8 +130,10 @@ void main() {
     await settle(tester);
     await tester.tap(find.text('Основные'));
     await tester.pumpAndSettle();
-    // Включено = прежний режим «один профиль»; выключили — профили параллельно.
-    expect(settings.parallelLaunch, isFalse);
+    // По умолчанию профили работают параллельно — «Закрывать другие» выключено;
+    // включили — прежний режим «один профиль».
+    expect(settings.parallelLaunch, isTrue);
+    expect(find.text('Отчёт о параллельной работе'), findsOneWidget);
     final closeOthers = find.descendant(
       of: find.widgetWithText(
         SettingSwitchRow,
@@ -141,8 +143,8 @@ void main() {
     );
     await tester.tap(closeOthers);
     await tester.pumpAndSettle();
-    expect(settings.parallelLaunch, isTrue);
-    expect(find.text('Отчёт о параллельной работе'), findsOneWidget);
+    expect(settings.parallelLaunch, isFalse);
+    expect(find.text('Отчёт о параллельной работе'), findsNothing);
     await tester.scrollUntilVisible(find.text('Тёмная'), 200);
     expect(find.text('Тема окна'), findsOneWidget);
     await tester.tap(find.text('Тёмная'));
