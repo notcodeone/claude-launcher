@@ -255,18 +255,8 @@ class _ProfilePageState extends State<ProfilePage> {
   /// Профили, из которых есть что взять: Claude в них уже открывали.
   List<Profile> get _settingsSources => [
     for (final profile in widget.launcher.profiles)
-      if (_configDirOf(profile) != null) profile,
+      if (widget.launcher.settingsDirOf(profile) != null) profile,
   ];
-
-  /// Папка, где у профиля лежат настройки Claude (на Windows бывает в пакете).
-  String? _configDirOf(Profile profile) {
-    for (final dir in widget.launcher.readableDataDirsOf(profile)) {
-      if (File(p.join(dir, 'claude_desktop_config.json')).existsSync()) {
-        return dir;
-      }
-    }
-    return null;
-  }
 
   String? _nameError;
   bool _saving = false;
@@ -345,7 +335,7 @@ class _ProfilePageState extends State<ProfilePage> {
         .where((other) => other.id == _settingsFrom)
         .firstOrNull;
     if (source != null) {
-      if (_configDirOf(source) case final from?) {
+      if (widget.launcher.settingsDirOf(source) case final from?) {
         try {
           await ProfileSettingsCopy.copy(
             from: from,

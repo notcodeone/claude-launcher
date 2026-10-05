@@ -25,6 +25,14 @@ abstract class LinkHandlerPlatform {
   /// Ссылки, которые система уже отдала лаунчеру и которые он ещё не забрал.
   Future<List<String>> takeLinks();
 
+  /// Своя схема `claudelauncher://` для ярлыков профилей. macOS берёт её из
+  /// Info.plist, Windows — из реестра. Остаётся и после выхода: ярлык должен
+  /// запускать закрытый лаунчер; убирает её только [removeShortcuts].
+  Future<void> registerShortcuts();
+
+  /// Удаление лаунчера (`--cleanup`).
+  Future<void> removeShortcuts();
+
   static LinkHandlerPlatform? forCurrentPlatform() {
     if (Platform.isMacOS) return const MacLinkHandlerPlatform();
     if (Platform.isWindows) return WindowsLinkHandlerPlatform();
@@ -69,6 +77,12 @@ class MacLinkHandlerPlatform implements LinkHandlerPlatform {
   @override
   Future<List<String>> takeLinks() async =>
       (await _channel.invokeListMethod<String>('takeLinks')) ?? const [];
+
+  @override
+  Future<void> registerShortcuts() async {}
+
+  @override
+  Future<void> removeShortcuts() async {}
 }
 
 /// Windows: регистрация в реестре пользователя, как у claude-profile-manager.
@@ -92,6 +106,7 @@ class WindowsLinkHandlerPlatform implements LinkHandlerPlatform {
 
   static const progId = 'ClaudeLauncher.claude';
   static const _scheme = r'Software\Classes\claude';
+  static const _shortcutScheme = r'Software\Classes\claudelauncher';
   static const _progIdKey = r'Software\Classes\' + progId;
   static const _capabilities = r'Software\ClaudeLauncher\Capabilities';
   static const _registered = r'Software\RegisteredApplications';
@@ -205,6 +220,16 @@ class WindowsLinkHandlerPlatform implements LinkHandlerPlatform {
       }
     } on WindowsException {
       // Уже удалён.
+    }
+  }
+
+  @override
+  Future<void> removeShortcuts() async => _removeTree(_shortcutScheme);
+
+  @override
+  Future<void> registerShortcuts() async {
+    if (_read('$_shortcutScheme\\shell\\open\\command', '') != command) {
+      _writeProtocol(_shortcutScheme, command);
     }
   }
 

@@ -7,10 +7,12 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_settings.dart';
 import '../claude/claude_updates.dart';
+import '../claude/profile_shortcut.dart';
 import '../integrations/claude_links.dart';
 import '../integrations/session_sync_service.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
+import '../integrations/profile_settings_copy.dart';
 import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
 import '../location/cowork_firewall.dart';
@@ -19,6 +21,7 @@ import '../location/location_guard.dart';
 import '../profile.dart';
 import '../updates/app_updater.dart';
 import 'anchored_menu.dart';
+import 'announcements.dart' show Snacks;
 import 'code_sessions_view.dart';
 import 'kill_switch_status.dart';
 import 'feature_menu.dart';
@@ -1945,6 +1948,16 @@ class _ProfileCard extends StatelessWidget {
       highlight: _menuHighlight,
       entries: [
         const MenuEntry(value: 'edit', icon: AppIcons.edit, label: 'Изменить'),
+        const MenuEntry(
+          value: 'duplicate',
+          icon: AppIcons.duplicate,
+          label: 'Дублировать',
+        ),
+        const MenuEntry(
+          value: 'shortcut',
+          icon: AppIcons.shortcut,
+          label: 'Ярлык на рабочем столе',
+        ),
         MenuEntry(
           value: 'folder',
           icon: AppIcons.folder,
@@ -1983,6 +1996,10 @@ class _ProfileCard extends StatelessWidget {
     switch (action) {
       case 'edit':
         _edit(cardContext);
+      case 'duplicate':
+        await _duplicate();
+      case 'shortcut':
+        await _shortcut();
       case 'folder':
         await launcher.host.revealFolder(launcher.dataDirOf(profile));
       case 'startup':
@@ -2013,6 +2030,60 @@ class _ProfileCard extends StatelessWidget {
       confirmLabel: 'Завершить',
     );
     if (confirmed) await launcher.close(profile);
+  }
+
+  /// Новый профиль с теми же меткой, иконкой и настройками Claude — без входа
+  /// и сессий: в него войдут заново (обычно — другим аккаунтом).
+  Future<void> _duplicate() async {
+    final names = {for (final other in launcher.profiles) other.name};
+    var name = '${profile.name} — копия';
+    for (var n = 2; names.contains(name); n++) {
+      name = '${profile.name} — копия $n';
+    }
+    final copy = await launcher.addProfile(
+      name: name,
+      note: profile.note,
+      marker: profile.marker,
+      icon: profile.icon,
+      ownClaudeCode: profile.ownClaudeCode || profile.usesDefaultFolder,
+    );
+    if (launcher.settingsDirOf(profile) case final from?) {
+      try {
+        await ProfileSettingsCopy.copy(
+          from: from,
+          to: launcher.dataDirOf(copy),
+        );
+      } catch (error) {
+        debugPrint('Не удалось перенести настройки в копию: $error');
+      }
+    }
+    AppSnackbar.show(
+      Snacks.profileCreated(name, () => launcher.switchTo(copy)),
+    );
+  }
+
+  /// Ярлык профиля на рабочем столе (на Mac его можно перетащить в Dock).
+  Future<void> _shortcut() async {
+    try {
+      await ProfileShortcut.create(profile);
+      AppSnackbar.show(
+        Snack(
+          id: 'shortcut',
+          icon: AppIcons.check,
+          text: 'Ярлык «${profile.name}» — на рабочем столе',
+        ),
+      );
+    } catch (error) {
+      debugPrint('Не удалось создать ярлык: $error');
+      AppSnackbar.show(
+        const Snack(
+          id: 'shortcut',
+          icon: AppIcons.error,
+          error: true,
+          text: 'Не удалось создать ярлык',
+        ),
+      );
+    }
   }
 
   /// Правка — на странице профиля: аватар карточки перелетает в её шапку.

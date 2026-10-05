@@ -30,13 +30,15 @@ class AppDelegate: FlutterAppDelegate {
     return .terminateLater
   }
 
-  /// Ссылки `claude://`, которые macOS отдала лаунчеру как обработчику. Копятся,
+  /// Ссылки `claude://` (лаунчер — их обработчик) и `claudelauncher://` (ярлыки
+  /// профилей), которые отдала macOS. Копятся,
   /// пока Dart их не заберёт (`takeLinks`): при запуске ссылкой событие приходит
   /// раньше, чем Dart готов.
   var pendingLinks: [String] = []
 
   override func application(_ application: NSApplication, open urls: [URL]) {
-    pendingLinks += urls.filter { $0.scheme == "claude" }.map(\.absoluteString)
+    pendingLinks += urls.filter { ["claude", "claudelauncher"].contains($0.scheme) }
+      .map(\.absoluteString)
     (mainFlutterWindow as? MainFlutterWindow)?.nativeChannel?.invokeMethod("linksArrived", arguments: nil)
   }
 

@@ -40,6 +40,8 @@
   Claude в этом режиме сам не обновляется — его обновляет лаунчер, закрыв и снова
   открыв все профили: иначе один профиль заменил бы приложение под остальными. Подробности —
   [docs/parallel-profiles.md](docs/parallel-profiles.md).
+- **Ярлык профиля** на рабочем столе (на Mac — и в Dock) и **«Дублировать профиль»** — в
+  меню карточки.
 - **Настройки нового профиля** можно взять из другого: вид панели, Cowork, задачи по
   расписанию, редактор вкладки Code — без входа и сессий.
 - **Диагностика** (Настройки → «Диагностика»): всё, что обычно ломается, одним списком, с
@@ -455,6 +457,9 @@ Claude Code — обычно `~/.claude`, одной на все профили.
   `HKCU\Software\ClaudeLauncher\Capabilities` и значение `ClaudeLauncher` в
   `HKCU\Software\RegisteredApplications` (выбор в «Приложениях по умолчанию» лаунчер не
   трогает);
+- ярлыки профилей — файлы `Claude — <профиль>.webloc` (macOS) или `.url` (Windows) на
+  рабочем столе, только когда вы их создали; Windows — ссылка `claudelauncher://` в
+  `HKCU\Software\Classes\claudelauncher` (убирается при `--cleanup`);
 - `claude_desktop_config.json` профилей — уведомления Claude и его значок
   (`menuBarEnabled`), только пока Claude этого профиля закрыт;
 - с Kill Switch — `egressProxyUrl` и `disableAutoUpdates` в папках `…-3p`, а при

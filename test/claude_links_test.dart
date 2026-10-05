@@ -37,6 +37,14 @@ class FakeLinkPlatform implements LinkHandlerPlatform {
   @override
   Future<String?> blocker() async => choice;
 
+  bool shortcutsRegistered = false;
+
+  @override
+  Future<void> registerShortcuts() async => shortcutsRegistered = true;
+
+  @override
+  Future<void> removeShortcuts() async => shortcutsRegistered = false;
+
   @override
   Future<List<String>> takeLinks() async {
     final taken = [...links];

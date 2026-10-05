@@ -45,6 +45,19 @@ abstract final class ClaudeLinks {
   /// через минуту-другую, а не через час.
   static const loginWindow = Duration(minutes: 10);
 
+  /// Своя схема лаунчера — для ярлыков профилей.
+  static const shortcutScheme = 'claudelauncher';
+
+  static Uri shortcutFor(Profile profile) =>
+      Uri(scheme: shortcutScheme, host: 'open', path: '/${profile.id}');
+
+  static String? shortcutProfileId(Uri link) =>
+      link.scheme == shortcutScheme &&
+          link.host == 'open' &&
+          link.pathSegments.length == 1
+      ? link.pathSegments.single
+      : null;
+
   static ClaudeLinkKind kindOf(Uri link) {
     if (link.host == 'login') return ClaudeLinkKind.login;
     if (link.host == 'claude.ai') {
@@ -171,6 +184,11 @@ class ClaudeLinkHandler extends ChangeNotifier {
     settings.addListener(_onSettings);
     launcher.addListener(_onLauncher);
     await _onSettings();
+    try {
+      await platform.registerShortcuts();
+    } catch (error) {
+      debugPrint('Не удалось зарегистрировать ссылки ярлыков: $error');
+    }
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _reclaim());
     for (final link in initial) {
       await handleString(link);
@@ -263,7 +281,18 @@ class ClaudeLinkHandler extends ChangeNotifier {
 
   Future<void> handleString(String link) async {
     final uri = Uri.tryParse(link);
-    if (uri != null && uri.scheme == 'claude') await handle(uri);
+    if (uri == null) return;
+    if (uri.scheme == 'claude') await handle(uri);
+    if (uri.scheme == ClaudeLinks.shortcutScheme) await _openShortcut(uri);
+  }
+
+  /// Ярлык профиля: `claudelauncher://open/<id профиля>` — открыть профиль или,
+  /// если он открыт, вывести его окно вперёд.
+  Future<void> _openShortcut(Uri link) async {
+    final id = ClaudeLinks.shortcutProfileId(link);
+    final profile = launcher.profiles.where((p) => p.id == id).firstOrNull;
+    if (profile == null) return;
+    await launcher.switchTo(profile);
   }
 
   Future<void> handle(Uri link) async {

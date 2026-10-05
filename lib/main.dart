@@ -754,9 +754,9 @@ Future<void> _cleanup(Directory supportDir) async {
   await settings.load();
   // Ссылки `claude://` — снова Claude.
   try {
-    await LinkHandlerPlatform.forCurrentPlatform()?.restore(
-      settings.previousLinkHandler,
-    );
+    final links = LinkHandlerPlatform.forCurrentPlatform();
+    await links?.restore(settings.previousLinkHandler);
+    await links?.removeShortcuts();
   } catch (error) {
     debugPrint('Не удалось вернуть обработчик claude://: $error');
   }

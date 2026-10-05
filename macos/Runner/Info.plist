@@ -24,6 +24,16 @@
 				<string>claude</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ClaudeLauncher profile shortcuts</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>claudelauncher</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>

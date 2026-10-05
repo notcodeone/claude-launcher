@@ -237,6 +237,17 @@ class LauncherController extends ChangeNotifier {
     ),
   );
 
+  /// Папка, где у профиля лежат настройки Claude (`claude_desktop_config.json`;
+  /// на Windows бывает в папке пакета); `null` — Claude в нём ещё не открывали.
+  String? settingsDirOf(Profile profile) {
+    for (final dir in readableDataDirsOf(profile)) {
+      if (File(p.join(dir, 'claude_desktop_config.json')).existsSync()) {
+        return dir;
+      }
+    }
+    return null;
+  }
+
   Profile? profileOf(ClaudeInstance instance) {
     final dir = host.dataDirOf(instance);
     for (final profile in profiles) {

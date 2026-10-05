@@ -966,6 +966,8 @@ abstract final class AppIcons {
   static const show = LucideIcons.eye;
   static const charts = LucideIcons.chartColumn;
   static const edit = LucideIcons.pencil;
+  static const duplicate = LucideIcons.copy;
+  static const shortcut = LucideIcons.squareArrowOutUpRight;
   static const folder = LucideIcons.folderOpen;
   static const remove = LucideIcons.trash2;
   static const info = LucideIcons.info;

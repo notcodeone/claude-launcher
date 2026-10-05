@@ -9,11 +9,12 @@
 #include "utils.h"
 
 // Ссылка после `--open-url` (Windows запускает так лаунчер как обработчик
-// `claude://`): от `claude:` до кавычки или конца строки. Пусто — флага нет.
+// `claude://` и своей `claudelauncher://` — ярлыков профилей): от `claude` до
+// кавычки или конца строки. Пусто — флага нет.
 static std::wstring OpenUrlArgument(const wchar_t* command_line) {
   const wchar_t* flag = wcsstr(command_line, L"--open-url");
   if (flag == nullptr) return L"";
-  const wchar_t* start = wcsstr(flag, L"claude:");
+  const wchar_t* start = wcsstr(flag, L"claude");
   if (start == nullptr) return L"";
   const wchar_t* end = start;
   while (*end != L'\0' && *end != L'"') ++end;
