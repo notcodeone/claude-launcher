@@ -31,9 +31,13 @@ Future<String> parallelReport({
   final rows = <Map<String, Object?>>[];
   for (final (index, profile) in profiles.indexed) {
     bool? matches;
+    bool? updatesHeld;
     try {
       matches = await config
           .isPinned(launcher.dataDirOf(profile), port: port)
+          .timeout(const Duration(seconds: 2));
+      updatesHeld = await config
+          .holdsUpdates(launcher.dataDirOf(profile))
           .timeout(const Duration(seconds: 2));
     } catch (_) {
       // Preserve unknown; do not export exception text with paths.
@@ -62,10 +66,12 @@ Future<String> parallelReport({
       'duplicateProcesses': pids == null ? null : pids.length > 1,
       'codeSessionCounts': counts,
       'proxyConfigMatchesGate': matches,
+      // Файл настроек, не состояние уже работающего процесса.
+      'builtInUpdatesDisabled': updatesHeld,
     });
   }
   return const JsonEncoder.withIndent('  ').convert({
-    'schema': 1,
+    'schema': 2,
     'launcherVersion': version,
     'platform': Platform.operatingSystem,
     'parallelEnabled': settings.parallelLaunch,

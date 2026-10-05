@@ -42,6 +42,60 @@ void main() {
     );
   });
 
+  group('удержание обновлений', () {
+    test('выключает встроенное обновление без прокси', () async {
+      expect(await config.holdUpdates(dataDir), isTrue);
+      final entry = await read('configLibrary/${EgressConfig.entryId}.json');
+      expect(entry.containsKey('egressProxyUrl'), isFalse);
+      expect(entry['disableAutoUpdates'], isTrue);
+      expect(
+        (await read('claude_desktop_config.json'))['deploymentMode'],
+        '1p',
+      );
+      expect(await config.holdsUpdates(dataDir), isTrue);
+      // Без прокси это не защита Kill Switch.
+      expect(await config.isPinned(dataDir), isFalse);
+
+      await config.releaseUpdates(dataDir);
+      expect(await config.holdsUpdates(dataDir), isFalse);
+      expect(
+        await Directory(p.join(configDir, 'configLibrary')).exists(),
+        isFalse,
+      );
+    });
+
+    test('не ослабляет запись Kill Switch и не снимает её', () async {
+      expect(await config.pin(dataDir, 47821), isTrue);
+      expect(await config.holdUpdates(dataDir), isTrue);
+      expect(await config.isPinned(dataDir, port: 47821), isTrue);
+      await config.releaseUpdates(dataDir);
+      expect(await config.isPinned(dataDir, port: 47821), isTrue);
+      expect(await config.holdsUpdates(dataDir), isTrue);
+    });
+
+    test('Kill Switch поверх удержания добавляет прокси', () async {
+      expect(await config.holdUpdates(dataDir), isTrue);
+      expect(await config.pin(dataDir, 47821), isTrue);
+      expect(await config.isPinned(dataDir, port: 47821), isTrue);
+    });
+
+    test('чужую конфигурацию не трогает', () async {
+      final library = Directory(p.join(configDir, 'configLibrary'));
+      await library.create(recursive: true);
+      final meta = File(p.join(library.path, '_meta.json'));
+      final foreign = jsonEncode({
+        'appliedId': 'admin',
+        'entries': [
+          {'id': 'admin', 'name': 'Admin'},
+        ],
+      });
+      await meta.writeAsString(foreign);
+      expect(await config.holdUpdates(dataDir), isFalse);
+      await config.releaseUpdates(dataDir);
+      expect(await meta.readAsString(), foreign);
+    });
+  });
+
   test('сохраняет остальные ключи claude_desktop_config.json', () async {
     await Directory(configDir).create(recursive: true);
     await File(p.join(configDir, 'claude_desktop_config.json')).writeAsString(

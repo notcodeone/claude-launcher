@@ -129,8 +129,6 @@ Future<void> main(List<String> args) async {
     onFired: window.show,
     onLog: _killSwitchLog(supportDir, 'лаунчер'),
   );
-  // Перед запуском профиля: уведомления Claude — лаунчеру, а при Kill
-  // switch — закрепить профиль за затвором (Claude читает это при запуске).
   // «Скрывать значок Claude» — настройкой самого Claude в папке профиля.
   final trayIcon = ClaudeTrayIcon(settings: settings, launcher: launcher);
   launcher.prepareClaudeCode = (profile, dir) async {
@@ -140,21 +138,26 @@ Future<void> main(List<String> args) async {
     ).prepare();
     await claudeCode.prepareProfile(profile, dir);
   };
-  launcher.beforeLaunch = (dataDir) async {
-    await claudeCode.beforeLaunch(dataDir);
-    await trayIcon.beforeLaunch(dataDir);
-    await killSwitch.beforeLaunch(dataDir);
-  };
   // Windows: правило брандмауэра для службы Cowork (см. настройки Kill Switch).
   final coworkFirewall = Platform.isWindows ? CoworkFirewall() : null;
   unawaited(coworkFirewall?.refresh());
-  // Пока включён Kill Switch, Claude обновляет лаунчер — через проверенную сеть.
+  // При Kill Switch и в параллельном режиме Claude обновляет лаунчер.
   final claudeUpdates = ClaudeUpdates(
     host: launcher.host,
     launcher: launcher,
     killSwitch: killSwitch,
     settings: settings,
   );
+  // Перед запуском профиля: уведомления Claude — лаунчеру; в параллельном
+  // режиме выключить встроенное обновление (иначе один экземпляр заменил бы
+  // Claude под работающими соседями); при Kill Switch — закрепить профиль за
+  // затвором. Claude читает всё это при запуске.
+  launcher.beforeLaunch = (dataDir) async {
+    await claudeCode.beforeLaunch(dataDir);
+    await trayIcon.beforeLaunch(dataDir);
+    await claudeUpdates.beforeLaunch(dataDir);
+    await killSwitch.beforeLaunch(dataDir);
+  };
   final sessionSync = SessionSyncService(
     launcher: launcher,
     settings: settings,
