@@ -10,7 +10,7 @@ void main() {
   final now = DateTime(2026, 10, 1, 12);
 
   Widget app({
-    required Future<ProfileUsage?> Function() load,
+    required UsageLoader load,
     required ValueNotifier<bool> running,
     Brightness brightness = Brightness.light,
   }) => MaterialApp(
@@ -102,7 +102,10 @@ void main() {
       final running = ValueNotifier(true);
       addTearDown(running.dispose);
       var calls = 0;
-      Future<ProfileUsage?> load() async {
+      Future<ProfileUsage?> load({
+        bool online = false,
+        bool manual = false,
+      }) async {
         calls++;
         return ProfileUsage(
           limits: [
@@ -163,7 +166,8 @@ void main() {
     await tester.pumpWidget(
       app(
         running: running,
-        load: () async => fail ? throw const FormatException() : null,
+        load: ({online = false, manual = false}) async =>
+            fail ? throw const FormatException() : null,
       ),
     );
     await tester.tap(find.byTooltip('Лимиты профиля'));
@@ -208,7 +212,7 @@ void main() {
                       ),
                       activity: activity,
                       isRunning: () => true,
-                      load: () async => null,
+                      load: ({online = false, manual = false}) async => null,
                     ),
                   ),
                 ),
@@ -241,7 +245,12 @@ void main() {
     final running = ValueNotifier(true);
     addTearDown(running.dispose);
     final pending = Completer<ProfileUsage?>();
-    await tester.pumpWidget(app(running: running, load: () => pending.future));
+    await tester.pumpWidget(
+      app(
+        running: running,
+        load: ({online = false, manual = false}) => pending.future,
+      ),
+    );
     await tester.tap(find.byTooltip('Лимиты профиля'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tapAt(const Offset(10, 460));

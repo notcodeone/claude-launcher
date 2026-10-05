@@ -68,6 +68,10 @@ class AppSettings extends ChangeNotifier {
   /// Чей был обработчик `claude://` до лаунчера — вернуть при выключении и выходе.
   String? previousLinkHandler;
 
+  /// macOS: метка разрешения доступа к «Claude Safe Storage» (свежие лимиты),
+  /// см. `keychainGrant` в ui/keychain_access.dart.
+  String? keychainAccessVersion;
+
   /// Синхронизация сессий Code между профилями [syncProfiles] (см.
   /// `SessionSync`).
   bool sessionSync = false;
@@ -127,6 +131,7 @@ class AppSettings extends ChangeNotifier {
         parallelLaunch = json['parallelLaunch'] as bool? ?? true;
         claudeLinks = json['claudeLinks'] as bool? ?? true;
         previousLinkHandler = json['previousLinkHandler'] as String?;
+        keychainAccessVersion = json['keychainAccessVersion'] as String?;
         sessionSync = json['sessionSync'] as bool? ?? false;
         syncProfiles = [
           ...?(json['syncProfiles'] as List?)?.whereType<String>(),
@@ -196,6 +201,9 @@ class AppSettings extends ChangeNotifier {
   Future<void> setClaudeLinks(bool enabled) =>
       _update(() => claudeLinks = enabled);
 
+  Future<void> setKeychainAccessVersion(String? version) =>
+      _update(() => keychainAccessVersion = version);
+
   Future<void> setPreviousLinkHandler(String? bundleId) =>
       _update(() => previousLinkHandler = bundleId);
 
@@ -255,6 +263,7 @@ class AppSettings extends ChangeNotifier {
         'parallelLaunch': parallelLaunch,
         'claudeLinks': claudeLinks,
         'previousLinkHandler': previousLinkHandler,
+        'keychainAccessVersion': keychainAccessVersion,
         'sessionSync': sessionSync,
         'syncProfiles': syncProfiles,
         'syncProjects': syncProjects,

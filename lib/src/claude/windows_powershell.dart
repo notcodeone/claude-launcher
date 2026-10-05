@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
@@ -29,7 +30,7 @@ abstract final class WindowsPowerShell {
     final result = File(p.join(work.path, 'result.txt'));
     final script = File(p.join(work.path, 'script.ps1'));
     if (await result.exists()) await result.delete();
-    await script.writeAsString(wrap(body, result: result.path));
+    await script.writeAsBytes(scriptBytes(wrap(body, result: result.path)));
     final (process, error) = elevated
         ? _shellExecuteElevated(_powerShell, scriptArguments(script.path))
         : _createProcess('"$_powerShell" ${scriptArguments(script.path)}');
@@ -79,6 +80,18 @@ abstract final class WindowsPowerShell {
     '}',
     '',
   ].join('\r\n');
+
+  /// Файл сценария — UTF-8 с меткой (BOM). Без неё Windows PowerShell 5.1
+  /// читает `.ps1` в кодировке системы (cp1251): кириллица в пути к файлу итога
+  /// (имя пользователя, временная папка) ломается, и итог пишется не туда —
+  /// лаунчер видел «сценарий завершился без ответа».
+  @visibleForTesting
+  static List<int> scriptBytes(String text) => [
+    0xEF,
+    0xBB,
+    0xBF,
+    ...utf8.encode(text),
+  ];
 
   /// Строка в одинарных кавычках PowerShell.
   static String quote(String value) => "'${value.replaceAll("'", "''")}'";

@@ -33,6 +33,26 @@ jobs:
       - run: flutter build macos --release
       - name: Версия из pubspec.yaml
         run: python3 tool/build_version.py
+      # Свой сертификат подписи (см. tool/sign_macos.sh): временная связка из
+      # секретов, доверие — только для подписи кода. Без секретов (форки) —
+      # ad-hoc, как раньше.
+      - name: Сертификат подписи
+        env:
+          P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "Секретов подписи нет — ad-hoc"; exit 0; fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain tool/signing/notcode-code-signing.pem
+          rm "$RUNNER_TEMP/signing.p12"
       - name: DMG-образ
         run: tool/make_dmg.sh "$APP_VERSION"
       # archive: false — образ скачивается как есть, без обёртки в zip.

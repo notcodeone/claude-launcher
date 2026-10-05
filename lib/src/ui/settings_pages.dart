@@ -7,6 +7,8 @@ import '../app_settings.dart';
 import '../diagnostics/diagnostics.dart';
 import '../diagnostics/parallel_report.dart';
 import '../integrations/claude_links.dart';
+import '../integrations/live_usage.dart';
+import 'keychain_access.dart';
 import 'diagnostics_view.dart';
 import 'parallel_report_dialog.dart';
 import '../claude/claude_updates.dart';
@@ -52,6 +54,7 @@ class SettingsContext {
     this.claudeUpdates,
     this.coworkFirewall,
     this.links,
+    this.liveUsage,
   });
 
   final LauncherController launcher;
@@ -67,6 +70,9 @@ class SettingsContext {
 
   /// Ссылки `claude://` — нужному профилю; null — не эта ОС или тесты.
   final ClaudeLinkHandler? links;
+
+  /// Свежие лимиты от Anthropic; null — тесты.
+  final LiveUsage? liveUsage;
   final String version;
 
   Listenable get changes => Listenable.merge([
@@ -645,11 +651,37 @@ class SettingsSectionPage extends StatelessWidget {
             title: 'Лимиты профиля',
             description:
                 'Кнопка с графиками на открытом профиле: сколько использовано '
-                'за 5 часов и за неделю и когда лимит сбросится. Данные — те, '
-                'что сохраняет сам Claude; отстают от сервера на 10–20 минут.',
+                'за 5 часов и за неделю и когда лимит сбросится. Лаунчер '
+                'спрашивает их у Anthropic, когда вы их открываете; без '
+                'доступа ко входу Claude — из его файлов, с задержкой.',
             value: settings.usageLimits,
-            onChanged: settings.setUsageLimits,
+            onChanged: (enabled) async {
+              // macOS: сразу — наше окно и вопрос Связки ключей, чтобы потом
+              // окна лимитов открывались без вопросов.
+              if (enabled &&
+                  deps.liveUsage != null &&
+                  needsKeychainAccess(settings)) {
+                await askKeychainAccess(
+                  context,
+                  live: deps.liveUsage!,
+                  settings: settings,
+                );
+              }
+              await settings.setUsageLimits(enabled);
+            },
           ),
+          if (settings.usageLimits &&
+              deps.liveUsage != null &&
+              needsKeychainAccess(settings))
+            AppButton(
+              label: 'Разрешить доступ к лимитам',
+              kind: AppButtonKind.secondary,
+              onPressed: () => askKeychainAccess(
+                context,
+                live: deps.liveUsage!,
+                settings: settings,
+              ),
+            ),
         ],
       ),
       _Card(

@@ -8,6 +8,10 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Кнопка лимитов на открытом профиле. Данные читаются при открытии меню.
+/// Загрузка лимитов профиля; [online] — можно спросить Anthropic.
+typedef UsageLoader =
+    Future<ProfileUsage?> Function({bool online, bool manual});
+
 class ProfileUsageButton extends StatelessWidget {
   const ProfileUsageButton({
     super.key,
@@ -18,15 +22,22 @@ class ProfileUsageButton extends StatelessWidget {
     this.interactive = true,
     this.menuAnchorContext,
     this.menuHighlight,
+    this.allowAccess,
   });
 
-  final Future<ProfileUsage?> Function() load;
+  /// [online] — спросить Anthropic: при открытии и по «Проверить снова»
+  /// ([manual]); иначе — только файлы Claude и последний ответ (LiveUsage).
+  final UsageLoader load;
   final bool Function() isRunning;
   final Listenable activity;
   final bool enabled;
   final bool interactive;
   final BuildContext? menuAnchorContext;
   final Widget? menuHighlight;
+
+  /// macOS: доступ к «Claude Safe Storage» нужен заново (после обновления
+  /// лаунчера) — в меню пункт «Разрешить свежие лимиты». true — дан.
+  final Future<bool> Function()? allowAccess;
 
   @override
   Widget build(BuildContext context) => Builder(
@@ -46,6 +57,7 @@ class ProfileUsageButton extends StatelessWidget {
                   load: load,
                   isRunning: isRunning,
                   activity: activity,
+                  allowAccess: allowAccess,
                 ),
               );
             }
@@ -64,14 +76,18 @@ class ProfileUsageMenu extends StatefulWidget {
     required this.isRunning,
     required this.activity,
     this.now = DateTime.now,
+    this.allowAccess,
   });
 
   static const width = 320.0;
 
-  final Future<ProfileUsage?> Function() load;
+  /// [online] — спросить Anthropic: при открытии и по «Проверить снова»
+  /// ([manual]); иначе — только файлы Claude и последний ответ (LiveUsage).
+  final UsageLoader load;
   final bool Function() isRunning;
   final Listenable activity;
   final DateTime Function() now;
+  final Future<bool> Function()? allowAccess;
 
   @override
   State<ProfileUsageMenu> createState() => _ProfileUsageMenuState();
@@ -82,20 +98,29 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
   bool _loaded = false;
   bool _loading = false;
   bool _failed = false;
+  bool _granted = false;
   Timer? _timer;
+
+  Future<void> _allow() async {
+    final granted = await widget.allowAccess!();
+    if (!mounted) return;
+    setState(() => _granted = granted);
+    if (granted) await _refresh(online: true, manual: true);
+  }
 
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _refresh(online: true);
+    // Пока меню открыто — файлы Claude, без запросов к Anthropic.
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool online = false, bool manual = false}) async {
     if (_loading || !widget.isRunning()) return;
     setState(() => _loading = true);
     try {
-      final usage = await widget.load();
+      final usage = await widget.load(online: online, manual: manual);
       if (!mounted) return;
       setState(() {
         _usage = usage;
@@ -167,18 +192,26 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
                     else
                       for (final (index, limit) in usage!.limits.indexed) ...[
                         if (index > 0) const SizedBox(height: 14),
-                        _LimitRow(limit: limit, now: widget.now()),
+                        UsageLimitRow(limit: limit, now: widget.now()),
                       ],
                   ],
                 ),
               ),
             ),
             const Divider(),
+            if (widget.allowAccess != null && !_granted)
+              AnchoredMenuAction(
+                icon: AppIcons.hand,
+                label: 'Разрешить свежие лимиты',
+                onPressed: _allow,
+              ),
             AnchoredMenuAction(
               icon: AppIcons.sync,
               label: 'Проверить снова',
               loading: _loading,
-              onPressed: running && !_loading ? _refresh : null,
+              onPressed: running && !_loading
+                  ? () => _refresh(online: true, manual: true)
+                  : null,
             ),
           ],
         ),
@@ -187,8 +220,8 @@ class _ProfileUsageMenuState extends State<ProfileUsageMenu> {
   );
 }
 
-class _LimitRow extends StatelessWidget {
-  const _LimitRow({required this.limit, required this.now});
+class UsageLimitRow extends StatelessWidget {
+  const UsageLimitRow({super.key, required this.limit, required this.now});
 
   final UsageLimit limit;
   final DateTime now;

@@ -262,6 +262,79 @@ class ProfileUsage {
       : UsageWindow.other;
 
   static String labelOf(String key) => _labels[key] ?? key;
+
+  /// Ответ `GET /api/oauth/usage` (как его получает Claude): окна `five_hour`,
+  /// `seven_day`, `seven_day_*` с `utilization` и `resets_at`, и `limits[]` —
+  /// в том числе недельные лимиты отдельных моделей. `null` — лимитов нет.
+  static ProfileUsage? fromOAuthUsage(Object? json) {
+    if (json is! Map) return null;
+    final byKey = <String, UsageLimit>{};
+    void add(String key, Object? percent, Object? resets, {String? name}) {
+      if (percent is! num) return;
+      byKey[key] = UsageLimit(
+        label: name != null && !_labels.containsKey(key)
+            ? 'За неделю · $name'
+            : labelOf(key),
+        usedPercent: percent.toDouble(),
+        window: _windowOf(key),
+        resetsAt: _resetOf(resets),
+      );
+    }
+
+    const windows = {
+      'five_hour': 'session',
+      'seven_day': 'weekly',
+      'seven_day_opus': 'weekly:Opus',
+      'seven_day_sonnet': 'weekly:Sonnet',
+      'seven_day_oauth_apps': 'weekly:apps',
+      'seven_day_cowork': 'weekly:Cowork',
+    };
+    for (final MapEntry(:key, :value) in windows.entries) {
+      final window = json[key];
+      if (window is Map) add(value, window['utilization'], window['resets_at']);
+    }
+    final list = json['limits'];
+    if (list is List) {
+      for (final item in list) {
+        if (item is! Map) continue;
+        final scope = item['scope'];
+        final model = scope is Map && scope['model'] is Map
+            ? (scope['model'] as Map)['display_name']
+            : null;
+        final name = model is String && model.trim().isNotEmpty ? model : null;
+        final key = switch (item['kind']) {
+          'session' => 'session',
+          'weekly_all' => 'weekly',
+          'weekly_scoped' when name != null => 'weekly:$name',
+          _ => null,
+        };
+        if (key != null) {
+          add(key, item['percent'], item['resets_at'], name: name);
+        }
+      }
+    }
+    final extra = json['extra_usage'];
+    if (extra is Map && extra['is_enabled'] == true) {
+      add('extra', extra['utilization'], null);
+    }
+    if (byKey.isEmpty) return null;
+    // Порядок как в Claude: 5 часов, неделя, модели, остальное.
+    final ordered = [
+      ?byKey.remove('session'),
+      ?byKey.remove('weekly'),
+      ...byKey.values,
+    ];
+    return ProfileUsage(limits: ordered);
+  }
+
+  /// `resets_at` — строка ISO или секунды Unix.
+  static DateTime? _resetOf(Object? value) => switch (value) {
+    final String text => DateTime.tryParse(text)?.toLocal(),
+    final num seconds => DateTime.fromMillisecondsSinceEpoch(
+      (seconds * 1000).round(),
+    ),
+    _ => null,
+  };
 }
 
 /// Снимок из `plan-usage-history.json`.

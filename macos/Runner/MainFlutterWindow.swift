@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import Network
+import Security
 import window_manager
 
 class MainFlutterWindow: NSWindow {
@@ -69,6 +70,26 @@ class MainFlutterWindow: NSWindow {
           return
         }
         result(LSSetDefaultHandlerForURLScheme("claude" as CFString, bundleId as CFString) == noErr)
+        return
+      // Ключ safeStorage Claude — чтобы лаунчер прочитал вход профиля и
+      // запросил лимиты тем же запросом, что и Claude. В первый раз macOS
+      // спросит пароль; отказ — nil, Dart больше не спрашивает до перезапуска.
+      // Не в главном потоке: окно доступа держит вызов, пока пользователь думает.
+      case "safeStorageKey":
+        DispatchQueue.global(qos: .userInitiated).async {
+          let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Safe Storage",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+          ]
+          var item: CFTypeRef?
+          let status = SecItemCopyMatching(query as CFDictionary, &item)
+          let password = status == errSecSuccess
+            ? (item as? Data).flatMap { String(data: $0, encoding: .utf8) }
+            : nil
+          DispatchQueue.main.async { result(password) }
+        }
         return
       case "ownBundleId":
         result(Bundle.main.bundleIdentifier)

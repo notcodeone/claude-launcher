@@ -18,8 +18,10 @@ import 'src/integrations/code_session_registry.dart';
 import 'src/integrations/claude_tray_icon.dart';
 import 'src/integrations/notification_handoff.dart';
 import 'src/integrations/profile_claude_code.dart';
+import 'src/claude/claude_credentials.dart';
 import 'src/claude/link_handler_platform.dart';
 import 'src/integrations/claude_links.dart';
+import 'src/integrations/live_usage.dart';
 import 'src/integrations/session_overview.dart';
 import 'src/integrations/session_sync_service.dart';
 import 'src/launcher_controller.dart';
@@ -33,6 +35,7 @@ import 'src/location/windows_network_watch.dart';
 import 'src/notifications.dart';
 import 'src/profile_store.dart';
 import 'src/tray.dart';
+import 'src/ui/keychain_access.dart' show keychainGrant;
 import 'src/ui/profile_dialog.dart' show showLinkProfileDialog;
 import 'src/ui/announcements.dart';
 import 'src/ui/home_page.dart';
@@ -272,6 +275,17 @@ Future<void> main(List<String> args) async {
 
   // Версия из самого приложения — её Flutter берёт из pubspec.yaml.
   final version = (await PackageInfo.fromPlatform()).version;
+  // Свежие лимиты — запросом Claude к Anthropic, только когда их открыли.
+  // Не мимо защиты: при Kill Switch — только с открытым затвором. macOS:
+  // к Связке ключей — без нашего окна, только если уже разрешили.
+  final liveUsage = LiveUsage(
+    launcher: launcher,
+    credentials: ClaudeCredentials(
+      mayAsk: () => settings.keychainAccessVersion == keychainGrant,
+    ),
+    allowed: () =>
+        !location.blocksLaunch && (!settings.killSwitch || killSwitch.open),
+  );
   final updater = AppUpdater(
     currentVersion: version,
     settings: settings,
@@ -323,6 +337,7 @@ Future<void> main(List<String> args) async {
       coworkFirewall: coworkFirewall,
       sessionSync: sessionSync,
       links: links,
+      liveUsage: liveUsage,
       version: version,
     ),
   );
@@ -848,6 +863,7 @@ class ClaudeLauncherApp extends StatelessWidget {
     this.coworkFirewall,
     this.sessionSync,
     this.links,
+    this.liveUsage,
     required this.version,
   });
 
@@ -861,6 +877,7 @@ class ClaudeLauncherApp extends StatelessWidget {
   final CoworkFirewall? coworkFirewall;
   final SessionSyncService? sessionSync;
   final ClaudeLinkHandler? links;
+  final LiveUsage? liveUsage;
   final String version;
 
   @override
@@ -885,6 +902,7 @@ class ClaudeLauncherApp extends StatelessWidget {
           coworkFirewall: coworkFirewall,
           sessionSync: sessionSync,
           links: links,
+          liveUsage: liveUsage,
           version: version,
         ),
       ),

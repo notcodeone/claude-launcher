@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:claude_launcher/src/claude/windows_claude_host.dart';
 import 'package:claude_launcher/src/claude/windows_powershell.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,6 +30,17 @@ void main() {
     expect(arguments, contains('-ExecutionPolicy Bypass'));
     expect(arguments, contains('-NonInteractive'));
     expect(arguments, endsWith(r'-File "C:\Users\Анна Нил\Temp\script.ps1"'));
+  });
+
+  test('файл сценария — UTF-8 с BOM: кириллица в пути не ломается', () {
+    final bytes = WindowsPowerShell.scriptBytes(
+      WindowsPowerShell.wrap(
+        'Get-Date',
+        result: r'C:\Users\Дмитрий\result.txt',
+      ),
+    );
+    expect(bytes.take(3), [0xEF, 0xBB, 0xBF]);
+    expect(utf8.decode(bytes.skip(3).toList()), contains(r'C:\Users\Дмитрий'));
   });
 
   test('итог — последняя строка, без BOM', () {

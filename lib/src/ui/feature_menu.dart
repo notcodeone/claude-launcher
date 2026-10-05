@@ -225,7 +225,6 @@ const appFeatures = <FeatureSection<String>>[
         icon: AppIcons.charts,
         title: 'Лимиты',
         text: 'Сколько осталось в каждом профиле прямо сейчас',
-        soon: true,
       ),
     ],
   ),

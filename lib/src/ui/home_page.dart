@@ -12,6 +12,7 @@ import '../integrations/claude_links.dart';
 import '../integrations/session_sync_service.dart';
 import '../integrations/claude_code_integration.dart';
 import '../integrations/claude_code_sessions.dart';
+import '../integrations/live_usage.dart';
 import '../integrations/profile_settings_copy.dart';
 import '../integrations/profile_usage.dart';
 import '../launcher_controller.dart';
@@ -24,6 +25,8 @@ import 'anchored_menu.dart';
 import 'announcements.dart' show Snacks;
 import 'code_sessions_view.dart';
 import 'kill_switch_status.dart';
+import 'keychain_access.dart';
+import 'limits_page.dart';
 import 'feature_menu.dart';
 import 'profile_dialog.dart';
 import 'profile_page.dart';
@@ -46,6 +49,7 @@ abstract final class AppPages {
   static const features = '/features';
   static const sessions = '/features/sessions';
   static const sync = '/features/sync';
+  static const limits = '/features/limits';
 
   /// Правка профиля [id].
   static String editProfile(String id) => '/profiles/edit/$id';
@@ -138,6 +142,7 @@ class HomePage extends StatelessWidget {
     this.coworkFirewall,
     this.sessionSync,
     this.links,
+    this.liveUsage,
     this.version = '',
   });
 
@@ -162,6 +167,9 @@ class HomePage extends StatelessWidget {
 
   /// Ссылки `claude://` — нужному профилю; null — не эта ОС или тесты.
   final ClaudeLinkHandler? links;
+
+  /// Свежие лимиты от Anthropic по открытию; null — только файлы Claude.
+  final LiveUsage? liveUsage;
 
   /// Версия приложения — в подвале.
   final String version;
@@ -221,6 +229,7 @@ class HomePage extends StatelessWidget {
       claudeUpdates: claudeUpdates,
       coworkFirewall: coworkFirewall,
       links: links,
+      liveUsage: liveUsage,
       version: version,
     );
     if (route == AppPages.newProfile) {
@@ -252,8 +261,26 @@ class HomePage extends StatelessWidget {
           onOpen: (feature) => switch (feature) {
             'sessions' => AppPages.open(AppPages.sessions),
             'sync' => AppPages.open(AppPages.sync),
+            'limits' => AppPages.open(AppPages.limits),
             _ => null,
           },
+        ),
+      );
+    }
+    if (route == AppPages.limits) {
+      return _withScrim(
+        context,
+        LimitsPage(
+          launcher: launcher,
+          padding: padding,
+          liveUsage: liveUsage,
+          allowAccess: liveUsage != null && needsKeychainAccess(settings)
+              ? () => askKeychainAccess(
+                  context,
+                  live: liveUsage!,
+                  settings: settings,
+                )
+              : null,
         ),
       );
     }
@@ -389,6 +416,7 @@ class HomePage extends StatelessWidget {
               settings: settings,
               claudeCode: claudeCode,
               location: location,
+              liveUsage: liveUsage,
               profile: profile,
             ),
           ),
@@ -510,6 +538,7 @@ class HomePage extends StatelessWidget {
                 settings,
                 killSwitch,
                 claudeUpdates,
+                liveUsage,
                 AppPages.current,
               ]),
               builder: (context, _) => _HeaderBar(
@@ -520,6 +549,7 @@ class HomePage extends StatelessWidget {
                 updater: updater,
                 killSwitch: killSwitch,
                 claudeUpdates: claudeUpdates,
+                liveUsage: liveUsage,
                 page: AppPages.current.value,
               ),
             ),
@@ -785,6 +815,7 @@ HeaderStatus? headerStatus(
   AppUpdater? updater,
   KillSwitch? killSwitch,
   ClaudeUpdates? claudeUpdates,
+  LiveUsage? liveUsage,
 ]) {
   final version = updater?.release?.version;
   final progress = updater?.progress;
@@ -837,6 +868,10 @@ HeaderStatus? headerStatus(
     null when !launcher.located => const HeaderStatus(
       'loading',
       'Загружаю профили…',
+    ),
+    null when liveUsage?.fetching ?? false => const HeaderStatus(
+      'limits',
+      'Обновляю лимиты…',
     ),
     null => null,
   };
@@ -1039,6 +1074,7 @@ class _HeaderBar extends StatelessWidget {
     this.updater,
     this.killSwitch,
     this.claudeUpdates,
+    this.liveUsage,
     this.page = AppPages.home,
     this.interactive = true,
   });
@@ -1055,6 +1091,7 @@ class _HeaderBar extends StatelessWidget {
 
   /// Ход обновления Claude — в статусе шапки.
   final ClaudeUpdates? claudeUpdates;
+  final LiveUsage? liveUsage;
 
   /// Открытая страница: на профилях — название и кнопки, в настройках —
   /// «← Настройки».
@@ -1072,12 +1109,15 @@ class _HeaderBar extends StatelessWidget {
       updater,
       killSwitch,
       claudeUpdates,
+      liveUsage,
     );
     // В настройках — «Настройки»; из статусов там виден только ход обновления.
     final status =
         home ||
             (busy?.id.startsWith('update') ?? false) ||
-            (busy?.id.startsWith('claude-') ?? false)
+            (busy?.id.startsWith('claude-') ?? false) ||
+            // Лимиты обновляются и со страницы «Лимиты» в «Возможностях».
+            busy?.id == 'limits'
         ? busy
         : page.startsWith(AppPages.settings)
         ? const HeaderStatus('settings', 'Настройки', plain: true)
@@ -1218,6 +1258,7 @@ class _HeaderBar extends StatelessWidget {
     updater: updater,
     killSwitch: killSwitch,
     claudeUpdates: claudeUpdates,
+    liveUsage: liveUsage,
     page: page,
     interactive: false,
   );
@@ -1708,6 +1749,7 @@ class _ProfileCard extends StatelessWidget {
     required this.claudeCode,
     required this.location,
     required this.profile,
+    this.liveUsage,
     this.interactive = true,
   });
 
@@ -1716,6 +1758,9 @@ class _ProfileCard extends StatelessWidget {
   final ClaudeCodeIntegration claudeCode;
   final LocationGuard location;
   final Profile profile;
+
+  /// Свежие лимиты от Anthropic; null — только файлы Claude (тесты).
+  final LiveUsage? liveUsage;
 
   /// Копия карточки поверх затемнения под меню не реагирует на клики.
   final bool interactive;
@@ -1854,18 +1899,38 @@ class _ProfileCard extends StatelessWidget {
                           interactive: interactive,
                           activity: launcher,
                           isRunning: () => launcher.isRunning(profile),
-                          load: () async {
-                            final instance = launcher.instances
-                                .where(
-                                  (i) =>
-                                      launcher.profileOf(i)?.id == profile.id,
+                          allowAccess:
+                              liveUsage != null && needsKeychainAccess(settings)
+                              ? () => askKeychainAccess(
+                                  cardContext,
+                                  live: liveUsage!,
+                                  settings: settings,
                                 )
-                                .firstOrNull;
-                            if (instance == null) return null;
-                            return const ProfileUsageReader().read(
-                              launcher.host.readableDataDirs(instance),
-                            );
-                          },
+                              : null,
+                          load:
+                              ({
+                                bool online = false,
+                                bool manual = false,
+                              }) async {
+                                final live = online
+                                    ? await liveUsage?.fetch(
+                                        profile,
+                                        manual: manual,
+                                      )
+                                    : liveUsage?.cached(profile);
+                                if (live != null) return live;
+                                final instance = launcher.instances
+                                    .where(
+                                      (i) =>
+                                          launcher.profileOf(i)?.id ==
+                                          profile.id,
+                                    )
+                                    .firstOrNull;
+                                if (instance == null) return null;
+                                return const ProfileUsageReader().read(
+                                  launcher.host.readableDataDirs(instance),
+                                );
+                              },
                         ),
                       CircleIconButton(
                         icon: running ? AppIcons.show : AppIcons.launch,
@@ -1936,6 +2001,7 @@ class _ProfileCard extends StatelessWidget {
       settings: settings,
       claudeCode: claudeCode,
       location: location,
+      liveUsage: liveUsage,
       profile: profile,
       interactive: false,
     ),
